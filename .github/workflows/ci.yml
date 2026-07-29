@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install --workspaces --include-workspace-root
+
+      - name: Typecheck
+        run: |
+          npm run check -w apps/api
+          npm run check -w apps/web
+          npx tsc -p apps/mobile/tsconfig.json --noEmit
+
+      - name: Run tests
+        run: |
+          npm test -w apps/api
+          npm test -w apps/web
+
+      - name: Build web
+        run: npm run build -w apps/web

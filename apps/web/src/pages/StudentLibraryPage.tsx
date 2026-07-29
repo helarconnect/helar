@@ -1,0 +1,663 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { BookOpenText, Bookmark, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Scale, Search } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+
+import { useTheme } from "@/hooks/useTheme";
+import {
+  createStudentStudyBookmark,
+  deleteStudentStudyBookmark,
+  fetchStudentStudyBookmarks,
+  autocompletePublishedSubjectSummaries,
+  fetchLibraryLawReports,
+  fetchPublishedSubjectSummaryHierarchy,
+  fetchPublishedSubjectSummaryHierarchyCases,
+  fetchPublishedSubjectSummaryHierarchyTopics,
+  type AdminLibraryFilters,
+  type SubjectSummaryHierarchySubject,
+  type SubjectSummaryHierarchyTopic
+} from "@/lib/admin-api";
+import { queryKeys } from "@/lib/query-keys";
+import { cn } from "@/lib/utils";
+
+const defaultFilters: Required<AdminLibraryFilters> = {
+  materialType: "all",
+  page: 1,
+  pageSize: 12,
+  search: "",
+  sortBy: "updatedAt",
+  sortOrder: "desc"
+};
+
+function formatDate(value?: string | null) {
+  if (!value) {
+    return "Date not available";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    day: "numeric",
+    month: "short",
+    year: "numeric"
+  }).format(new Date(value));
+}
+
+function prettifyCourt(value: string) {
+  return value
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function stripHtml(value: string) {
+  return value
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function BookmarkButton({
+  active,
+  isDark,
+  onClick
+}: {
+  active: boolean;
+  isDark: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className={cn(
+        "inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium transition",
+        active
+          ? isDark
+            ? "border-amber-500/30 bg-amber-500/10 text-amber-100"
+            : "border-amber-200 bg-amber-50 text-amber-700"
+          : isDark
+            ? "border-slate-700 bg-slate-950 text-white hover:border-slate-600"
+            : "border-slate-300 bg-white text-slate-950 shadow-sm hover:border-slate-400 hover:bg-slate-50"
+      )}
+      onClick={onClick}
+      type="button"
+    >
+      <Bookmark className="h-4 w-4" />
+      {active ? "Saved" : "Bookmark"}
+    </button>
+  );
+}
+
+function StudentSubjectSummaryTopicItem({
+  autoExpand,
+  bookmarkActive,
+  isDark,
+  onToggleBookmark,
+  selectedTopicId,
+  topic
+}: {
+  autoExpand: boolean;
+  bookmarkActive: boolean;
+  isDark: boolean;
+  onToggleBookmark: () => void;
+  selectedTopicId: string | null;
+  topic: SubjectSummaryHierarchyTopic;
+}) {
+  const [isExpanded, setIsExpanded] = useState(autoExpand);
+  const isSelected = selectedTopicId === topic.id;
+
+  useEffect(() => {
+    if (autoExpand) {
+      setIsExpanded(true);
+    }
+  }, [autoExpand]);
+
+  const casesQuery = useQuery({
+    enabled: isExpanded,
+    queryFn: () => fetchPublishedSubjectSummaryHierarchyCases(topic.id),
+    queryKey: queryKeys.subjectSummaryPublishedHierarchyCases(topic.id, "")
+  });
+
+  return (
+    <div
+      className={cn(
+        "rounded-[22px] border transition",
+        isSelected
+          ? isDark
+            ? "border-orange-400/60 bg-slate-900"
+            : "border-orange-300 bg-orange-50/60"
+          : isDark
+            ? "border-slate-800 bg-slate-900/80"
+            : "border-slate-200 bg-white"
+      )}
+    >
+      <div className="flex items-center justify-between gap-3 px-4 py-3">
+        <button className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left" onClick={() => setIsExpanded((current) => !current)} type="button">
+        <div>
+          <div className="flex items-center gap-3">
+            {topic.hasCases ? (isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />) : <span className="w-4" />}
+            <p className={cn("font-medium", isDark ? "text-white" : "text-slate-950")}>{topic.name}</p>
+          </div>
+          <p className={cn("mt-2 pl-7 text-sm", isDark ? "text-slate-400" : "text-slate-600")}>{topic.description || "No description added yet."}</p>
+        </div>
+        <span className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-500")}>{topic.caseCount} cases</span>
+        </button>
+        <BookmarkButton active={bookmarkActive} isDark={isDark} onClick={onToggleBookmark} />
+      </div>
+      {isExpanded ? (
+        <div className={cn("border-t px-4 py-4", isDark ? "border-slate-800" : "border-slate-200")}>
+          {casesQuery.isLoading ? (
+            <p className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-500")}>Loading cases...</p>
+          ) : casesQuery.data?.items.length ? (
+            <div className="space-y-3">
+              {casesQuery.data.items.map((item) => (
+                <Link
+                  className={cn("block rounded-[20px] border px-4 py-3 transition", isDark ? "border-slate-800 bg-slate-950 hover:border-slate-700" : "border-slate-200 bg-slate-50 hover:border-slate-300")}
+                  key={item.id}
+                  to={`/app/library/subject-summaries/cases/${item.id}`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className={cn("font-medium", isDark ? "text-white" : "text-slate-950")}>{item.title}</p>
+                      <p className={cn("mt-1 text-sm", isDark ? "text-slate-400" : "text-slate-600")}>{item.citation || item.court || "No citation yet."}</p>
+                    </div>
+                    <span className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-400")}>Open case</span>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <p className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-500")}>No published cases are available in this topic yet.</p>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function StudentSubjectSummarySubjectItem({
+  autoExpand,
+  bookmarkActive,
+  isDark,
+  onToggleBookmark,
+  onToggleTopicBookmark,
+  selectedTopicId,
+  topicBookmarkKeys,
+  subject
+}: {
+  autoExpand: boolean;
+  bookmarkActive: boolean;
+  isDark: boolean;
+  onToggleBookmark: () => void;
+  onToggleTopicBookmark: (topic: SubjectSummaryHierarchyTopic) => void;
+  selectedTopicId: string | null;
+  topicBookmarkKeys: Set<string>;
+  subject: SubjectSummaryHierarchySubject;
+}) {
+  const [isExpanded, setIsExpanded] = useState(autoExpand);
+
+  useEffect(() => {
+    if (autoExpand) {
+      setIsExpanded(true);
+    }
+  }, [autoExpand]);
+
+  const topicsQuery = useQuery({
+    enabled: isExpanded,
+    queryFn: () => fetchPublishedSubjectSummaryHierarchyTopics(subject.id),
+    queryKey: queryKeys.subjectSummaryPublishedHierarchyTopics(subject.id, "")
+  });
+
+  return (
+    <div className={cn("rounded-[26px] border", isDark ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-white")}>
+      <div className="flex items-center justify-between gap-4 px-5 py-4">
+        <button className="flex min-w-0 flex-1 items-center justify-between gap-4 text-left" onClick={() => setIsExpanded((current) => !current)} type="button">
+        <div>
+          <div className="flex items-center gap-3">
+            {subject.hasTopics ? (isExpanded ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />) : <span className="w-5" />}
+            <div>
+              <p className={cn("font-heading text-2xl", isDark ? "text-white" : "text-slate-950")}>{subject.name}</p>
+              <p className={cn("mt-2 text-sm leading-6", isDark ? "text-slate-400" : "text-slate-600")}>{subject.description || "No subject description yet."}</p>
+            </div>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          <span className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-500")}>{subject.topicCount} topics</span>
+          <span className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-500")}>{subject.caseCount} cases</span>
+        </div>
+        </button>
+        <BookmarkButton active={bookmarkActive} isDark={isDark} onClick={onToggleBookmark} />
+      </div>
+      {isExpanded ? (
+        <div className={cn("space-y-3 border-t px-5 py-4", isDark ? "border-slate-800" : "border-slate-200")}>
+          {topicsQuery.isLoading ? (
+            <p className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-500")}>Loading topics...</p>
+          ) : topicsQuery.data?.items.length ? (
+            topicsQuery.data.items.map((topic) => (
+              <StudentSubjectSummaryTopicItem
+                autoExpand={selectedTopicId === topic.id}
+                bookmarkActive={topicBookmarkKeys.has(`SUBJECT_SUMMARY_TOPIC:${topic.id}`)}
+                isDark={isDark}
+                key={topic.id}
+                onToggleBookmark={() => onToggleTopicBookmark(topic)}
+                selectedTopicId={selectedTopicId}
+                topic={topic}
+              />
+            ))
+          ) : (
+            <p className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-500")}>No active topics are available in this subject yet.</p>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function StudentLawReportsPage() {
+  const { isDark } = useTheme();
+  const queryClient = useQueryClient();
+  const [filters, setFilters] = useState(defaultFilters);
+  const reportsQuery = useQuery({
+    queryFn: () => fetchLibraryLawReports(filters),
+    queryKey: queryKeys.adminLibrary("student-law-reports", filters)
+  });
+  const bookmarksQuery = useQuery({
+    queryFn: () => fetchStudentStudyBookmarks({}),
+    queryKey: queryKeys.studentStudyBookmarks({})
+  });
+  const createBookmarkMutation = useMutation({
+    mutationFn: createStudentStudyBookmark,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.studentStudyBookmarks({}) });
+    }
+  });
+  const deleteBookmarkMutation = useMutation({
+    mutationFn: deleteStudentStudyBookmark,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.studentStudyBookmarks({}) });
+    }
+  });
+
+  const materials = reportsQuery.data?.materials ?? [];
+  const bookmarks = bookmarksQuery.data?.items ?? [];
+  const totalItems = reportsQuery.data?.pagination.totalItems ?? 0;
+  const summaryText = useMemo(
+    () => `${totalItems} law report${totalItems === 1 ? "" : "s"} available in the student library.`,
+    [totalItems]
+  );
+
+  return (
+    <div className="space-y-6">
+      <section
+        className={cn(
+          "overflow-visible rounded-[30px] border p-6 shadow-[0_30px_90px_rgba(15,23,42,0.12)] lg:p-7",
+          isDark ? "border-slate-800 bg-slate-950" : "border-slate-200 bg-white"
+        )}
+      >
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div className="max-w-3xl">
+            <p className={cn("text-xs uppercase tracking-[0.24em]", isDark ? "text-slate-500" : "text-slate-400")}>Student library</p>
+            <h2 className={cn("mt-3 font-heading text-3xl leading-tight", isDark ? "text-white" : "text-slate-950")}>
+              Read published law reports from the student portal.
+            </h2>
+            <p className={cn("mt-3 max-w-2xl text-sm leading-7", isDark ? "text-slate-300" : "text-slate-600")}>{summaryText}</p>
+          </div>
+
+          <div className={cn("flex items-center gap-3 rounded-[24px] border px-4 py-3", isDark ? "border-slate-700 bg-slate-900" : "border-slate-200 bg-slate-50")}>
+            <Search className={cn("h-4 w-4", isDark ? "text-slate-500" : "text-slate-400")} />
+            <input
+              className={cn("w-72 bg-transparent text-sm outline-none", isDark ? "text-white placeholder:text-slate-500" : "text-slate-950 placeholder:text-slate-400")}
+              onChange={(event) => setFilters((current) => ({ ...current, page: 1, search: event.target.value }))}
+              placeholder="Search law reports"
+              value={filters.search}
+            />
+          </div>
+        </div>
+      </section>
+
+      {reportsQuery.isLoading ? (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, index) => (
+            <div className={cn("h-64 animate-pulse rounded-[28px]", isDark ? "bg-slate-800" : "bg-slate-100")} key={index} />
+          ))}
+        </div>
+      ) : reportsQuery.isError ? (
+        <div
+          className={cn(
+            "rounded-[28px] border px-6 py-8 text-sm leading-7",
+            isDark ? "border-slate-800 bg-slate-900 text-slate-300" : "border-slate-200 bg-white text-slate-600"
+          )}
+        >
+          Could not load the law reports right now.
+        </div>
+      ) : materials.length ? (
+        <>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {materials.map((material) => (
+              <article
+                className={cn(
+                  "rounded-[28px] border p-5 shadow-[0_20px_60px_rgba(15,23,42,0.06)]",
+                  isDark ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-white"
+                )}
+                key={material.id}
+              >
+                {(() => {
+                  const contentKey = `LAW_REPORT:${material.id}`;
+                  const activeBookmark = bookmarks.find((bookmark) => bookmark.contentKey === contentKey);
+
+                  return (
+                    <>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={cn("inline-flex rounded-full border px-3 py-1 text-xs uppercase tracking-[0.16em]", isDark ? "border-slate-700 bg-slate-950 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600")}>
+                    {material.reportNumber ?? "Law report"}
+                  </span>
+                  <span className={cn("inline-flex rounded-full border px-3 py-1 text-xs", isDark ? "border-slate-700 bg-slate-950 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600")}>
+                    {material.estimatedMins ? `${material.estimatedMins} min read` : "Read time pending"}
+                  </span>
+                </div>
+
+                <h3 className={cn("mt-4 font-heading text-2xl leading-tight", isDark ? "text-white" : "text-slate-950")}>{material.title}</h3>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <div className={cn("rounded-[20px] border p-3", isDark ? "border-slate-800 bg-slate-950" : "border-slate-200 bg-slate-50")}>
+                    <div className="flex items-center gap-2">
+                      <Scale className={cn("h-4 w-4", isDark ? "text-slate-500" : "text-slate-400")} />
+                      <p className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-400")}>Court</p>
+                    </div>
+                    <p className={cn("mt-2 text-sm font-medium", isDark ? "text-white" : "text-slate-950")}>
+                      {prettifyCourt(material.materialType)}
+                    </p>
+                  </div>
+
+                  <div className={cn("rounded-[20px] border p-3", isDark ? "border-slate-800 bg-slate-950" : "border-slate-200 bg-slate-50")}>
+                    <div className="flex items-center gap-2">
+                      <CalendarDays className={cn("h-4 w-4", isDark ? "text-slate-500" : "text-slate-400")} />
+                      <p className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-400")}>Date</p>
+                    </div>
+                    <p className={cn("mt-2 text-sm font-medium", isDark ? "text-white" : "text-slate-950")}>{formatDate(material.reportDate)}</p>
+                  </div>
+                </div>
+
+                <p className={cn("mt-4 line-clamp-4 text-sm leading-7", isDark ? "text-slate-300" : "text-slate-600")}>
+                  {stripHtml(material.summary) || "No summary has been added for this law report yet."}
+                </p>
+
+                <div className="mt-5 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <BookmarkButton
+                      active={Boolean(activeBookmark)}
+                      isDark={isDark}
+                      onClick={() => {
+                        if (activeBookmark) {
+                          deleteBookmarkMutation.mutate(activeBookmark.id);
+                          return;
+                        }
+
+                        createBookmarkMutation.mutate({
+                          contentKey,
+                          contentType: "LAW_REPORT",
+                          path: `/app/library/law-reports/${material.id}`,
+                          title: material.title
+                        });
+                      }}
+                    />
+                    <span className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-400")}>
+                      Suit Number: {material.storageUrl}
+                    </span>
+                  </div>
+                  <Link
+                    className={cn(
+                      "inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium transition",
+                      isDark
+                        ? "border-slate-700 bg-slate-950 text-white hover:border-slate-600"
+                        : "border-slate-300 bg-white text-slate-950 shadow-sm hover:border-slate-400 hover:bg-slate-50"
+                    )}
+                    to={`/app/library/law-reports/${material.id}`}
+                  >
+                    Open
+                    <ExternalLink className="h-4 w-4" />
+                  </Link>
+                </div>
+                    </>
+                  );
+                })()}
+              </article>
+            ))}
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
+            <p className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-500")}>
+              Page {reportsQuery.data?.pagination.page ?? 1} of {reportsQuery.data?.pagination.totalPages ?? 1}
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60",
+                  isDark ? "border-slate-700 bg-slate-900 text-slate-100" : "border-slate-300 bg-white text-slate-900 shadow-sm"
+                )}
+                disabled={(reportsQuery.data?.pagination.page ?? 1) <= 1}
+                onClick={() => setFilters((current) => ({ ...current, page: Math.max(1, current.page - 1) }))}
+                type="button"
+              >
+                <ChevronLeft className="h-4 w-4" />
+                Previous
+              </button>
+              <button
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60",
+                  isDark ? "border-slate-700 bg-slate-900 text-slate-100" : "border-slate-300 bg-white text-slate-900 shadow-sm"
+                )}
+                disabled={(reportsQuery.data?.pagination.page ?? 1) >= (reportsQuery.data?.pagination.totalPages ?? 1)}
+                onClick={() =>
+                  setFilters((current) => ({
+                    ...current,
+                    page: Math.min(reportsQuery.data?.pagination.totalPages ?? current.page, current.page + 1)
+                  }))
+                }
+                type="button"
+              >
+                Next
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </>
+      ) : (
+        <div
+          className={cn(
+            "rounded-[28px] border px-6 py-8 text-sm leading-7",
+            isDark ? "border-slate-800 bg-slate-900 text-slate-300" : "border-slate-200 bg-white text-slate-600"
+          )}
+        >
+          No law reports match the current search yet.
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function StudentSubjectSummariesPage() {
+  const { isDark } = useTheme();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
+  const [autocompleteQuery, setAutocompleteQuery] = useState("");
+  const selectedSubjectId = searchParams.get("subjectId");
+  const selectedTopicId = searchParams.get("topicId");
+
+  const hierarchyQuery = useQuery({
+    queryFn: () => fetchPublishedSubjectSummaryHierarchy(),
+    queryKey: queryKeys.subjectSummaryPublishedHierarchy("")
+  });
+  const autocompleteResultsQuery = useQuery({
+    enabled: autocompleteQuery.trim().length >= 2,
+    queryFn: () => autocompletePublishedSubjectSummaries(autocompleteQuery),
+    queryKey: queryKeys.subjectSummaryPublishedAutocomplete(autocompleteQuery)
+  });
+  const bookmarksQuery = useQuery({
+    queryFn: () => fetchStudentStudyBookmarks({}),
+    queryKey: queryKeys.studentStudyBookmarks({})
+  });
+  const createBookmarkMutation = useMutation({
+    mutationFn: createStudentStudyBookmark,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.studentStudyBookmarks({}) });
+    }
+  });
+  const deleteBookmarkMutation = useMutation({
+    mutationFn: deleteStudentStudyBookmark,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.studentStudyBookmarks({}) });
+    }
+  });
+
+  const totalSubjects = hierarchyQuery.data?.items.length ?? 0;
+  const bookmarks = bookmarksQuery.data?.items ?? [];
+  const bookmarkKeys = new Set(bookmarks.map((item) => item.contentKey));
+  const summaryText = useMemo(
+    () => `${totalSubjects} subject${totalSubjects === 1 ? "" : "s"} currently available in cases and ratios with published topics and case materials.`,
+    [totalSubjects]
+  );
+
+  function toggleBookmark(payload: {
+    contentKey: string;
+    contentType: "SUBJECT_SUMMARY_SUBJECT" | "SUBJECT_SUMMARY_TOPIC";
+    path: string;
+    subjectName?: string;
+    title: string;
+    topicName?: string;
+  }) {
+    const activeBookmark = bookmarks.find((item) => item.contentKey === payload.contentKey);
+
+    if (activeBookmark) {
+      deleteBookmarkMutation.mutate(activeBookmark.id);
+      return;
+    }
+
+    createBookmarkMutation.mutate(payload);
+  }
+
+  return (
+    <div className="space-y-6">
+      <section
+        className={cn(
+          "relative z-20 overflow-visible rounded-[30px] border p-6 shadow-[0_30px_90px_rgba(15,23,42,0.12)] lg:p-7",
+          isDark ? "border-slate-800 bg-slate-950" : "border-slate-200 bg-white"
+        )}
+      >
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div className="max-w-3xl">
+            <p className={cn("text-xs uppercase tracking-[0.24em]", isDark ? "text-slate-500" : "text-slate-400")}>Student library</p>
+            <h2 className={cn("mt-3 font-heading text-3xl leading-tight", isDark ? "text-white" : "text-slate-950")}>
+              Explore published cases and ratios, topics, and cases.
+            </h2>
+            <p className={cn("mt-3 max-w-2xl text-sm leading-7", isDark ? "text-slate-300" : "text-slate-600")}>{summaryText}</p>
+          </div>
+
+          <div className="relative z-30 w-full max-w-md">
+            <div className={cn("flex items-center gap-3 rounded-[24px] border px-4 py-3", isDark ? "border-slate-700 bg-slate-900" : "border-slate-200 bg-slate-50")}>
+              <Search className={cn("h-4 w-4", isDark ? "text-slate-500" : "text-slate-400")} />
+              <input
+                className={cn("w-full bg-transparent text-sm outline-none", isDark ? "text-white placeholder:text-slate-500" : "text-slate-950 placeholder:text-slate-400")}
+                onChange={(event) => setAutocompleteQuery(event.target.value)}
+                placeholder="Search subjects, topics, and cases"
+                value={autocompleteQuery}
+              />
+            </div>
+            {autocompleteResultsQuery.data?.items.length ? (
+              <div className={cn("absolute left-0 right-0 top-[calc(100%+10px)] z-20 overflow-hidden rounded-[24px] border shadow-[0_20px_60px_rgba(15,23,42,0.12)]", isDark ? "border-slate-800 bg-slate-950" : "border-slate-200 bg-white")}>
+                {autocompleteResultsQuery.data.items.map((item) => (
+                  <button
+                    className={cn("flex w-full items-start justify-between gap-3 border-b px-4 py-3 text-left last:border-b-0", isDark ? "border-slate-800 hover:bg-slate-900" : "border-slate-100 hover:bg-slate-50")}
+                    key={`${item.type}-${item.id}`}
+                    onClick={() => {
+                      setAutocompleteQuery("");
+                      navigate(item.path);
+                    }}
+                    type="button"
+                  >
+                    <div>
+                      <p className={cn("font-medium", isDark ? "text-white" : "text-slate-950")}>{item.label}</p>
+                      <p className={cn("mt-1 text-sm", isDark ? "text-slate-400" : "text-slate-500")}>{item.subtitle}</p>
+                    </div>
+                    <span className={cn("rounded-full border px-2.5 py-1 text-xs uppercase", isDark ? "border-slate-700 text-slate-300" : "border-slate-200 text-slate-500")}>
+                      {item.type}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : autocompleteQuery.trim().length >= 2 ? (
+              <div
+                className={cn(
+                  "absolute left-0 right-0 top-[calc(100%+10px)] z-20 rounded-[24px] border px-4 py-3 text-sm shadow-[0_20px_60px_rgba(15,23,42,0.12)]",
+                  isDark ? "border-slate-800 bg-slate-950 text-slate-400" : "border-slate-200 bg-white text-slate-500"
+                )}
+              >
+                {autocompleteResultsQuery.isLoading ? "Searching cases and ratios..." : "No matching subjects, topics, or cases found."}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </section>
+
+      <section className={cn("rounded-[28px] border p-6 shadow-[0_24px_70px_rgba(15,23,42,0.07)]", isDark ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-white")}>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className={cn("text-xs uppercase tracking-[0.22em]", isDark ? "text-slate-500" : "text-slate-400")}>Hierarchy</p>
+            <h3 className={cn("mt-2 font-heading text-3xl", isDark ? "text-white" : "text-slate-950")}>Cases and ratios tree</h3>
+          </div>
+          <div className={cn("inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm", isDark ? "border-slate-700 bg-slate-950 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600")}>
+            <BookOpenText className="h-4 w-4" />
+            Published items only
+          </div>
+        </div>
+
+        <div className="mt-6 space-y-4">
+          {hierarchyQuery.isLoading ? (
+            <p className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-500")}>Loading cases and ratios hierarchy...</p>
+          ) : hierarchyQuery.isError ? (
+            <div className={cn("rounded-[24px] border px-6 py-8 text-sm leading-7", isDark ? "border-slate-800 bg-slate-950 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600")}>
+              Could not load the published cases and ratios hierarchy right now.
+            </div>
+          ) : hierarchyQuery.data?.items.length ? (
+            hierarchyQuery.data.items.map((subject) => (
+              <StudentSubjectSummarySubjectItem
+                autoExpand={selectedSubjectId === subject.id}
+                bookmarkActive={bookmarkKeys.has(`SUBJECT_SUMMARY_SUBJECT:${subject.id}`)}
+                isDark={isDark}
+                key={subject.id}
+                onToggleBookmark={() =>
+                  toggleBookmark({
+                    contentKey: `SUBJECT_SUMMARY_SUBJECT:${subject.id}`,
+                    contentType: "SUBJECT_SUMMARY_SUBJECT",
+                    path: `/app/library/subject-summaries?subjectId=${subject.id}`,
+                    subjectName: subject.name,
+                    title: subject.name
+                  })
+                }
+                onToggleTopicBookmark={(topic) =>
+                  toggleBookmark({
+                    contentKey: `SUBJECT_SUMMARY_TOPIC:${topic.id}`,
+                    contentType: "SUBJECT_SUMMARY_TOPIC",
+                    path: `/app/library/subject-summaries?subjectId=${subject.id}&topicId=${topic.id}`,
+                    subjectName: subject.name,
+                    title: topic.name,
+                    topicName: topic.name
+                  })
+                }
+                selectedTopicId={selectedTopicId}
+                topicBookmarkKeys={bookmarkKeys}
+                subject={subject}
+              />
+            ))
+          ) : (
+            <div className={cn("rounded-[24px] border px-6 py-8 text-sm leading-7", isDark ? "border-slate-800 bg-slate-950 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600")}>
+              No published cases and ratios materials are available yet.
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}

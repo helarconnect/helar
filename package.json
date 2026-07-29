@@ -1,0 +1,26 @@
+{
+  "name": "lexlearn-platform",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "db:start": "node -e \"console.log('MongoDB is now the primary database. No local PostgreSQL service is started by this script.')\"",
+    "db:stop": "node -e \"console.log('MongoDB is now the primary database. No local PostgreSQL service is stopped by this script.')\"",
+    "db:push": "npx prisma db push --schema prisma/schema.prisma",
+    "db:setup": "npm run db:push && npm run prisma:generate && npm run prisma:seed",
+    "db:migrate:legacy-postgres": "npm run prisma:migrate:legacy-postgres -w apps/api",
+    "db:doctor:mongo": "tsx prisma/check-mongo-connectivity.ts",
+    "dev:web": "npm run dev -w apps/web",
+    "dev:api": "npm run dev -w apps/api",
+    "dev:mobile": "npm run start -w apps/mobile",
+    "build": "npm run build -w apps/web && npm run build -w apps/api",
+    "check": "npm run check -w apps/web && npm run check -w apps/api",
+    "lint": "npm run lint -w apps/web && npm run lint -w apps/api",
+    "test": "npm run test -w apps/web && npm run test -w apps/api",
+    "prisma:generate": "npm run prisma:generate -w apps/api",
+    "prisma:generate:legacy-postgres": "npm run prisma:generate:legacy-postgres -w apps/api",
+    "prisma:seed": "npm run prisma:seed -w apps/api"
+  }
+}
