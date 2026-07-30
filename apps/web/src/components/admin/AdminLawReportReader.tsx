@@ -405,6 +405,7 @@ export function AdminLawReportReader() {
   const navigate = useNavigate();
   const roleCodes = useAuthStore((state) => state.session?.user.roleCodes ?? []);
   const isStudentReader = location.pathname.startsWith("/app/library/");
+  const canUseAdminLibraryEndpoint = hasAdminAccess(roleCodes);
   const backPath = isStudentReader ? "/app/library" : "/app/admin/library/law-reports";
   const backLabel = isStudentReader ? "Back to library" : "Back to law reports";
   const [searchTerm, setSearchTerm] = useState("");
@@ -431,7 +432,7 @@ export function AdminLawReportReader() {
   const reportQuery = useQuery({
     enabled: Boolean(materialId),
     queryFn: () =>
-      isStudentReader ? fetchLibraryMaterial("law-reports", materialId) : fetchAdminLibraryMaterial("law-reports", materialId),
+      canUseAdminLibraryEndpoint ? fetchAdminLibraryMaterial("law-reports", materialId) : fetchLibraryMaterial("law-reports", materialId),
     queryKey: queryKeys.adminLibraryDetail("law-reports", materialId)
   });
   const studyProgressQuery = useQuery({
@@ -522,6 +523,14 @@ export function AdminLawReportReader() {
       if (!paragraphElement) {
         if (attemptIndex < 10) {
           timer = window.setTimeout(() => attemptJump(attemptIndex + 1), 60);
+        } else {
+          setShareNotice({
+            message: quote
+              ? "The shared excerpt could not be loaded. It may be locked behind a subscription or no longer available."
+              : "The shared paragraph could not be loaded. It may be locked behind a subscription or no longer available.",
+            tone: "red"
+          });
+          stripDlToken();
         }
         return;
       }
@@ -568,7 +577,11 @@ export function AdminLawReportReader() {
       return;
     }
 
-    const url = new URL(`${window.location.origin}/app/library/law-reports/${materialId}`);
+    const basePath =
+      report?.publicationStatus === "PUBLISHED"
+        ? `/app/library/law-reports/${materialId}`
+        : `/app/admin/library/law-reports/${materialId}`;
+    const url = new URL(`${window.location.origin}${basePath}`);
     url.hash = paragraphId;
     url.searchParams.set("dl", createShareToken());
 

@@ -49,6 +49,10 @@ const adminDashboardNav: NavItem[] = [
 
 export function getDashboardNav(roleCodes: string[] = []) {
   if (!hasAdminAccess(roleCodes)) {
+    if (roleCodes.includes('judge')) {
+      return studentDashboardNav.filter((item) => item.href !== '/app/cbt')
+    }
+
     return studentDashboardNav
   }
 

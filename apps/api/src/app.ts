@@ -837,6 +837,20 @@ function requireSuperAdminRequest(request: AuthenticatedRequest, response: Respo
   return next();
 }
 
+function forbidJudgeRequest(request: AuthenticatedRequest, response: Response, next: NextFunction) {
+  if (request.auth?.roleCodes.includes("judge")) {
+    return response.status(403).json({
+      success: false,
+      error: {
+        code: "FORBIDDEN",
+        message: "CBT access is not available for this role."
+      }
+    });
+  }
+
+  return next();
+}
+
 function requirePaymentAccessRequest(request: AuthenticatedRequest, response: Response, next: NextFunction) {
   if (!canAccessPaymentsRole(request.auth?.roleCodes)) {
     return response.status(403).json({
@@ -5719,8 +5733,8 @@ export function createApp(options: AppOptions = {}) {
       });
     }
   };
-  app.get("/api/v1/student/cbts", authenticateRequest, studentCbtListHandler);
-  app.get("/api/v1/student/cbt", authenticateRequest, studentCbtListHandler);
+  app.get("/api/v1/student/cbts", authenticateRequest, forbidJudgeRequest, studentCbtListHandler);
+  app.get("/api/v1/student/cbt", authenticateRequest, forbidJudgeRequest, studentCbtListHandler);
 
   const studentCbtDetailHandler = async (request: AuthenticatedRequest, response: Response) => {
     if (!useDatabase) {
@@ -5756,8 +5770,8 @@ export function createApp(options: AppOptions = {}) {
       });
     }
   };
-  app.get("/api/v1/student/cbts/:cbtId", authenticateRequest, studentCbtDetailHandler);
-  app.get("/api/v1/student/cbt/:cbtId", authenticateRequest, studentCbtDetailHandler);
+  app.get("/api/v1/student/cbts/:cbtId", authenticateRequest, forbidJudgeRequest, studentCbtDetailHandler);
+  app.get("/api/v1/student/cbt/:cbtId", authenticateRequest, forbidJudgeRequest, studentCbtDetailHandler);
 
   const studentStartCbtAttemptHandler = async (request: AuthenticatedRequest, response: Response) => {
     if (!useDatabase) {
@@ -5797,8 +5811,8 @@ export function createApp(options: AppOptions = {}) {
       });
     }
   };
-  app.post("/api/v1/student/cbt-attempts", authenticateRequest, studentStartCbtAttemptHandler);
-  app.post("/api/v1/student/cbt/:cbtId/start", authenticateRequest, studentStartCbtAttemptHandler);
+  app.post("/api/v1/student/cbt-attempts", authenticateRequest, forbidJudgeRequest, studentStartCbtAttemptHandler);
+  app.post("/api/v1/student/cbt/:cbtId/start", authenticateRequest, forbidJudgeRequest, studentStartCbtAttemptHandler);
 
   const studentCbtAttemptDetailHandler = async (request: AuthenticatedRequest, response: Response) => {
     if (!useDatabase) {
@@ -5834,8 +5848,8 @@ export function createApp(options: AppOptions = {}) {
       });
     }
   };
-  app.get("/api/v1/student/cbt-attempts/:attemptId", authenticateRequest, studentCbtAttemptDetailHandler);
-  app.get("/api/v1/student/cbt/attempts/:attemptId", authenticateRequest, studentCbtAttemptDetailHandler);
+  app.get("/api/v1/student/cbt-attempts/:attemptId", authenticateRequest, forbidJudgeRequest, studentCbtAttemptDetailHandler);
+  app.get("/api/v1/student/cbt/attempts/:attemptId", authenticateRequest, forbidJudgeRequest, studentCbtAttemptDetailHandler);
 
   const studentSaveCbtAnswerHandler = async (request: AuthenticatedRequest, response: Response) => {
     if (!useDatabase) {
@@ -5887,8 +5901,13 @@ export function createApp(options: AppOptions = {}) {
       });
     }
   };
-  app.post("/api/v1/student/cbt-answers", authenticateRequest, studentSaveCbtAnswerHandler);
-  app.post("/api/v1/student/cbt/attempts/:attemptId/answers", authenticateRequest, studentSaveCbtAnswerHandler);
+  app.post("/api/v1/student/cbt-answers", authenticateRequest, forbidJudgeRequest, studentSaveCbtAnswerHandler);
+  app.post(
+    "/api/v1/student/cbt/attempts/:attemptId/answers",
+    authenticateRequest,
+    forbidJudgeRequest,
+    studentSaveCbtAnswerHandler
+  );
 
   const studentSubmitCbtAttemptHandler = async (request: AuthenticatedRequest, response: Response) => {
     if (!useDatabase) {
@@ -5926,8 +5945,18 @@ export function createApp(options: AppOptions = {}) {
       });
     }
   };
-  app.post("/api/v1/student/cbt-attempts/:attemptId/submit", authenticateRequest, studentSubmitCbtAttemptHandler);
-  app.post("/api/v1/student/cbt/attempts/:attemptId/submit", authenticateRequest, studentSubmitCbtAttemptHandler);
+  app.post(
+    "/api/v1/student/cbt-attempts/:attemptId/submit",
+    authenticateRequest,
+    forbidJudgeRequest,
+    studentSubmitCbtAttemptHandler
+  );
+  app.post(
+    "/api/v1/student/cbt/attempts/:attemptId/submit",
+    authenticateRequest,
+    forbidJudgeRequest,
+    studentSubmitCbtAttemptHandler
+  );
 
   const studentCbtResultsHandler = async (request: AuthenticatedRequest, response: Response) => {
     if (!useDatabase) {
@@ -5954,8 +5983,8 @@ export function createApp(options: AppOptions = {}) {
       });
     }
   };
-  app.get("/api/v1/student/cbt-results", authenticateRequest, studentCbtResultsHandler);
-  app.get("/api/v1/student/cbt/results", authenticateRequest, studentCbtResultsHandler);
+  app.get("/api/v1/student/cbt-results", authenticateRequest, forbidJudgeRequest, studentCbtResultsHandler);
+  app.get("/api/v1/student/cbt/results", authenticateRequest, forbidJudgeRequest, studentCbtResultsHandler);
 
   const studentCbtAttemptResultHandler = async (request: AuthenticatedRequest, response: Response) => {
     if (!useDatabase) {
@@ -5991,8 +6020,18 @@ export function createApp(options: AppOptions = {}) {
       });
     }
   };
-  app.get("/api/v1/student/cbt-attempts/:attemptId/result", authenticateRequest, studentCbtAttemptResultHandler);
-  app.get("/api/v1/student/cbt/attempts/:attemptId/result", authenticateRequest, studentCbtAttemptResultHandler);
+  app.get(
+    "/api/v1/student/cbt-attempts/:attemptId/result",
+    authenticateRequest,
+    forbidJudgeRequest,
+    studentCbtAttemptResultHandler
+  );
+  app.get(
+    "/api/v1/student/cbt/attempts/:attemptId/result",
+    authenticateRequest,
+    forbidJudgeRequest,
+    studentCbtAttemptResultHandler
+  );
 
   app.get(
     "/api/v1/library/bar-final-exams-mls-mcq/subjects",

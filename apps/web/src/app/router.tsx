@@ -4,6 +4,7 @@ import { AppLayout } from '@/components/layout/AppLayout'
 import { MarketingLayout } from '@/components/layout/MarketingLayout'
 import { RequireAdmin } from '@/components/routing/RequireAdmin'
 import { RequireAuth } from '@/components/routing/RequireAuth'
+import { RequireCbtAccess } from '@/components/routing/RequireCbtAccess'
 import { RequirePaymentAccess } from '@/components/routing/RequirePaymentAccess'
 import {
   AdminCasesAndRatiosPage,
@@ -98,15 +99,27 @@ export const router = createBrowserRouter([
           { path: 'library/subject-summaries/cases/:caseId', element: <AdminSubjectSummaryCaseReaderPage /> },
           {
             path: 'cbt',
-            element: <StudentCbtPage />,
+            element: (
+              <RequireCbtAccess>
+                <StudentCbtPage />
+              </RequireCbtAccess>
+            ),
           },
           {
             path: 'cbt/:cbtId',
-            element: <StudentCbtPage />,
+            element: (
+              <RequireCbtAccess>
+                <StudentCbtPage />
+              </RequireCbtAccess>
+            ),
           },
           {
             path: 'cbt/attempts/:attemptId',
-            element: <StudentCbtPage />,
+            element: (
+              <RequireCbtAccess>
+                <StudentCbtPage />
+              </RequireCbtAccess>
+            ),
           },
           {
             path: 'assignments',

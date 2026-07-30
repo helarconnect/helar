@@ -65,6 +65,7 @@ const adminUserMonthlyRegistrationsSchema = z.object({
 
 const adminManagedRoles = [
   { code: "content_admin", name: "Content Admin" },
+  { code: "judge", name: "Judge" },
   { code: "student", name: "Students" },
   { code: "lawyer", name: "Lawyers" }
 ] as const;

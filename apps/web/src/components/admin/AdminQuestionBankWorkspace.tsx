@@ -501,6 +501,77 @@ export function AdminQuestionBankWorkspace() {
     setQuestionDraft((current) => ({ ...current, [field]: value }));
   }
 
+  function getChoiceLabel(index: number) {
+    const baseCode = "A".charCodeAt(0);
+    const nextCode = baseCode + index;
+    return nextCode <= "Z".charCodeAt(0) ? String.fromCharCode(nextCode) : `Option ${index + 1}`;
+  }
+
+  function normalizeOptionsForType(nextType: QuestionCreateInput["type"], currentOptions: any[]) {
+    const options = Array.isArray(currentOptions) ? currentOptions : [];
+
+    if (nextType === "TRUE_FALSE") {
+      return [
+        { label: "True", text: "True", isCorrect: true, displayOrder: 1 },
+        { label: "False", text: "False", isCorrect: false, displayOrder: 2 }
+      ];
+    }
+
+    if (nextType === "SHORT_ANSWER") {
+      if (options.length > 0) {
+        return options.map((option, index) => ({
+          ...option,
+          label: option.label?.trim() ? option.label : `Accepted answer ${index + 1}`,
+          isCorrect: true,
+          displayOrder: index + 1
+        }));
+      }
+
+      return [{ label: "Accepted answer 1", text: "", isCorrect: true, displayOrder: 1 }];
+    }
+
+    if (nextType === "MULTIPLE_CHOICE" || nextType === "MULTIPLE_SELECT") {
+      const baseOptions =
+        options.length >= 2
+          ? options.map((option, index) => ({
+              ...option,
+              label: getChoiceLabel(index),
+              displayOrder: index + 1
+            }))
+          : Array.from({ length: 4 }).map((_, index) => ({
+              label: getChoiceLabel(index),
+              text: "",
+              isCorrect: false,
+              displayOrder: index + 1
+            }));
+
+      const correctIndexes = baseOptions.flatMap((option, index) => (option.isCorrect ? [index] : []));
+
+      if (nextType === "MULTIPLE_CHOICE") {
+        const selectedIndex = correctIndexes[0] ?? 0;
+        return baseOptions.map((option, index) => ({ ...option, isCorrect: index === selectedIndex }));
+      }
+
+      if (correctIndexes.length === 0) {
+        const nextOptions = [...baseOptions];
+        nextOptions[0] = { ...nextOptions[0], isCorrect: true };
+        return nextOptions;
+      }
+
+      return baseOptions;
+    }
+
+    return options;
+  }
+
+  function updateQuestionType(nextType: QuestionCreateInput["type"]) {
+    setQuestionDraft((current) => ({
+      ...current,
+      type: nextType,
+      options: normalizeOptionsForType(nextType, current.options || [])
+    }));
+  }
+
   function addOption() {
     const newDisplayOrder = (questionDraft.options?.length || 0) + 1;
     setQuestionDraft((current) => ({
@@ -508,7 +579,12 @@ export function AdminQuestionBankWorkspace() {
       options: [
         ...(current.options || []),
         {
-          label: current.type === "SHORT_ANSWER" ? `Accepted answer ${newDisplayOrder}` : `Option ${newDisplayOrder}`,
+          label:
+            current.type === "SHORT_ANSWER"
+              ? `Accepted answer ${newDisplayOrder}`
+              : current.type === "MULTIPLE_CHOICE" || current.type === "MULTIPLE_SELECT"
+                ? getChoiceLabel(newDisplayOrder - 1)
+                : `Option ${newDisplayOrder}`,
           text: "",
           isCorrect: current.type === "SHORT_ANSWER",
           displayOrder: newDisplayOrder
@@ -785,6 +861,7 @@ export function AdminQuestionBankWorkspace() {
             isDark={isDark}
             questionDraft={questionDraft}
             updateQuestionDraft={updateQuestionDraft}
+            updateQuestionType={updateQuestionType}
             addOption={addOption}
             updateOption={updateOption}
             removeOption={removeOption}
@@ -831,6 +908,7 @@ export function AdminQuestionBankWorkspace() {
               isDark={isDark}
               questionDraft={questionDraft}
               updateQuestionDraft={updateQuestionDraft}
+              updateQuestionType={updateQuestionType}
               addOption={addOption}
               updateOption={updateOption}
               removeOption={removeOption}
@@ -846,6 +924,7 @@ function QuestionForm({
   isDark,
   questionDraft,
   updateQuestionDraft,
+  updateQuestionType,
   addOption,
   updateOption,
   removeOption
@@ -853,6 +932,7 @@ function QuestionForm({
   isDark: boolean;
   questionDraft: any;
   updateQuestionDraft: (field: string, value: any) => void;
+  updateQuestionType: (type: QuestionCreateInput["type"]) => void;
   addOption: () => void;
   updateOption: (index: number, field: "label" | "text" | "isCorrect", value: any) => void;
   removeOption: (index: number) => void;
@@ -884,7 +964,7 @@ function QuestionForm({
                 ? "border-slate-700 bg-slate-900 text-white focus:border-blue-500"
                 : "border-slate-300 bg-white text-slate-900 focus:border-blue-500"
             )}
-            onChange={(e) => updateQuestionDraft("type", e.target.value as any)}
+            onChange={(e) => updateQuestionType(e.target.value as QuestionCreateInput["type"])}
             value={questionDraft.type}
           >
             <option value="MULTIPLE_CHOICE">Multiple Choice</option>
@@ -1001,12 +1081,23 @@ function QuestionForm({
                   isDark ? "border-slate-700 bg-slate-800" : "border-slate-200 bg-slate-50"
                 )}
               >
-                <input
-                  checked={opt.isCorrect}
-                  className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                  onChange={(e) => updateOption(index, "isCorrect", e.target.checked)}
-                  type="checkbox"
-                />
+                {questionDraft.type === "MULTIPLE_CHOICE" ? (
+                  <input
+                    checked={opt.isCorrect}
+                    className="mt-1 h-4 w-4 border-slate-300 text-blue-600 focus:ring-blue-500"
+                    name="multipleChoiceCorrect"
+                    onChange={() => updateOption(index, "isCorrect", true)}
+                    type="radio"
+                  />
+                ) : (
+                  <input
+                    checked={opt.isCorrect}
+                    className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    disabled={questionDraft.type === "SHORT_ANSWER"}
+                    onChange={(e) => updateOption(index, "isCorrect", e.target.checked)}
+                    type="checkbox"
+                  />
+                )}
                 <div className="flex-1 grid gap-2">
                   <input
                     className={cn(

@@ -191,7 +191,17 @@ export function LibrarySearchControl({ audience = "admin" }: { audience?: "admin
                                         : "border-slate-200 bg-slate-50 hover:border-slate-300 hover:bg-white"
                                     )}
                                     key={`${group.key}-${result.id}`}
-                                    onClick={() => handleOpenPath(result.path)}
+                                    onClick={() => {
+                                      if (result.kind === "library_material") {
+                                        handleOpenPath(result.path, {
+                                          librarySearchItemId: result.id,
+                                          librarySearchQuery: trimmedQuery
+                                        });
+                                        return;
+                                      }
+
+                                      handleOpenPath(result.path);
+                                    }}
                                     type="button"
                                   >
                                     <div className="flex items-start gap-4">
