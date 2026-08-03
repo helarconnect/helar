@@ -35,6 +35,9 @@ export function AppSidebar() {
   const [isCbtOpen, setIsCbtOpen] = useState(
     location.pathname.startsWith('/app/admin/cbt'),
   )
+  const [isBarFinalExamOpen, setIsBarFinalExamOpen] = useState(
+    location.pathname.startsWith('/app/bar-final-exams') || location.pathname.startsWith('/app/admin/bar-final-exams'),
+  )
   const [isSubjectSummariesOpen, setIsSubjectSummariesOpen] = useState(
     location.pathname === '/app/admin/library/cases-and-ratios' || location.pathname === '/app/library/cases-and-ratios',
   )
@@ -45,6 +48,9 @@ export function AppSidebar() {
     }
     if (location.pathname.startsWith('/app/admin/cbt')) {
       setIsCbtOpen(true)
+    }
+    if (location.pathname.startsWith('/app/bar-final-exams') || location.pathname.startsWith('/app/admin/bar-final-exams')) {
+      setIsBarFinalExamOpen(true)
     }
     if (location.pathname === '/app/admin/library/cases-and-ratios' || location.pathname === '/app/library/cases-and-ratios') {
       setIsSubjectSummariesOpen(true)
@@ -62,6 +68,14 @@ export function AppSidebar() {
     }
     const currentModuleType = new URLSearchParams(location.search).get('moduleType')
     return (currentModuleType || 'FACULTY') === expectedModuleType
+  }
+
+  function isBarFinalExamHrefActive(href: string) {
+    if (location.pathname === href) {
+      return true
+    }
+
+    return location.pathname.startsWith(`${href}/`)
   }
 
   const libraryItems: SidebarLibraryItem[] = isAdminWorkspace
@@ -94,6 +108,16 @@ export function AppSidebar() {
         { href: '/app/admin/cbt/question-bank', label: 'Question Bank' },
       ]
     : []
+
+  const barFinalExamItems: SidebarNavItem[] = isAdminWorkspace
+    ? [
+        { href: '/app/admin/bar-final-exams-nls-mcq', label: 'NLS Theory' },
+        { href: '/app/admin/bar-final-exams-mcq', label: 'MCQ' },
+      ]
+    : [
+        { href: '/app/bar-final-exams-nls-mcq', label: 'NLS Theory' },
+        { href: '/app/bar-final-exams-mcq', label: 'MCQ' },
+      ]
 
   return (
     <aside
@@ -128,10 +152,11 @@ export function AppSidebar() {
           const shouldShowLibraryTrigger = !isAdminWorkspace && item.href === '/app/library'
           const shouldShowAdminLibraryAfterItem = isAdminWorkspace && item.href === '/app/admin/users'
           const shouldShowAdminCbtAfterItem = isAdminWorkspace && item.href === '/app/admin/cbt'
+          const shouldShowBarFinalExamTrigger = item.href === '/app/bar-final-exams-nls-mcq' || item.href === '/app/admin/bar-final-exams-nls-mcq'
 
           return (
             <div key={item.href}>
-              {!shouldShowLibraryTrigger && !shouldShowAdminCbtAfterItem ? (
+              {!shouldShowLibraryTrigger && !shouldShowAdminCbtAfterItem && !shouldShowBarFinalExamTrigger ? (
                 <NavLink
                   className={({ isActive }) =>
                     cn(
@@ -148,6 +173,53 @@ export function AppSidebar() {
                   <Icon className="h-4 w-4 text-[color:var(--color-accent-strong)]" />
                   <span>{item.label}</span>
                 </NavLink>
+              ) : null}
+
+              {shouldShowBarFinalExamTrigger ? (
+                <div className="mt-2">
+                  <button
+                    className={cn(
+                      'flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-sm uppercase tracking-[0.12em] transition',
+                      isDark
+                        ? 'border-transparent text-white/75 hover:border-white/10 hover:bg-white/6 hover:text-white'
+                        : 'border-transparent text-slate-600 hover:border-slate-200 hover:bg-white hover:text-slate-950',
+                      (location.pathname.startsWith('/app/bar-final-exams') || location.pathname.startsWith('/app/admin/bar-final-exams')) &&
+                        (isDark ? 'border-white/10 bg-white/10 text-white' : 'border-slate-200 bg-white text-slate-950'),
+                    )}
+                    onClick={() => setIsBarFinalExamOpen((current) => !current)}
+                    type="button"
+                  >
+                    <span className="flex items-center gap-3">
+                      <Icon className="h-4 w-4 text-[color:var(--color-accent-strong)]" />
+                      <span>Bar Final Exam</span>
+                    </span>
+                    <ChevronDown className={cn('h-4 w-4 transition', isBarFinalExamOpen ? 'rotate-180' : '')} />
+                  </button>
+
+                  {isBarFinalExamOpen ? (
+                    <div className="mt-2 space-y-2 pl-4">
+                      {barFinalExamItems.map((barItem) => (
+                        <NavLink
+                          key={barItem.href}
+                          className={() =>
+                            cn(
+                              'flex items-center rounded-2xl border px-4 py-3 text-sm transition',
+                              isDark
+                                ? 'border-transparent text-white/70 hover:border-white/10 hover:bg-white/6 hover:text-white'
+                                : 'border-transparent text-slate-600 hover:border-slate-200 hover:bg-white hover:text-slate-950',
+                              isBarFinalExamHrefActive(barItem.href) &&
+                                (isDark ? 'border-white/10 bg-white/10 text-white' : 'border-slate-200 bg-white text-slate-950'),
+                            )
+                          }
+                          onClick={closeSidebar}
+                          to={barItem.href}
+                        >
+                          {barItem.label}
+                        </NavLink>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
               ) : null}
 
               {shouldShowLibraryTrigger || shouldShowAdminLibraryAfterItem ? (

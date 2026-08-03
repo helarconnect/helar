@@ -271,7 +271,7 @@ export function AdminSubjectSummaryCaseReader() {
           { label: "Subject", value: item.subject.name, icon: BookOpenText },
           { label: "Topic", value: item.topic.name, icon: BookOpenText },
           { label: "Status", value: item.status, icon: Tag },
-          { label: "Jurisdiction", value: item.jurisdiction || "Not set", icon: Tag }
+          { label: "Type of cases and ratios", value: item.jurisdiction || "Not set", icon: Tag }
         ].map((entry) => {
           const Icon = entry.icon;
 
@@ -310,7 +310,7 @@ export function AdminSubjectSummaryCaseReader() {
       ) : null}
 
       <div className="grid gap-4 xl:grid-cols-2">
-        {item.caseSummary ? <Section isDark={isDark} title="Case Summary">{item.caseSummary}</Section> : null}
+        {item.caseSummary ? <Section isDark={isDark} title="Ratio Summary">{item.caseSummary}</Section> : null}
         {item.facts ? <Section isDark={isDark} title="Facts">{item.facts}</Section> : null}
         {item.issues ? <Section isDark={isDark} title="Issues">{item.issues}</Section> : null}
         {item.decisionHolding ? <Section isDark={isDark} title="Decision / Holding">{item.decisionHolding}</Section> : null}

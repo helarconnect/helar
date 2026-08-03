@@ -1116,6 +1116,7 @@ model BarFinalExamQuestion {
   subjectId      String                    @db.ObjectId
   question       String
   answer         String
+  examDate       DateTime?
   status         BarFinalExamQuestionStatus @default(DRAFT)
   reviewFeedback String?
   approvedAt     DateTime?

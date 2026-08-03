@@ -118,6 +118,7 @@ function truncateWords(value: string, maxWords: number) {
 function buildDefaultDraft(subjectId: string): BarFinalExamQuestionInput {
   return {
     answer: "",
+    examDate: "",
     question: "",
     status: "PUBLISHED",
     subjectId
@@ -269,6 +270,7 @@ export function AdminBarFinalExamsMlsMcqPage() {
   function openEdit(question: BarFinalExamQuestion) {
     setDraft({
       answer: question.answer,
+      examDate: question.examDate ? question.examDate.slice(0, 10) : "",
       question: question.question,
       status: question.status,
       subjectId: question.subjectId
@@ -492,6 +494,21 @@ export function AdminBarFinalExamsMlsMcqPage() {
                   <option value="PUBLISHED">Published</option>
                   <option value="ARCHIVED">Archived</option>
                 </select>
+              </label>
+
+              <label className="space-y-2">
+                <span className={cn("text-xs font-medium uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>
+                  Exam date
+                </span>
+                <input
+                  className={cn(
+                    "w-full rounded-2xl border px-3.5 py-3 text-sm outline-none",
+                    isDark ? "border-slate-700 bg-slate-900 text-white" : "border-slate-200 bg-slate-50 text-slate-950"
+                  )}
+                  onChange={(event) => setDraft((current) => ({ ...current, examDate: event.target.value }))}
+                  type="date"
+                  value={draft.examDate}
+                />
               </label>
 
               <RichTextEditor

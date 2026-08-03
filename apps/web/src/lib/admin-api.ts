@@ -695,6 +695,7 @@ export type BarFinalExamQuestionStatus = "DRAFT" | "PENDING_APPROVAL" | "PUBLISH
 export type BarFinalExamQuestion = {
   answer: string;
   createdAt: string;
+  examDate: string | null;
   id: string;
   question: string;
   status: BarFinalExamQuestionStatus;
@@ -708,6 +709,7 @@ export type BarFinalExamQuestion = {
 
 export type BarFinalExamQuestionInput = {
   answer: string;
+  examDate: string;
   question: string;
   status: BarFinalExamQuestionStatus;
   subjectId: string;
@@ -744,6 +746,7 @@ export type StudentBarFinalExamSubjectsResponse = {
 export type StudentBarFinalExamQuestionsResponse = {
   items: Array<{
     answer: string;
+    examDate: string | null;
     id: string;
     question: string;
   }>;

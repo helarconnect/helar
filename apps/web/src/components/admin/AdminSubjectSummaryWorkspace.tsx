@@ -817,6 +817,8 @@ function CaseModal({
   }
 
   const availableTopics = draft.subjectId ? topics.filter((topic) => topic.subjectId === draft.subjectId) : topics;
+  const caseTypeOptions = ["Handbook", "Textbooks"] as const;
+  const hasCustomCaseType = Boolean(draft.jurisdiction) && !caseTypeOptions.includes(draft.jurisdiction as (typeof caseTypeOptions)[number]);
 
   return createPortal(
     <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/45 px-4 py-6 backdrop-blur-sm" onClick={onClose}>
@@ -924,12 +926,22 @@ function CaseModal({
               />
             </label>
             <label className="space-y-2">
-              <span className={cn("text-xs font-medium uppercase tracking-[0.2em]", isDark ? "text-slate-500" : "text-slate-500")}>Jurisdiction</span>
-              <input
+              <span className={cn("text-xs font-medium uppercase tracking-[0.2em]", isDark ? "text-slate-500" : "text-slate-500")}>Type of cases and ratios</span>
+              <select
                 className={cn("w-full rounded-2xl border px-4 py-3 text-sm outline-none transition", isDark ? "border-slate-700 bg-slate-900 text-white" : "border-slate-200 bg-slate-50 text-slate-950")}
                 onChange={(event) => onChange("jurisdiction", event.target.value)}
                 value={draft.jurisdiction}
-              />
+              >
+                <option value="">Select type</option>
+                {hasCustomCaseType ? (
+                  <option value={draft.jurisdiction}>{draft.jurisdiction}</option>
+                ) : null}
+                {caseTypeOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="space-y-2">
               <span className={cn("text-xs font-medium uppercase tracking-[0.2em]", isDark ? "text-slate-500" : "text-slate-500")}>Status</span>
@@ -948,7 +960,7 @@ function CaseModal({
           </div>
           <div className="mt-6 grid gap-4 xl:grid-cols-2">
             {[
-              ["caseSummary", "Case Summary", "Write the summary of the case."],
+              ["caseSummary", "Ratio Summary", "Write the ratio summary."],
               ["facts", "Facts", "Outline the facts."],
               ["issues", "Issues", "List the legal issues."],
               ["decisionHolding", "Decision / Holding", "State the holding."],
@@ -1721,9 +1733,19 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
   }
 
   function openCaseModal(item?: SubjectSummaryCase, selection?: HierarchyTopicSelection) {
+    const derivedSelection = selection
+      ? selection
+      : item
+        ? {
+            subjectId: item.subjectId,
+            subjectName: item.subject.name,
+            topicId: item.topicId,
+            topicName: item.topic.name
+          }
+        : null;
     void subjectReferenceQuery.refetch();
     void topicReferenceQuery.refetch();
-    setSelectedHierarchyTopic(selection ?? null);
+    setSelectedHierarchyTopic(derivedSelection);
     setIsCaseSelectionLocked(Boolean(selection) && !item);
     setEditingCase(item ?? null);
     setCaseDraft(

@@ -101,6 +101,15 @@ export const router = createBrowserRouter([
             element: <StudentBarFinalExamsMlsMcqPage />,
           },
           {
+            path: 'bar-final-exams-mcq',
+            element: (
+              <WorkspacePlaceholderPage
+                title="Bar Final Exam • MCQ"
+                description="This MCQ workspace is being prepared. For now, use NLS Theory to review the uploaded questions and answers."
+              />
+            ),
+          },
+          {
             path: 'bar-final-exams-nls-mcq/:subjectId/questions/:questionId',
             element: <StudentBarFinalExamQuestionPage />,
           },
@@ -158,6 +167,15 @@ export const router = createBrowserRouter([
               { path: 'library/cases-and-ratios/materials', element: <AdminCasesAndRatiosMaterialsPage /> },
               { path: 'bar-final-exams-mls-mcq', element: <Navigate replace to="/app/admin/bar-final-exams-nls-mcq" /> },
               { path: 'bar-final-exams-nls-mcq', element: <AdminBarFinalExamsMlsMcqPage /> },
+              {
+                path: 'bar-final-exams-mcq',
+                element: (
+                  <WorkspacePlaceholderPage
+                    title="Bar Final Exam • MCQ"
+                    description="This MCQ workspace is being prepared. For now, use NLS Theory to review the uploaded questions and answers."
+                  />
+                ),
+              },
               { path: 'content', element: <AdminContentPage /> },
               {
                 path: 'payments',

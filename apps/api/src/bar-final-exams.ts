@@ -16,6 +16,7 @@ const adminQuestionFiltersSchema = z.object({
 const questionInputSchema = z
   .object({
     answer: z.string().trim().min(2),
+    examDate: z.string().trim().optional().or(z.literal("")),
     question: z.string().trim().min(2),
     status: z.nativeEnum(BarFinalExamQuestionStatus).default(BarFinalExamQuestionStatus.DRAFT),
     subjectId: recordIdSchema
@@ -59,6 +60,20 @@ function resolveQuestionStatus(inputStatus: BarFinalExamQuestionStatus, actorRol
   return inputStatus;
 }
 
+function parseExamDate(value: string | undefined) {
+  const trimmed = (value ?? "").trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed;
+}
+
 function buildAdminWhere(filters: AdminBarFinalExamQuestionFilters): Prisma.BarFinalExamQuestionWhereInput {
   return {
     deletedAt: null,
@@ -88,6 +103,7 @@ function mapQuestion(item: {
   subjectId: string;
   question: string;
   answer: string;
+  examDate: Date | null;
   status: BarFinalExamQuestionStatus;
   createdAt: Date;
   updatedAt: Date;
@@ -99,6 +115,7 @@ function mapQuestion(item: {
   return {
     answer: item.answer,
     createdAt: item.createdAt.toISOString(),
+    examDate: item.examDate?.toISOString() ?? null,
     id: item.id,
     question: item.question,
     status: item.status,
@@ -186,11 +203,13 @@ export async function createAdminBarFinalExamQuestion(
   actorUserId: string
 ) {
   const resolvedStatus = resolveQuestionStatus(input.status, actorRoleCodes);
+  const resolvedExamDate = parseExamDate(input.examDate);
 
   const created = await prisma.barFinalExamQuestion.create({
     data: {
       answer: input.answer,
       deletedAt: null,
+      examDate: resolvedExamDate,
       question: input.question,
       reviewFeedback: null,
       status: resolvedStatus,
@@ -221,6 +240,7 @@ export async function updateAdminBarFinalExamQuestion(
   actorUserId: string
 ) {
   const resolvedStatus = resolveQuestionStatus(input.status, actorRoleCodes);
+  const resolvedExamDate = parseExamDate(input.examDate);
 
   const updated = await prisma.barFinalExamQuestion.update({
     where: {
@@ -228,6 +248,7 @@ export async function updateAdminBarFinalExamQuestion(
     },
     data: {
       answer: input.answer,
+      examDate: resolvedExamDate,
       question: input.question,
       reviewFeedback: null,
       status: resolvedStatus,
@@ -307,6 +328,7 @@ export async function listStudentBarFinalExamQuestions(query: StudentBarFinalExa
     orderBy: [{ createdAt: "asc" }],
     select: {
       answer: true,
+      examDate: true,
       id: true,
       question: true
     }
