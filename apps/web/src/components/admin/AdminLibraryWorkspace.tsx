@@ -509,7 +509,7 @@ function LibraryMaterialModal({
                 <div className="overflow-x-auto pb-1">
                   <div className="grid min-w-[620px] grid-cols-2 gap-2.5">
                     <label className="space-y-1">
-                      <span className={cn("text-[11px] font-medium uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Report Number</span>
+                      <span className={cn("text-[11px] font-medium uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Case Number</span>
                       <input
                         className={cn(
                           "w-full rounded-2xl border px-3 py-2 text-sm outline-none transition",
@@ -1212,7 +1212,7 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
               <input
                 className={cn("w-full bg-transparent text-sm outline-none", isDark ? "text-white placeholder:text-slate-500" : "text-slate-950 placeholder:text-slate-400")}
                 onChange={(event) => setFilters((current) => ({ ...current, page: 1, search: event.target.value }))}
-                placeholder={isLawReports ? "Search title, suit number, or report number" : "Search title or URL"}
+                placeholder={isLawReports ? "Search title, suit number, or case number" : "Search title or URL"}
                 value={filters.search}
               />
             </label>
@@ -1322,7 +1322,7 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
                                 {material.title}
                               </Link>
                               <p className={cn("mt-2 text-xs", isDark ? "text-slate-400" : "text-slate-500")}>
-                                Report Number: {material.reportNumber ?? "Pending assignment"}
+                                Case Number: {material.reportNumber ?? "Pending assignment"}
                               </p>
                               <p className={cn("mt-1 text-xs", isDark ? "text-slate-400" : "text-slate-500")}>Suit Number: {material.storageUrl}</p>
                               {stripHtml(material.summary) ? (

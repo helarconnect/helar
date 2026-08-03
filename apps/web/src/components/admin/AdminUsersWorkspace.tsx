@@ -25,6 +25,7 @@ import {
   createAdminUser,
   type AdminCreateUserInput,
   type AdminMonthlyRegistrations,
+  type AdminUserDeviceLimitInput,
   type AdminUserDetail,
   type AdminUserListFilters,
   type AdminUserPasswordInput,
@@ -35,6 +36,8 @@ import {
   fetchAdminUserDetail,
   fetchAdminUsersForExport,
   fetchAdminUsers,
+  resetAdminUserDevices,
+  updateAdminUserDeviceLimit,
   updateAdminUserPassword,
   updateAdminUserProfile,
   updateAdminUserRoles,
@@ -644,6 +647,7 @@ export function AdminUsersWorkspace() {
     confirmPassword: "",
     password: ""
   });
+  const [deviceLimitOverrideDraft, setDeviceLimitOverrideDraft] = useState("");
   const [toasts, setToasts] = useState<Array<{ id: number; message: string; tone: "success" | "error" }>>([]);
 
   function dismissToast(id: number) {
@@ -704,6 +708,9 @@ export function AdminUsersWorkspace() {
       confirmPassword: "",
       password: ""
     });
+    setDeviceLimitOverrideDraft(
+      selectedUserQuery.data.deviceLimitOverride === null ? "" : String(selectedUserQuery.data.deviceLimitOverride)
+    );
   }, [selectedUserQuery.data]);
 
   useEffect(() => {
@@ -789,6 +796,39 @@ export function AdminUsersWorkspace() {
           ? error.response?.data?.error?.message ?? "Could not update the user password right now."
           : "Could not update the user password right now.";
 
+      showToast(errorMessage, "error");
+    }
+  });
+
+  const deviceLimitMutation = useMutation({
+    mutationFn: ({ userId, payload }: { userId: string; payload: AdminUserDeviceLimitInput }) =>
+      updateAdminUserDeviceLimit(userId, payload),
+    onSuccess: (updatedUser) => {
+      setDeviceLimitOverrideDraft(updatedUser.deviceLimitOverride === null ? "" : String(updatedUser.deviceLimitOverride));
+      showToast(`Updated ${updatedUser.fullName}'s device limit to ${updatedUser.deviceLimit}.`, "success");
+      void queryClient.invalidateQueries({ queryKey: queryKeys.adminUserDetail(updatedUser.id) });
+    },
+    onError: (error) => {
+      const errorMessage =
+        error instanceof AxiosError
+          ? error.response?.data?.error?.message ?? "Could not update the device limit right now."
+          : "Could not update the device limit right now.";
+      showToast(errorMessage, "error");
+    }
+  });
+
+  const resetDevicesMutation = useMutation({
+    mutationFn: (userId: string) => resetAdminUserDevices(userId),
+    onSuccess: (updatedUser) => {
+      showToast(`Reset devices and signed out ${updatedUser.fullName}.`, "success");
+      void queryClient.invalidateQueries({ queryKey: queryKeys.adminUserDetail(updatedUser.id) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.adminUsers(filters) });
+    },
+    onError: (error) => {
+      const errorMessage =
+        error instanceof AxiosError
+          ? error.response?.data?.error?.message ?? "Could not reset the user devices right now."
+          : "Could not reset the user devices right now.";
       showToast(errorMessage, "error");
     }
   });
@@ -924,6 +964,73 @@ export function AdminUsersWorkspace() {
       ...current,
       [field]: value
     }));
+  }
+
+  function buildDeviceLimitPayload(): AdminUserDeviceLimitInput | null {
+    const trimmedValue = deviceLimitOverrideDraft.trim();
+
+    if (!trimmedValue) {
+      return {
+        deviceLimitOverride: null
+      };
+    }
+
+    const parsedValue = Number(trimmedValue);
+
+    if (!Number.isFinite(parsedValue) || !Number.isInteger(parsedValue)) {
+      showToast("Enter a whole number for the device limit override.", "error");
+      return null;
+    }
+
+    if (parsedValue < 1 || parsedValue > 20) {
+      showToast("Device limit override must be between 1 and 20.", "error");
+      return null;
+    }
+
+    return {
+      deviceLimitOverride: parsedValue
+    };
+  }
+
+  function handleSaveDeviceLimit() {
+    if (!selectedUserQuery.data) {
+      return;
+    }
+
+    const payload = buildDeviceLimitPayload();
+    if (!payload) {
+      return;
+    }
+
+    deviceLimitMutation.mutate({
+      userId: selectedUserQuery.data.id,
+      payload
+    });
+  }
+
+  function handleClearDeviceLimitOverride() {
+    setDeviceLimitOverrideDraft("");
+    if (!selectedUserQuery.data) {
+      return;
+    }
+
+    deviceLimitMutation.mutate({
+      userId: selectedUserQuery.data.id,
+      payload: { deviceLimitOverride: null }
+    });
+  }
+
+  function handleResetDevices() {
+    if (!selectedUserQuery.data) {
+      return;
+    }
+
+    const confirmed = window.confirm(`Reset devices for ${selectedUserQuery.data.fullName}? This will sign them out everywhere.`);
+    if (!confirmed) {
+      return;
+    }
+
+    resetDevicesMutation.mutate(selectedUserQuery.data.id);
   }
 
   async function handleCreateUser() {
@@ -1556,6 +1663,113 @@ export function AdminUsersWorkspace() {
                       <p className={cn("mt-2 text-lg font-semibold", isDark ? "text-white" : "text-slate-950")}>{value}</p>
                     </div>
                   ))}
+                </div>
+              </Surface>
+
+              <Surface className="p-4 xl:col-span-2" isDark={isDark}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-400")}>Devices</p>
+                    <h4 className={cn("mt-1 font-heading text-lg", isDark ? "text-white" : "text-slate-950")}>Login devices</h4>
+                  </div>
+                  {isSuperAdmin ? (
+                    <button
+                      className="button-primary !px-4 !py-3"
+                      disabled={resetDevicesMutation.isPending || !selectedUserQuery.data.devices.length}
+                      onClick={handleResetDevices}
+                      type="button"
+                    >
+                      <RefreshCw className="h-4 w-4" />
+                      Reset devices
+                    </button>
+                  ) : null}
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <CompactField
+                    isDark={isDark}
+                    label="Allowed devices"
+                    value={`${selectedUserQuery.data.deviceLimit} ${selectedUserQuery.data.deviceLimit === 1 ? "device" : "devices"}`}
+                  />
+                  <CompactField
+                    isDark={isDark}
+                    label="Override"
+                    value={
+                      selectedUserQuery.data.deviceLimitOverride === null
+                        ? "Not set"
+                        : `${selectedUserQuery.data.deviceLimitOverride} ${selectedUserQuery.data.deviceLimitOverride === 1 ? "device" : "devices"}`
+                    }
+                  />
+                </div>
+
+                {isSuperAdmin ? (
+                  <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto_auto] sm:items-end">
+                    <label>
+                      <span className={cn("text-[11px] uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-400")}>
+                        Device limit override (1-20)
+                      </span>
+                      <input
+                        className={cn(
+                          "mt-2 w-full rounded-2xl border px-4 py-3 text-sm outline-none transition",
+                          isDark ? "border-slate-700 bg-slate-950 text-white" : "border-slate-200 bg-white text-slate-900"
+                        )}
+                        disabled={deviceLimitMutation.isPending}
+                        inputMode="numeric"
+                        onChange={(event) => setDeviceLimitOverrideDraft(event.target.value)}
+                        placeholder="Leave blank for default"
+                        value={deviceLimitOverrideDraft}
+                      />
+                    </label>
+
+                    <button
+                      className="button-primary !px-4 !py-3"
+                      disabled={deviceLimitMutation.isPending}
+                      onClick={handleSaveDeviceLimit}
+                      type="button"
+                    >
+                      {deviceLimitMutation.isPending ? "Saving..." : "Save"}
+                    </button>
+
+                    <button
+                      className="button-secondary !px-4 !py-3"
+                      disabled={deviceLimitMutation.isPending}
+                      onClick={handleClearDeviceLimitOverride}
+                      type="button"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                ) : null}
+
+                <div className="mt-5 space-y-2">
+                  {selectedUserQuery.data.devices.length ? (
+                    selectedUserQuery.data.devices.map((device) => (
+                      <div
+                        className={cn(
+                          "rounded-[18px] border px-4 py-3",
+                          isDark ? "border-slate-700 bg-slate-900 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-700"
+                        )}
+                        key={device.id}
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className={cn("flex items-center gap-2 text-sm font-semibold", isDark ? "text-white" : "text-slate-950")}>
+                              <Smartphone className="h-4 w-4" />
+                              <span className="truncate">{device.name}</span>
+                            </p>
+                            <p className={cn("mt-1 text-xs", isDark ? "text-slate-500" : "text-slate-500")}>
+                              Last seen: {formatDateTime(device.lastSeenAt)}
+                            </p>
+                          </div>
+                          <p className={cn("text-xs uppercase tracking-[0.16em]", isDark ? "text-slate-500" : "text-slate-400")}>
+                            Added {formatDateOnly(device.createdAt)}
+                          </p>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <EmptyState isDark={isDark} message="No login devices have been recorded for this user yet." />
+                  )}
                 </div>
               </Surface>
 

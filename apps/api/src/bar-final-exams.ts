@@ -108,6 +108,17 @@ function mapQuestion(item: {
   };
 }
 
+async function createAuditLog(actorUserId: string, action: string, resourceId: string, payload?: Prisma.InputJsonValue) {
+  await prisma.auditLog.create({
+    data: {
+      action,
+      payload,
+      resource: resourceId,
+      userId: actorUserId
+    }
+  });
+}
+
 export async function fetchBarFinalExamFormOptions() {
   const subjects = await prisma.subjectSummarySubject.findMany({
     where: {
@@ -169,7 +180,11 @@ export async function listAdminBarFinalExamQuestions(filters: AdminBarFinalExamQ
   };
 }
 
-export async function createAdminBarFinalExamQuestion(input: BarFinalExamQuestionInput, actorRoleCodes: string[] = []) {
+export async function createAdminBarFinalExamQuestion(
+  input: BarFinalExamQuestionInput,
+  actorRoleCodes: string[] = [],
+  actorUserId: string
+) {
   const resolvedStatus = resolveQuestionStatus(input.status, actorRoleCodes);
 
   const created = await prisma.barFinalExamQuestion.create({
@@ -177,6 +192,7 @@ export async function createAdminBarFinalExamQuestion(input: BarFinalExamQuestio
       answer: input.answer,
       deletedAt: null,
       question: input.question,
+      reviewFeedback: null,
       status: resolvedStatus,
       subjectId: input.subjectId
     },
@@ -190,13 +206,19 @@ export async function createAdminBarFinalExamQuestion(input: BarFinalExamQuestio
     }
   });
 
+  await createAuditLog(actorUserId, "admin.bar-final-exams.question.created", created.id, {
+    status: created.status,
+    subjectId: created.subjectId
+  });
+
   return mapQuestion(created);
 }
 
 export async function updateAdminBarFinalExamQuestion(
   questionId: string,
   input: BarFinalExamQuestionInput,
-  actorRoleCodes: string[] = []
+  actorRoleCodes: string[] = [],
+  actorUserId: string
 ) {
   const resolvedStatus = resolveQuestionStatus(input.status, actorRoleCodes);
 
@@ -207,6 +229,7 @@ export async function updateAdminBarFinalExamQuestion(
     data: {
       answer: input.answer,
       question: input.question,
+      reviewFeedback: null,
       status: resolvedStatus,
       subjectId: input.subjectId,
       deletedAt: null
@@ -219,6 +242,11 @@ export async function updateAdminBarFinalExamQuestion(
         }
       }
     }
+  });
+
+  await createAuditLog(actorUserId, "admin.bar-final-exams.question.updated", updated.id, {
+    status: updated.status,
+    subjectId: updated.subjectId
   });
 
   return mapQuestion(updated);

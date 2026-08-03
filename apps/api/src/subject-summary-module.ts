@@ -175,11 +175,24 @@ function buildEntryWhere(filters: EntryFilters): Prisma.SubjectSummaryEntryWhere
   };
 }
 
+function buildEntrySummaryWhere(filters: EntryFilters): Prisma.SubjectSummaryEntryWhereInput {
+  return {
+    deletedAt: null,
+    subject: {
+      deletedAt: null
+    },
+    moduleType: filters.moduleType,
+    ...(filters.subjectId ? { subjectId: filters.subjectId } : {}),
+    ...(filters.topic ? { topic: filters.topic } : {})
+  };
+}
+
 function mapEntry(item: {
   id: string;
   subjectId: string;
   moduleType: SubjectSummaryModuleType;
   topic: string | null;
+  serialNumber: string | null;
   question: string;
   answer: string;
   keyPrinciple: string | null;
@@ -223,6 +236,7 @@ function mapEntry(item: {
     id: item.id,
     keyPrinciple: item.keyPrinciple ?? "",
     moduleType: item.moduleType,
+    serialNumber: item.serialNumber ?? "",
     topic: item.topic ?? "",
     question: item.question,
     relatedCases: item.caseLinks.map((link) => ({
@@ -319,29 +333,29 @@ async function assertSubjectExists(subjectId: string) {
   }
 }
 
-async function countEntryStatuses() {
+async function countEntryStatuses(where: Prisma.SubjectSummaryEntryWhereInput) {
   const [archivedCount, draftCount, pendingApprovalCount, publishedCount] = await Promise.all([
     prisma.subjectSummaryEntry.count({
       where: {
-        deletedAt: null,
+        ...where,
         status: SubjectSummaryCaseStatus.ARCHIVED
       }
     }),
     prisma.subjectSummaryEntry.count({
       where: {
-        deletedAt: null,
+        ...where,
         status: SubjectSummaryCaseStatus.DRAFT
       }
     }),
     prisma.subjectSummaryEntry.count({
       where: {
-        deletedAt: null,
+        ...where,
         status: SubjectSummaryCaseStatus.PENDING_APPROVAL
       }
     }),
     prisma.subjectSummaryEntry.count({
       where: {
-        deletedAt: null,
+        ...where,
         status: SubjectSummaryCaseStatus.PUBLISHED
       }
     })
@@ -438,6 +452,7 @@ export function parseStudentSubjectSummaryTopicsQuery(query: Record<string, stri
 
 export async function listSubjectSummaryEntries(filters: EntryFilters) {
   const where = buildEntryWhere(filters);
+  const summaryWhere = buildEntrySummaryWhere(filters);
   const [items, totalItems, subjects, summary] = await Promise.all([
     prisma.subjectSummaryEntry.findMany({
       where,
@@ -478,7 +493,7 @@ export async function listSubjectSummaryEntries(filters: EntryFilters) {
         name: true
       }
     }),
-    countEntryStatuses()
+    countEntryStatuses(summaryWhere)
   ]);
 
   return {
@@ -619,57 +634,83 @@ export async function getSubjectSummaryEntryFormOptions(subjectId?: string) {
   };
 }
 
+function formatSubjectSummarySerialNumber(moduleType: SubjectSummaryModuleType, value: number) {
+  const prefix = moduleType === "NLS" ? "Helar-NLS-" : "Helar-FAC-";
+  return `${prefix}${value}`;
+}
+
+async function allocateSubjectSummarySerialRange(
+  tx: Prisma.TransactionClient,
+  moduleType: SubjectSummaryModuleType,
+  count: number
+) {
+  const next = await tx.subjectSummarySerialCounter.upsert({
+    where: { moduleType },
+    update: { value: { increment: count } },
+    create: { moduleType, value: count },
+    select: { value: true }
+  });
+
+  return next.value - count + 1;
+}
+
 export async function createSubjectSummaryEntry(input: EntryInput, actorUserId: string, actorRoleCodes: string[] = []) {
   await assertSubjectExists(input.subjectId);
   await assertCasesBelongToSubject(input.subjectId, input.relatedCaseIds);
   const resolvedStatus = resolveEntryStatus(input.status, actorRoleCodes);
 
-  const entry = await prisma.subjectSummaryEntry.create({
-    data: {
-      answer: input.answer,
-      createdBy: actorUserId,
-      deletedAt: null,
-      difficulty: input.difficulty,
-      displayOrder: input.displayOrder,
-      estimatedReadingTime: input.estimatedReadingTime,
-      examTip: input.examTip.trim() || null,
-      keyPrinciple: input.keyPrinciple.trim() || null,
-      moduleType: input.moduleType,
-      question: input.question,
-      reviewFeedback: null,
-      relatedStatutes: normalizeList(input.relatedStatutes),
-      status: resolvedStatus,
-      subjectId: input.subjectId,
-      tags: normalizeList(input.tags),
-      topic: input.topic.trim() || null,
-      caseLinks: {
-        create: input.relatedCaseIds.map((caseId) => ({
-          caseId
-        }))
-      }
-    },
-    include: {
-      subject: {
-        select: {
-          id: true,
-          name: true
+  const entry = await runInTransaction(async (tx) => {
+    const serialStart = await allocateSubjectSummarySerialRange(tx, input.moduleType, 1);
+    const serialNumber = formatSubjectSummarySerialNumber(input.moduleType, serialStart);
+
+    return tx.subjectSummaryEntry.create({
+      data: {
+        answer: input.answer,
+        createdBy: actorUserId,
+        deletedAt: null,
+        difficulty: input.difficulty,
+        displayOrder: input.displayOrder,
+        estimatedReadingTime: input.estimatedReadingTime,
+        examTip: input.examTip.trim() || null,
+        keyPrinciple: input.keyPrinciple.trim() || null,
+        moduleType: input.moduleType,
+        serialNumber,
+        question: input.question,
+        reviewFeedback: null,
+        relatedStatutes: normalizeList(input.relatedStatutes),
+        status: resolvedStatus,
+        subjectId: input.subjectId,
+        tags: normalizeList(input.tags),
+        topic: input.topic.trim() || null,
+        caseLinks: {
+          create: input.relatedCaseIds.map((caseId) => ({
+            caseId
+          }))
         }
       },
-      caseLinks: {
-        include: {
-          case: {
-            include: {
-              topic: {
-                select: {
-                  id: true,
-                  name: true
+      include: {
+        subject: {
+          select: {
+            id: true,
+            name: true
+          }
+        },
+        caseLinks: {
+          include: {
+            case: {
+              include: {
+                topic: {
+                  select: {
+                    id: true,
+                    name: true
+                  }
                 }
               }
             }
           }
         }
       }
-    }
+    });
   });
 
   await createAuditLog(actorUserId, "subject_summary_entry_created", entry.id, {
@@ -686,6 +727,7 @@ export async function createSubjectSummaryTopicEntries(input: TopicBulkInput, ac
   const trimmedTopic = input.topic.trim();
 
   const result = await runInTransaction(async (tx) => {
+    const serialStart = await allocateSubjectSummarySerialRange(tx, input.moduleType, input.entries.length);
     const existingMax = await tx.subjectSummaryEntry.findFirst({
       where: {
         deletedAt: null,
@@ -702,6 +744,7 @@ export async function createSubjectSummaryTopicEntries(input: TopicBulkInput, ac
     });
 
     let displayOrderCursor = (existingMax?.displayOrder ?? -1) + 1;
+    let serialCursor = serialStart;
 
     for (const entryInput of input.entries) {
       await assertCasesBelongToSubject(input.subjectId, entryInput.relatedCaseIds);
@@ -717,6 +760,7 @@ export async function createSubjectSummaryTopicEntries(input: TopicBulkInput, ac
           examTip: entryInput.examTip.trim() || null,
           keyPrinciple: entryInput.keyPrinciple.trim() || null,
           moduleType: input.moduleType,
+          serialNumber: formatSubjectSummarySerialNumber(input.moduleType, serialCursor),
           question: entryInput.question,
           reviewFeedback: null,
           relatedStatutes: normalizeList(entryInput.relatedStatutes),
@@ -733,6 +777,7 @@ export async function createSubjectSummaryTopicEntries(input: TopicBulkInput, ac
       });
 
       displayOrderCursor += 1;
+      serialCursor += 1;
     }
 
     return {

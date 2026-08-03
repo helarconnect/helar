@@ -202,6 +202,7 @@ export type AdminNotificationItemType =
   | "library_material"
   | "subject_summary_case"
   | "subject_summary_entry"
+  | "bar_final_exam_question"
   | "user_notification";
 
 export type AdminNotificationItem = {
@@ -232,13 +233,14 @@ export type AdminApprovalQueueItem = {
   submittedRoleLabel: string;
   subtitle: string;
   title: string;
-  type: "library_material" | "subject_summary_case" | "subject_summary_entry";
+  type: "library_material" | "subject_summary_case" | "subject_summary_entry" | "bar_final_exam_question";
 };
 
 export type AdminApprovalQueueSnapshot = {
   items: AdminApprovalQueueItem[];
   summary: {
     itemsSubmittedToday: number;
+    barFinalExamQuestions: number;
     libraryMaterials: number;
     oldestPendingHours: number;
     subjectSummaryCases: number;
@@ -519,6 +521,7 @@ export type SubjectSummaryModuleEntry = {
   id: string;
   keyPrinciple: string;
   moduleType: SubjectSummaryModuleType;
+  serialNumber: string;
   topic: string;
   question: string;
   relatedCases: SubjectSummaryModuleRelatedCase[];
@@ -961,6 +964,8 @@ export type AdminUserDetail = {
     topics: number;
   };
   createdAt: string;
+  deviceLimit: number;
+  deviceLimitOverride: number | null;
   devices: Array<{
     createdAt: string;
     id: string;
@@ -1097,6 +1102,10 @@ export type AdminCreateUserInput = {
 
 export type AdminUserPasswordInput = {
   password: string;
+};
+
+export type AdminUserDeviceLimitInput = {
+  deviceLimitOverride: number | null;
 };
 
 export type AdminMonthlyRegistrations = {
@@ -1774,7 +1783,7 @@ export async function fetchAdminBarFinalExamQuestions(filters: {
   subjectId?: string;
 }) {
   const response = await authenticatedHttp.get<{ success: true; data: AdminBarFinalExamQuestionList }>(
-    "/api/v1/admin/bar-final-exams-mls-mcq/questions",
+    "/api/v1/admin/bar-final-exams-nls-mcq/questions",
     {
       params: Object.fromEntries(createQueryParams(filters).entries())
     }
@@ -1785,7 +1794,7 @@ export async function fetchAdminBarFinalExamQuestions(filters: {
 
 export async function fetchBarFinalExamFormOptions() {
   const response = await authenticatedHttp.get<{ success: true; data: BarFinalExamFormOptions }>(
-    "/api/v1/admin/bar-final-exams-mls-mcq/form-options"
+    "/api/v1/admin/bar-final-exams-nls-mcq/form-options"
   );
 
   return response.data.data;
@@ -1793,7 +1802,7 @@ export async function fetchBarFinalExamFormOptions() {
 
 export async function createAdminBarFinalExamQuestion(payload: BarFinalExamQuestionInput) {
   const response = await authenticatedHttp.post<{ success: true; data: BarFinalExamQuestion }>(
-    "/api/v1/admin/bar-final-exams-mls-mcq/questions",
+    "/api/v1/admin/bar-final-exams-nls-mcq/questions",
     payload
   );
 
@@ -1802,7 +1811,7 @@ export async function createAdminBarFinalExamQuestion(payload: BarFinalExamQuest
 
 export async function updateAdminBarFinalExamQuestion(questionId: string, payload: BarFinalExamQuestionInput) {
   const response = await authenticatedHttp.patch<{ success: true; data: BarFinalExamQuestion }>(
-    `/api/v1/admin/bar-final-exams-mls-mcq/questions/${questionId}`,
+    `/api/v1/admin/bar-final-exams-nls-mcq/questions/${questionId}`,
     payload
   );
 
@@ -1811,7 +1820,7 @@ export async function updateAdminBarFinalExamQuestion(questionId: string, payloa
 
 export async function deleteAdminBarFinalExamQuestion(questionId: string) {
   const response = await authenticatedHttp.delete<{ success: true; data: { id: string; success: true } }>(
-    `/api/v1/admin/bar-final-exams-mls-mcq/questions/${questionId}`
+    `/api/v1/admin/bar-final-exams-nls-mcq/questions/${questionId}`
   );
 
   return response.data.data;
@@ -1819,7 +1828,7 @@ export async function deleteAdminBarFinalExamQuestion(questionId: string) {
 
 export async function fetchStudentBarFinalExamSubjects(search = "") {
   const response = await authenticatedHttp.get<{ success: true; data: StudentBarFinalExamSubjectsResponse }>(
-    "/api/v1/library/bar-final-exams-mls-mcq/subjects",
+    "/api/v1/library/bar-final-exams-nls-mcq/subjects",
     {
       params: { search }
     }
@@ -1830,7 +1839,7 @@ export async function fetchStudentBarFinalExamSubjects(search = "") {
 
 export async function fetchStudentBarFinalExamQuestions(subjectId: string) {
   const response = await authenticatedHttp.get<{ success: true; data: StudentBarFinalExamQuestionsResponse }>(
-    "/api/v1/library/bar-final-exams-mls-mcq/questions",
+    "/api/v1/library/bar-final-exams-nls-mcq/questions",
     {
       params: { subjectId }
     }
@@ -2247,6 +2256,14 @@ export async function approveAdminSubjectSummaryEntry(entryId: string) {
   return response.data.data;
 }
 
+export async function approveAdminBarFinalExamQuestion(questionId: string) {
+  const response = await authenticatedHttp.post<{ success: true; data: { id: string; success: true } }>(
+    `/api/v1/admin/approvals/bar-final-exam-questions/${questionId}/approve`
+  );
+
+  return response.data.data;
+}
+
 export async function declineAdminLibraryMaterial(materialId: string, reason: string) {
   const response = await authenticatedHttp.post<{ success: true; data: { id: string; success: true } }>(
     `/api/v1/admin/approvals/library-materials/${materialId}/decline`,
@@ -2268,6 +2285,15 @@ export async function declineAdminSubjectSummaryCase(caseId: string, reason: str
 export async function declineAdminSubjectSummaryEntry(entryId: string, reason: string) {
   const response = await authenticatedHttp.post<{ success: true; data: { id: string; success: true } }>(
     `/api/v1/admin/approvals/subject-summary-entries/${entryId}/decline`,
+    { reason }
+  );
+
+  return response.data.data;
+}
+
+export async function declineAdminBarFinalExamQuestion(questionId: string, reason: string) {
+  const response = await authenticatedHttp.post<{ success: true; data: { id: string; success: true } }>(
+    `/api/v1/admin/approvals/bar-final-exam-questions/${questionId}/decline`,
     { reason }
   );
 
@@ -2326,6 +2352,23 @@ export async function updateAdminUserRoles(userId: string, roleCodes: string[]) 
   const response = await authenticatedHttp.patch<{ success: true; data: AdminUserDetail }>(
     `/api/v1/admin/users/${userId}/roles`,
     { roleCodes }
+  );
+
+  return response.data.data;
+}
+
+export async function updateAdminUserDeviceLimit(userId: string, payload: AdminUserDeviceLimitInput) {
+  const response = await authenticatedHttp.patch<{ success: true; data: AdminUserDetail }>(
+    `/api/v1/admin/users/${userId}/device-limit`,
+    payload
+  );
+
+  return response.data.data;
+}
+
+export async function resetAdminUserDevices(userId: string) {
+  const response = await authenticatedHttp.post<{ success: true; data: AdminUserDetail }>(
+    `/api/v1/admin/users/${userId}/devices/reset`
   );
 
   return response.data.data;

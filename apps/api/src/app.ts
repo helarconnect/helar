@@ -186,10 +186,13 @@ import {
   parseAdminCreateUserInput,
   parseAdminUserFilters,
   parseAdminUserMonthlyRegistrationsQuery,
+  parseAdminUserDeviceLimitInput,
   parseAdminUserPasswordInput,
   parseAdminUserProfileInput,
   parseAdminUserRolesInput,
   parseAdminUserStatusInput,
+  resetAdminUserDevices,
+  updateAdminUserDeviceLimitOverride,
   updateAdminUserPassword,
   updateAdminUserProfile,
   updateAdminUserRoles,
@@ -211,8 +214,10 @@ import {
 } from "./subscriptions.js";
 import {
   approveLibraryMaterial,
+  approveBarFinalExamQuestion,
   approveSubjectSummaryCase,
   approveSubjectSummaryEntry,
+  declineBarFinalExamQuestion,
   declineLibraryMaterial,
   declineSubjectSummaryCase,
   declineSubjectSummaryEntry,
@@ -602,9 +607,19 @@ class DeviceLimitError extends Error {
   code = "DEVICE_LIMIT_REACHED";
   statusCode = 403;
 
-  constructor(message = "You can only use Helar on up to 3 devices. Please continue on one of your existing devices or contact support for help.") {
-    super(message);
+  constructor(limit: number) {
+    super(
+      `You can only use Helar on up to ${limit} devices. Please continue on one of your existing devices or contact support for help.`
+    );
   }
+}
+
+function resolveAccountDeviceLimit(deviceLimitOverride: number | null | undefined) {
+  const overrideValue = Number.isFinite(deviceLimitOverride) ? Number(deviceLimitOverride) : NaN;
+  const normalizedOverride = Number.isInteger(overrideValue) ? overrideValue : NaN;
+  const limit = Number.isFinite(normalizedOverride) ? normalizedOverride : MAX_ACCOUNT_DEVICES;
+
+  return Math.max(1, limit);
 }
 
 function createDatabaseFallbackErrorMessage() {
@@ -650,8 +665,14 @@ async function registerUserDevice(
     }
   });
 
-  if (registeredDeviceCount >= MAX_ACCOUNT_DEVICES) {
-    throw new DeviceLimitError();
+  const user = await tx.user.findUnique({
+    where: { id: userId },
+    select: { deviceLimitOverride: true }
+  });
+  const deviceLimit = resolveAccountDeviceLimit(user?.deviceLimitOverride);
+
+  if (registeredDeviceCount >= deviceLimit) {
+    throw new DeviceLimitError(deviceLimit);
   }
 
   await tx.device.create({
@@ -1692,6 +1713,41 @@ export function createApp(options: AppOptions = {}) {
   );
 
   app.post(
+    "/api/v1/admin/approvals/bar-final-exam-questions/:questionId/approve",
+    authenticateRequest,
+    requireSuperAdminRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      try {
+        const data = await approveBarFinalExamQuestion(readRouteParam(request.params.questionId), request.auth!.userId);
+
+        if (!data) {
+          return response.status(404).json({
+            success: false,
+            error: {
+              code: "APPROVAL_TARGET_NOT_FOUND",
+              message: "The bar final exam question was not found or is no longer pending approval."
+            }
+          });
+        }
+
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "ADMIN_APPROVAL_FAILED",
+            message: "Could not approve the bar final exam question."
+          }
+        });
+      }
+    }
+  );
+
+  app.post(
     "/api/v1/admin/approvals/library-materials/:materialId/decline",
     authenticateRequest,
     requireSuperAdminRequest,
@@ -1829,6 +1885,58 @@ export function createApp(options: AppOptions = {}) {
           error: {
             code: "ADMIN_DECLINE_FAILED",
             message: "Could not decline the subject summary."
+          }
+        });
+      }
+    }
+  );
+
+  app.post(
+    "/api/v1/admin/approvals/bar-final-exam-questions/:questionId/decline",
+    authenticateRequest,
+    requireSuperAdminRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      try {
+        const parsed = declineApprovalSchema.safeParse(request.body);
+
+        if (!parsed.success) {
+          return response.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "A decline reason is required.",
+              details: parsed.error.flatten()
+            }
+          });
+        }
+
+        const data = await declineBarFinalExamQuestion(
+          readRouteParam(request.params.questionId),
+          request.auth!.userId,
+          parsed.data.reason
+        );
+
+        if (!data) {
+          return response.status(404).json({
+            success: false,
+            error: {
+              code: "APPROVAL_TARGET_NOT_FOUND",
+              message: "The bar final exam question was not found or is no longer pending approval."
+            }
+          });
+        }
+
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "ADMIN_DECLINE_FAILED",
+            message: "Could not decline the bar final exam question."
           }
         });
       }
@@ -3268,7 +3376,7 @@ export function createApp(options: AppOptions = {}) {
   );
 
   app.get(
-    "/api/v1/admin/bar-final-exams-mls-mcq/questions",
+    ["/api/v1/admin/bar-final-exams-nls-mcq/questions", "/api/v1/admin/bar-final-exams-mls-mcq/questions"],
     authenticateRequest,
     requireAdminRequest,
     async (request: AuthenticatedRequest, response: Response) => {
@@ -3315,7 +3423,7 @@ export function createApp(options: AppOptions = {}) {
   );
 
   app.get(
-    "/api/v1/admin/bar-final-exams-mls-mcq/form-options",
+    ["/api/v1/admin/bar-final-exams-nls-mcq/form-options", "/api/v1/admin/bar-final-exams-mls-mcq/form-options"],
     authenticateRequest,
     requireAdminRequest,
     async (_request: AuthenticatedRequest, response: Response) => {
@@ -3350,7 +3458,7 @@ export function createApp(options: AppOptions = {}) {
   );
 
   app.post(
-    "/api/v1/admin/bar-final-exams-mls-mcq/questions",
+    ["/api/v1/admin/bar-final-exams-nls-mcq/questions", "/api/v1/admin/bar-final-exams-mls-mcq/questions"],
     authenticateRequest,
     requireAdminRequest,
     async (request: AuthenticatedRequest, response: Response) => {
@@ -3366,7 +3474,7 @@ export function createApp(options: AppOptions = {}) {
 
       try {
         const payload = parseBarFinalExamQuestionInput(request.body);
-        const data = await createAdminBarFinalExamQuestion(payload, request.auth!.roleCodes);
+        const data = await createAdminBarFinalExamQuestion(payload, request.auth!.roleCodes, request.auth!.userId);
 
         return response.status(201).json({
           success: true,
@@ -3397,7 +3505,10 @@ export function createApp(options: AppOptions = {}) {
   );
 
   app.patch(
-    "/api/v1/admin/bar-final-exams-mls-mcq/questions/:questionId",
+    [
+      "/api/v1/admin/bar-final-exams-nls-mcq/questions/:questionId",
+      "/api/v1/admin/bar-final-exams-mls-mcq/questions/:questionId"
+    ],
     authenticateRequest,
     requireAdminRequest,
     async (request: AuthenticatedRequest, response: Response) => {
@@ -3416,7 +3527,8 @@ export function createApp(options: AppOptions = {}) {
         const data = await updateAdminBarFinalExamQuestion(
           String(request.params.questionId),
           payload,
-          request.auth!.roleCodes
+          request.auth!.roleCodes,
+          request.auth!.userId
         );
 
         return response.json({
@@ -3458,7 +3570,10 @@ export function createApp(options: AppOptions = {}) {
   );
 
   app.delete(
-    "/api/v1/admin/bar-final-exams-mls-mcq/questions/:questionId",
+    [
+      "/api/v1/admin/bar-final-exams-nls-mcq/questions/:questionId",
+      "/api/v1/admin/bar-final-exams-mls-mcq/questions/:questionId"
+    ],
     authenticateRequest,
     requireAdminRequest,
     async (request: AuthenticatedRequest, response: Response) => {
@@ -6034,7 +6149,7 @@ export function createApp(options: AppOptions = {}) {
   );
 
   app.get(
-    "/api/v1/library/bar-final-exams-mls-mcq/subjects",
+    ["/api/v1/library/bar-final-exams-nls-mcq/subjects", "/api/v1/library/bar-final-exams-mls-mcq/subjects"],
     authenticateRequest,
     async (request: AuthenticatedRequest, response: Response) => {
       if (!useDatabase) {
@@ -6080,7 +6195,7 @@ export function createApp(options: AppOptions = {}) {
   );
 
   app.get(
-    "/api/v1/library/bar-final-exams-mls-mcq/questions",
+    ["/api/v1/library/bar-final-exams-nls-mcq/questions", "/api/v1/library/bar-final-exams-mls-mcq/questions"],
     authenticateRequest,
     async (request: AuthenticatedRequest, response: Response) => {
       if (!useDatabase) {
@@ -7844,6 +7959,114 @@ export function createApp(options: AppOptions = {}) {
           error: {
             code: "ADMIN_USER_PASSWORD_UPDATE_FAILED",
             message: "Could not update the user password right now."
+          }
+        });
+      }
+    }
+  );
+
+  app.post(
+    "/api/v1/admin/users/:userId/devices/reset",
+    authenticateRequest,
+    requireAdminRequest,
+    requireSuperAdminRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required to reset user devices."
+          }
+        });
+      }
+
+      try {
+        const updatedUser = await resetAdminUserDevices(String(request.params.userId), request.auth!.userId);
+
+        if (!updatedUser) {
+          return response.status(404).json({
+            success: false,
+            error: {
+              code: "USER_NOT_FOUND",
+              message: "The requested user could not be found."
+            }
+          });
+        }
+
+        return response.json({
+          success: true,
+          data: updatedUser
+        });
+      } catch (error) {
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "ADMIN_USER_DEVICES_RESET_FAILED",
+            message: "Could not reset the user devices right now."
+          }
+        });
+      }
+    }
+  );
+
+  app.patch(
+    "/api/v1/admin/users/:userId/device-limit",
+    authenticateRequest,
+    requireAdminRequest,
+    requireSuperAdminRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required to update device limits."
+          }
+        });
+      }
+
+      try {
+        const parsed = parseAdminUserDeviceLimitInput(request.body);
+        const updatedUser = await updateAdminUserDeviceLimitOverride(
+          String(request.params.userId),
+          parsed,
+          request.auth!.userId
+        );
+
+        if (!updatedUser) {
+          return response.status(404).json({
+            success: false,
+            error: {
+              code: "USER_NOT_FOUND",
+              message: "The requested user could not be found."
+            }
+          });
+        }
+
+        return response.json({
+          success: true,
+          data: updatedUser
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return response.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "The device limit payload is invalid.",
+              details: error.flatten()
+            }
+          });
+        }
+
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "ADMIN_USER_DEVICE_LIMIT_UPDATE_FAILED",
+            message: "Could not update the device limit right now."
           }
         });
       }

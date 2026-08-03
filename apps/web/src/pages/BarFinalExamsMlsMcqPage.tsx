@@ -91,6 +91,29 @@ function stripHtml(value: string) {
     .trim();
 }
 
+function truncateWords(value: string, maxWords: number) {
+  const normalized = value.trim();
+  if (!normalized) {
+    return {
+      isTruncated: false,
+      text: ""
+    };
+  }
+
+  const words = normalized.split(/\s+/).filter(Boolean);
+  if (words.length <= maxWords) {
+    return {
+      isTruncated: false,
+      text: words.join(" ")
+    };
+  }
+
+  return {
+    isTruncated: true,
+    text: `${words.slice(0, maxWords).join(" ")}…`
+  };
+}
+
 function buildDefaultDraft(subjectId: string): BarFinalExamQuestionInput {
   return {
     answer: "",
@@ -169,6 +192,26 @@ export function AdminBarFinalExamsMlsMcqPage() {
     queryFn: () => fetchAdminBarFinalExamQuestions(filters)
   });
 
+  const countSubjectId = modalMode?.kind === "create" ? draft.subjectId : subjectId;
+  const questionCountQuery = useQuery({
+    enabled: Boolean(countSubjectId),
+    queryKey: queryKeys.adminBarFinalExamQuestions({
+      page: 1,
+      pageSize: 1,
+      search: "",
+      status: "all",
+      subjectId: countSubjectId || undefined
+    }),
+    queryFn: () =>
+      fetchAdminBarFinalExamQuestions({
+        page: 1,
+        pageSize: 1,
+        search: "",
+        status: "all",
+        subjectId: countSubjectId
+      })
+  });
+
   const createMutation = useMutation({
     mutationFn: () => createAdminBarFinalExamQuestion(draft),
     onSuccess: async () => {
@@ -208,8 +251,14 @@ export function AdminBarFinalExamsMlsMcqPage() {
 
   const subjects = formOptionsQuery.data?.subjects ?? [];
   const items = questionsQuery.data?.items ?? [];
+  const sortedItems = useMemo(
+    () => [...items].sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime()),
+    [items]
+  );
   const canSaveDraft = Boolean(draft.subjectId) && stripHtml(draft.question).length >= 2 && stripHtml(draft.answer).length >= 2;
   const canOpenCreate = !formOptionsQuery.isLoading && subjects.length > 0;
+  const nextQuestionNumber =
+    countSubjectId && modalMode?.kind === "create" ? (questionCountQuery.data?.pagination.totalItems ?? 0) + 1 : null;
 
   function openCreate() {
     setDraft(buildDefaultDraft(subjectId));
@@ -236,7 +285,7 @@ export function AdminBarFinalExamsMlsMcqPage() {
         <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-1">
             <h1 className={cn("text-xl font-semibold tracking-tight", isDark ? "text-white" : "text-slate-950")}>
-              Bar Final Exams MLS-MCQ (Q & A)
+              Bar Final Exams NLS-MCQ (Q & A)
             </h1>
             <p className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-600")}>
               Select a subject and upload questions with their answers.
@@ -318,7 +367,7 @@ export function AdminBarFinalExamsMlsMcqPage() {
               </div>
             ) : (
               <div className="space-y-3">
-                {items.map((item) => (
+                {sortedItems.map((item, index) => (
                   <div
                     className={cn(
                       "rounded-3xl border px-4 py-4",
@@ -334,6 +383,9 @@ export function AdminBarFinalExamsMlsMcqPage() {
                           </span>
                           <span className={cn("text-xs", isDark ? "text-slate-500" : "text-slate-500")}>{item.subject.name}</span>
                         </div>
+                        <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>
+                          Question {index + 1}
+                        </p>
                         <p className={cn("text-sm font-medium leading-relaxed", isDark ? "text-white" : "text-slate-950")}>{stripHtml(item.question)}</p>
                       </div>
 
@@ -400,6 +452,11 @@ export function AdminBarFinalExamsMlsMcqPage() {
 
             <div className="min-h-0 flex-1 overflow-y-auto p-5">
               <div className="grid gap-4">
+              {modalMode.kind === "create" && draft.subjectId && nextQuestionNumber ? (
+                <div className={cn("rounded-3xl border px-4 py-3 text-sm", isDark ? "border-slate-800 bg-slate-900 text-slate-200" : "border-slate-200 bg-slate-50 text-slate-700")}>
+                  This will be saved as <span className={cn("font-semibold", isDark ? "text-white" : "text-slate-950")}>Question {nextQuestionNumber}</span> for the selected subject.
+                </div>
+              ) : null}
               <label className="space-y-2">
                 <span className={cn("text-xs font-medium uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Subject</span>
                 <select
@@ -506,7 +563,7 @@ export function StudentBarFinalExamsMlsMcqPage() {
   const { isDark } = useTheme();
   const [search, setSearch] = useState("");
   const [selectedSubjectId, setSelectedSubjectId] = useState("");
-  const [openAnswerIds, setOpenAnswerIds] = useState<Record<string, boolean>>({});
+  const [expandedQuestionId, setExpandedQuestionId] = useState("");
   const [activeQuestionId, setActiveQuestionId] = useState("");
   const questionRefs = useRef(new Map<string, HTMLDivElement>());
 
@@ -554,17 +611,6 @@ export function StudentBarFinalExamsMlsMcqPage() {
     });
   }
 
-  function collapseAnswer(questionId: string) {
-    setOpenAnswerIds((current) => {
-      if (!current[questionId]) {
-        return current;
-      }
-      const next = { ...current };
-      delete next[questionId];
-      return next;
-    });
-  }
-
   function goToNextQuestion(currentQuestionId: string) {
     const currentIndex = questions.findIndex((item) => item.id === currentQuestionId);
     if (currentIndex === -1 || currentIndex >= questions.length - 1) {
@@ -572,17 +618,18 @@ export function StudentBarFinalExamsMlsMcqPage() {
     }
 
     const nextQuestionId = questions[currentIndex + 1].id;
-    collapseAnswer(currentQuestionId);
     setActiveQuestionId(nextQuestionId);
     scrollToQuestion(nextQuestionId);
   }
+
+  const expandedQuestion = expandedQuestionId ? questions.find((item) => item.id === expandedQuestionId) ?? null : null;
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-8">
       <div className="flex flex-col gap-6">
         <div className="space-y-1">
           <h1 className={cn("text-xl font-semibold tracking-tight", isDark ? "text-white" : "text-slate-950")}>
-            Bar Final Exams MLS-MCQ (Q & A)
+            Bar Final Exams NLS-MCQ (Q & A)
           </h1>
           <p className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-600")}>
             Choose a subject to reveal all available questions, then open the answer when you are ready.
@@ -633,7 +680,7 @@ export function StudentBarFinalExamsMlsMcqPage() {
                       key={subject.id}
                       onClick={() => {
                         setSelectedSubjectId(subject.id);
-                        setOpenAnswerIds({});
+                        setExpandedQuestionId("");
                       }}
                       type="button"
                     >
@@ -670,9 +717,8 @@ export function StudentBarFinalExamsMlsMcqPage() {
               </div>
 
               {questions.map((item, index) => {
-                const isAnswerOpen = Boolean(openAnswerIds[item.id]);
                 const isActive = item.id === activeQuestionId;
-                const isLastQuestion = questions[questions.length - 1]?.id === item.id;
+                const preview = truncateWords(stripHtml(item.question), 100);
 
                 return (
                   <div
@@ -696,69 +742,29 @@ export function StudentBarFinalExamsMlsMcqPage() {
                           <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>
                             Question {index + 1}
                           </p>
-                          <div
-                            className={cn("prose prose-sm max-w-none leading-7", isDark ? "prose-invert text-slate-200" : "text-slate-900")}
-                            dangerouslySetInnerHTML={{ __html: item.question }}
-                          />
+                          <p className={cn("text-sm leading-7", isDark ? "text-slate-200" : "text-slate-900")}>
+                            {preview.text}
+                          </p>
                         </div>
 
                         <div className="flex flex-wrap items-center justify-end gap-2">
-                          {isAnswerOpen ? (
-                            <button
-                              className={cn(
-                                "inline-flex items-center justify-center gap-2 rounded-2xl px-3 py-2 text-sm font-medium transition",
-                                isDark ? "bg-slate-900 text-slate-200 hover:bg-slate-800" : "bg-white text-slate-950 hover:bg-slate-100"
-                              )}
-                              onClick={() => collapseAnswer(item.id)}
-                              type="button"
-                            >
-                              <X className="h-4 w-4" />
-                              Collapse
-                            </button>
-                          ) : null}
-
                           <button
                             className={cn(
                               "inline-flex items-center justify-center gap-2 rounded-2xl px-3 py-2 text-sm font-medium transition",
-                              isAnswerOpen
-                                ? isDark
-                                  ? "bg-white text-slate-950 hover:bg-slate-100"
-                                  : "bg-slate-950 text-white hover:bg-slate-900"
-                                : isDark
-                                  ? "bg-slate-900 text-slate-200 hover:bg-slate-800"
-                                  : "bg-white text-slate-950 hover:bg-slate-100"
+                              isDark ? "bg-white text-slate-950 hover:bg-slate-100" : "bg-slate-950 text-white hover:bg-slate-900"
                             )}
                             onClick={() => {
                               setActiveQuestionId(item.id);
-                              setOpenAnswerIds((current) => ({ ...current, [item.id]: !current[item.id] }));
+                              setExpandedQuestionId(item.id);
                             }}
                             type="button"
                           >
                             <Eye className="h-4 w-4" />
-                            {isAnswerOpen ? "Hide answer" : "View answer"}
+                            View full question & answer
                           </button>
 
                         </div>
                       </div>
-
-                      {isAnswerOpen ? (
-                        <div
-                          className={cn(
-                            "rounded-3xl border p-4",
-                            isDark
-                              ? "border-emerald-500/25 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.18),transparent_45%),linear-gradient(180deg,rgba(15,23,42,0.55)_0%,rgba(2,6,23,0.75)_100%)] text-slate-100"
-                              : "border-emerald-200 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.12),transparent_45%),linear-gradient(180deg,#ffffff_0%,#f0fdf4_100%)] text-slate-800"
-                          )}
-                        >
-                          <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-emerald-200/90" : "text-emerald-700")}>
-                            Answer
-                          </p>
-                          <div
-                            className={cn("prose prose-sm mt-2 max-w-none leading-7", isDark ? "prose-invert text-slate-100" : "text-slate-800")}
-                            dangerouslySetInnerHTML={{ __html: item.answer }}
-                          />
-                        </div>
-                      ) : null}
                     </div>
                   </div>
                 );
@@ -766,6 +772,69 @@ export function StudentBarFinalExamsMlsMcqPage() {
             </div>
           )}
         </div>
+
+        {expandedQuestion ? (
+          <div className="fixed inset-0 z-[150] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/55" onClick={() => setExpandedQuestionId("")} />
+            <div
+              className={cn(
+                "relative w-full max-w-3xl overflow-hidden rounded-[32px] border",
+                isDark ? "border-slate-800 bg-slate-950" : "border-slate-200 bg-white"
+              )}
+              style={{ maxHeight: "86vh" }}
+            >
+              <div className={cn("flex items-start justify-between gap-4 border-b p-5", isDark ? "border-slate-800" : "border-slate-200")}>
+                <div className="space-y-1">
+                  <p className={cn("text-lg font-semibold", isDark ? "text-white" : "text-slate-950")}>Full question & answer</p>
+                  <p className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-600")}>
+                    {activeSubject?.name ?? "Subject"} • Question {questions.findIndex((item) => item.id === expandedQuestion.id) + 1}
+                  </p>
+                </div>
+                <button
+                  className={cn(
+                    "inline-flex h-10 w-10 items-center justify-center rounded-2xl border",
+                    isDark ? "border-slate-800 bg-slate-950/40 text-slate-200" : "border-slate-200 bg-white text-slate-700"
+                  )}
+                  onClick={() => setExpandedQuestionId("")}
+                  type="button"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="min-h-0 overflow-y-auto p-5">
+                <div className="space-y-5">
+                  <div>
+                    <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>
+                      Question
+                    </p>
+                    <div
+                      className={cn("prose prose-sm mt-2 max-w-none leading-7", isDark ? "prose-invert text-slate-200" : "text-slate-900")}
+                      dangerouslySetInnerHTML={{ __html: expandedQuestion.question }}
+                    />
+                  </div>
+
+                  <div
+                    className={cn(
+                      "rounded-3xl border p-4",
+                      isDark
+                        ? "border-emerald-500/25 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.18),transparent_45%),linear-gradient(180deg,rgba(15,23,42,0.55)_0%,rgba(2,6,23,0.75)_100%)] text-slate-100"
+                        : "border-emerald-200 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.12),transparent_45%),linear-gradient(180deg,#ffffff_0%,#f0fdf4_100%)] text-slate-800"
+                    )}
+                  >
+                    <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-emerald-200/90" : "text-emerald-700")}>
+                      Answer
+                    </p>
+                    <div
+                      className={cn("prose prose-sm mt-2 max-w-none leading-7", isDark ? "prose-invert text-slate-100" : "text-slate-800")}
+                      dangerouslySetInnerHTML={{ __html: expandedQuestion.answer }}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {typeof document !== "undefined" && selectedSubjectId && questions.length > 0
           ? createPortal(
@@ -779,12 +848,12 @@ export function StudentBarFinalExamsMlsMcqPage() {
                   )}
                   disabled={!activeQuestionId || questions[0]?.id === activeQuestionId}
                   onClick={() => {
+                    setExpandedQuestionId("");
                     const currentIndex = questions.findIndex((item) => item.id === activeQuestionId);
                     if (currentIndex <= 0) {
                       return;
                     }
                     const previousQuestionId = questions[currentIndex - 1].id;
-                    collapseAnswer(activeQuestionId);
                     setActiveQuestionId(previousQuestionId);
                     scrollToQuestion(previousQuestionId);
                   }}
@@ -801,7 +870,10 @@ export function StudentBarFinalExamsMlsMcqPage() {
                       : "border-slate-200 bg-slate-950 text-white hover:bg-slate-900"
                   )}
                   disabled={!activeQuestionId || questions[questions.length - 1]?.id === activeQuestionId}
-                  onClick={() => goToNextQuestion(activeQuestionId)}
+                  onClick={() => {
+                    setExpandedQuestionId("");
+                    goToNextQuestion(activeQuestionId);
+                  }}
                   title="Next question"
                   type="button"
                 >

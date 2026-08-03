@@ -14,7 +14,7 @@ import { useUiStore } from '@/store/ui-store'
 
 const studentPageTitles: Record<string, string> = {
   '/app/library/cases-and-ratios': 'Cases and Ratios',
-  '/app/bar-final-exams-mls-mcq': 'Bar Final Exams MLS-MCQ (Q & A)',
+  '/app/bar-final-exams-nls-mcq': 'Bar Final Exams NLS-MCQ (Q & A)',
   '/app/dashboard': 'Student Dashboard',
   '/app/library': 'Library',
   '/app/library/law-reports': 'Law Reports',
@@ -33,7 +33,7 @@ const adminPageTitles: Record<string, string> = {
   '/app/admin/library/subject-summaries/materials': 'Cases and Ratios Materials',
   '/app/admin/library/subject-summaries/subjects': 'Subject Summary Subjects',
   '/app/admin/library/subject-summaries/topics': 'Subject Summary Topics',
-  '/app/admin/bar-final-exams-mls-mcq': 'Bar Final Exams MLS-MCQ (Q & A)',
+  '/app/admin/bar-final-exams-nls-mcq': 'Bar Final Exams NLS-MCQ (Q & A)',
   '/app/admin/payments': 'Payments',
   '/app/admin/settings': 'Admin Settings',
   '/app/admin/users': 'User Management',

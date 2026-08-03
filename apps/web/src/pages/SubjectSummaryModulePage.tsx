@@ -615,7 +615,9 @@ function StudentSummaryCard({
     >
       <button className="flex w-full items-center justify-between gap-4 px-5 py-5 text-left" onClick={onToggle} type="button">
         <div className="min-w-0 flex-1">
-          <p className={cn("text-xs uppercase tracking-[0.22em]", isDark ? "text-slate-500" : "text-slate-400")}>Question {entry.orderLabel}</p>
+          <p className={cn("text-xs uppercase tracking-[0.22em]", isDark ? "text-slate-500" : "text-slate-400")}>
+            {entry.serialNumber ? `Serial ${entry.serialNumber}` : `Question ${entry.orderLabel}`}
+          </p>
           <h3 className={cn("mt-3 font-heading text-2xl leading-tight", isDark ? "text-white" : "text-slate-950")}>{entry.question}</h3>
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <span className={cn("rounded-full border px-3 py-1.5 text-xs font-medium uppercase tracking-[0.12em]", difficulty.tone)}>
@@ -1357,6 +1359,11 @@ export function AdminSubjectSummaryModulePage() {
                       <span className={cn("rounded-full border px-3 py-1.5 text-xs uppercase tracking-[0.12em]", difficultyMeta[entry.difficulty].tone)}>
                         {difficultyMeta[entry.difficulty].badge}
                       </span>
+                      {entry.serialNumber ? (
+                        <span className={cn("rounded-full border px-3 py-1.5 text-xs uppercase tracking-[0.12em]", isDark ? "border-slate-700 bg-slate-900 text-slate-300" : "border-slate-200 bg-white text-slate-600")}>
+                          {entry.serialNumber}
+                        </span>
+                      ) : null}
                       <span className={cn("rounded-full border px-3 py-1.5 text-xs uppercase tracking-[0.12em]", isDark ? "border-slate-700 bg-slate-900 text-slate-300" : "border-slate-200 bg-white text-slate-600")}>
                         {entry.status}
                       </span>

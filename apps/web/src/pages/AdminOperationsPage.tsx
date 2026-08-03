@@ -1,5 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowRight, BriefcaseBusiness, CheckCheck, Download, FileClock, GraduationCap, LibraryBig, RefreshCw, Search, ShieldCheck, Sparkles } from 'lucide-react'
+import {
+  ArrowRight,
+  BriefcaseBusiness,
+  CheckCheck,
+  ClipboardList,
+  Download,
+  FileClock,
+  GraduationCap,
+  LibraryBig,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  Sparkles,
+} from 'lucide-react'
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 
@@ -8,9 +21,11 @@ import { useTheme } from '@/hooks/useTheme'
 import {
   activateAdminSubscriptionManually,
   approveAdminLibraryMaterial,
+  approveAdminBarFinalExamQuestion,
   approveAdminSubjectSummaryCase,
   approveAdminSubjectSummaryEntry,
   declineAdminLibraryMaterial,
+  declineAdminBarFinalExamQuestion,
   declineAdminSubjectSummaryCase,
   declineAdminSubjectSummaryEntry,
   fetchAdminBillingSnapshot,
@@ -257,7 +272,7 @@ export function AdminContentPage() {
     id: string
     resourceId: string
     title: string
-    type: 'library_material' | 'subject_summary_case' | 'subject_summary_entry'
+    type: 'library_material' | 'subject_summary_case' | 'subject_summary_entry' | 'bar_final_exam_question'
   }>(null)
   const [declineReason, setDeclineReason] = useState('')
   const contentReviewQuery = useQuery({
@@ -267,13 +282,17 @@ export function AdminContentPage() {
   })
 
   const approveMutation = useMutation({
-    mutationFn: async (item: { id: string; resourceId: string; type: 'library_material' | 'subject_summary_case' | 'subject_summary_entry' }) => {
+    mutationFn: async (item: { id: string; resourceId: string; type: 'library_material' | 'subject_summary_case' | 'subject_summary_entry' | 'bar_final_exam_question' }) => {
       if (item.type === 'library_material') {
         return approveAdminLibraryMaterial(item.resourceId)
       }
 
       if (item.type === 'subject_summary_case') {
         return approveAdminSubjectSummaryCase(item.resourceId)
+      }
+
+      if (item.type === 'bar_final_exam_question') {
+        return approveAdminBarFinalExamQuestion(item.resourceId)
       }
 
       return approveAdminSubjectSummaryEntry(item.resourceId)
@@ -285,18 +304,23 @@ export function AdminContentPage() {
         queryClient.invalidateQueries({ queryKey: ['admin-library'] }),
         queryClient.invalidateQueries({ queryKey: ['subject-summary-cases'] }),
         queryClient.invalidateQueries({ queryKey: ['subject-summary-module-admin-entries'] }),
+        queryClient.invalidateQueries({ queryKey: ['admin-bar-final-exam-questions'] }),
       ])
     },
   })
 
   const declineMutation = useMutation({
-    mutationFn: async (item: { id: string; reason: string; resourceId: string; type: 'library_material' | 'subject_summary_case' | 'subject_summary_entry' }) => {
+    mutationFn: async (item: { id: string; reason: string; resourceId: string; type: 'library_material' | 'subject_summary_case' | 'subject_summary_entry' | 'bar_final_exam_question' }) => {
       if (item.type === 'library_material') {
         return declineAdminLibraryMaterial(item.resourceId, item.reason)
       }
 
       if (item.type === 'subject_summary_case') {
         return declineAdminSubjectSummaryCase(item.resourceId, item.reason)
+      }
+
+      if (item.type === 'bar_final_exam_question') {
+        return declineAdminBarFinalExamQuestion(item.resourceId, item.reason)
       }
 
       return declineAdminSubjectSummaryEntry(item.resourceId, item.reason)
@@ -310,6 +334,7 @@ export function AdminContentPage() {
         queryClient.invalidateQueries({ queryKey: ['admin-library'] }),
         queryClient.invalidateQueries({ queryKey: ['subject-summary-cases'] }),
         queryClient.invalidateQueries({ queryKey: ['subject-summary-module-admin-entries'] }),
+        queryClient.invalidateQueries({ queryKey: ['admin-bar-final-exam-questions'] }),
       ])
     },
   })
@@ -322,7 +347,7 @@ export function AdminContentPage() {
     id: string
     resourceId: string
     title: string
-    type: 'library_material' | 'subject_summary_case' | 'subject_summary_entry'
+    type: 'library_material' | 'subject_summary_case' | 'subject_summary_entry' | 'bar_final_exam_question'
   }) {
     setDeclineTarget(item)
     setDeclineReason('')
@@ -344,6 +369,7 @@ export function AdminContentPage() {
     library_material: LibraryBig,
     subject_summary_case: GraduationCap,
     subject_summary_entry: FileClock,
+    bar_final_exam_question: ClipboardList,
   } as const
 
   if (!isSuperAdminWorkspace) {

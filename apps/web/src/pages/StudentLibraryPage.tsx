@@ -350,7 +350,7 @@ export function StudentLawReportsPage() {
                     <>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className={cn("inline-flex rounded-full border px-3 py-1 text-xs uppercase tracking-[0.16em]", isDark ? "border-slate-700 bg-slate-950 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600")}>
-                    {material.reportNumber ?? "Law report"}
+                    {material.reportNumber ? `Case No: ${material.reportNumber}` : "Case number pending"}
                   </span>
                   <span className={cn("inline-flex rounded-full border px-3 py-1 text-xs", isDark ? "border-slate-700 bg-slate-950 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600")}>
                     {material.estimatedMins ? `${material.estimatedMins} min read` : "Read time pending"}

@@ -59,6 +59,10 @@ const adminUserPasswordSchema = z.object({
   password: z.string().trim().min(8).max(120)
 });
 
+const adminUserDeviceLimitSchema = z.object({
+  deviceLimitOverride: z.union([z.coerce.number().int().min(1).max(20), z.null()])
+});
+
 const adminUserMonthlyRegistrationsSchema = z.object({
   year: z.coerce.number().int().min(2000).max(2100).optional()
 });
@@ -79,6 +83,7 @@ export type AdminUserRolesInput = z.infer<typeof adminUserRolesSchema>;
 export type AdminUserProfileInput = z.infer<typeof adminUserProfileSchema>;
 export type AdminCreateUserInput = z.infer<typeof adminCreateUserSchema>;
 export type AdminUserPasswordInput = z.infer<typeof adminUserPasswordSchema>;
+export type AdminUserDeviceLimitInput = z.infer<typeof adminUserDeviceLimitSchema>;
 export type AdminUserMonthlyRegistrationsQuery = z.infer<typeof adminUserMonthlyRegistrationsSchema>;
 
 type QueryValue = string | string[] | undefined;
@@ -477,10 +482,22 @@ export function parseAdminUserPasswordInput(body: unknown) {
   return adminUserPasswordSchema.parse(body);
 }
 
+export function parseAdminUserDeviceLimitInput(body: unknown) {
+  return adminUserDeviceLimitSchema.parse(body);
+}
+
 export function parseAdminUserMonthlyRegistrationsQuery(query: Record<string, QueryValue>) {
   return adminUserMonthlyRegistrationsSchema.parse({
     year: readQueryValue(query.year)
   });
+}
+
+function resolveDeviceLimit(deviceLimitOverride: number | null | undefined) {
+  const overrideValue = Number.isFinite(deviceLimitOverride) ? Number(deviceLimitOverride) : NaN;
+  const normalizedOverride = Number.isInteger(overrideValue) ? overrideValue : NaN;
+  const limit = Number.isFinite(normalizedOverride) ? normalizedOverride : 3;
+
+  return Math.max(1, limit);
 }
 
 export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: string[]) {
@@ -1025,6 +1042,8 @@ export async function getAdminUserDetail(userId: string) {
     avatarUrl: user.avatarUrl,
     status: user.status,
     twoFactorEnabled: user.twoFactorEnabled,
+    deviceLimitOverride: user.deviceLimitOverride ?? null,
+    deviceLimit: resolveDeviceLimit(user.deviceLimitOverride),
     emailVerifiedAt: user.emailVerifiedAt?.toISOString() ?? null,
     createdAt: user.createdAt.toISOString(),
     updatedAt: user.updatedAt.toISOString(),
@@ -1128,6 +1147,101 @@ export async function getAdminUserDetail(userId: string) {
       }))
     ].sort((left, right) => (left.createdAt < right.createdAt ? 1 : -1))
   };
+}
+
+export async function updateAdminUserDeviceLimitOverride(
+  userId: string,
+  input: AdminUserDeviceLimitInput,
+  actorUserId: string
+) {
+  const updated = await runInTransaction(async (tx) => {
+    const user = await tx.user.findFirst({
+      where: {
+        deletedAt: null,
+        id: userId
+      },
+      select: {
+        id: true
+      }
+    });
+
+    if (!user) {
+      return null;
+    }
+
+    await tx.user.update({
+      where: {
+        id: user.id
+      },
+      data: {
+        deviceLimitOverride: input.deviceLimitOverride
+      }
+    });
+
+    await tx.auditLog.create({
+      data: {
+        action: "admin.user.device_limit_override.updated",
+        payload: input,
+        resource: user.id,
+        userId: actorUserId
+      }
+    });
+
+    return user.id;
+  });
+
+  if (!updated) {
+    return null;
+  }
+
+  return getAdminUserDetail(userId);
+}
+
+export async function resetAdminUserDevices(userId: string, actorUserId: string) {
+  const updated = await runInTransaction(async (tx) => {
+    const user = await tx.user.findFirst({
+      where: {
+        deletedAt: null,
+        id: userId
+      },
+      select: {
+        id: true
+      }
+    });
+
+    if (!user) {
+      return null;
+    }
+
+    await tx.device.updateMany({
+      where: {
+        deletedAt: null,
+        userId: user.id
+      },
+      data: {
+        deletedAt: new Date()
+      }
+    });
+
+    await revokeUserSessions(tx, user.id);
+
+    await tx.auditLog.create({
+      data: {
+        action: "admin.user.devices.reset",
+        payload: {},
+        resource: user.id,
+        userId: actorUserId
+      }
+    });
+
+    return user.id;
+  });
+
+  if (!updated) {
+    return null;
+  }
+
+  return getAdminUserDetail(userId);
 }
 
 export async function exportAdminUsersCsv(filters: AdminUserFilters) {

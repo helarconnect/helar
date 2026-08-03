@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
+  approveAdminBarFinalExamQuestion,
   approveAdminLibraryMaterial,
   approveAdminSubjectSummaryCase,
   approveAdminSubjectSummaryEntry,
@@ -55,6 +56,10 @@ export function AdminNotificationBell({ isDark, isSuperAdminWorkspace }: { isDar
         return approveAdminSubjectSummaryCase(item.resourceId);
       }
 
+      if (item.type === "bar_final_exam_question") {
+        return approveAdminBarFinalExamQuestion(item.resourceId);
+      }
+
       return approveAdminSubjectSummaryEntry(item.resourceId);
     },
     onSuccess: async () => {
@@ -63,7 +68,8 @@ export function AdminNotificationBell({ isDark, isSuperAdminWorkspace }: { isDar
         queryClient.invalidateQueries({ queryKey: queryKeys.adminNotifications }),
         queryClient.invalidateQueries({ queryKey: ["admin-library"] }),
         queryClient.invalidateQueries({ queryKey: ["subject-summary-cases"] }),
-        queryClient.invalidateQueries({ queryKey: ["subject-summary-module-admin-entries"] })
+        queryClient.invalidateQueries({ queryKey: ["subject-summary-module-admin-entries"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin-bar-final-exam-questions"] })
       ]);
     }
   });

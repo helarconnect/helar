@@ -157,6 +157,7 @@ model User {
   emailVerifiedAt  DateTime?
   sessionsRevokedAt DateTime?
   twoFactorEnabled Boolean       @default(false)
+  deviceLimitOverride Int?
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
   deletedAt        DateTime?
@@ -1077,6 +1078,7 @@ model SubjectSummaryEntry {
   subjectId            String                   @db.ObjectId
   moduleType           SubjectSummaryModuleType @default(FACULTY)
   topic                String?
+  serialNumber         String?
   question             String
   answer               String
   keyPrinciple         String?
@@ -1101,16 +1103,27 @@ model SubjectSummaryEntry {
   @@index([deletedAt])
 }
 
+model SubjectSummarySerialCounter {
+  id         String                  @id @default(auto()) @map("_id") @db.ObjectId
+  moduleType SubjectSummaryModuleType @unique
+  value      Int                     @default(0)
+  createdAt  DateTime                @default(now())
+  updatedAt  DateTime                @updatedAt
+}
+
 model BarFinalExamQuestion {
-  id        String                   @id @default(auto()) @map("_id") @db.ObjectId
-  subjectId String                   @db.ObjectId
-  question  String
-  answer    String
-  status    BarFinalExamQuestionStatus @default(DRAFT)
-  createdAt DateTime                 @default(now())
-  updatedAt DateTime                 @updatedAt
-  deletedAt DateTime?
-  subject   SubjectSummarySubject    @relation(fields: [subjectId], references: [id])
+  id             String                    @id @default(auto()) @map("_id") @db.ObjectId
+  subjectId      String                    @db.ObjectId
+  question       String
+  answer         String
+  status         BarFinalExamQuestionStatus @default(DRAFT)
+  reviewFeedback String?
+  approvedAt     DateTime?
+  approvedBy     String?                   @db.ObjectId
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+  deletedAt      DateTime?
+  subject        SubjectSummarySubject     @relation(fields: [subjectId], references: [id])
 
   @@index([subjectId, createdAt])
   @@index([status])

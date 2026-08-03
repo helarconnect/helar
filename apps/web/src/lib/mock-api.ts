@@ -31,7 +31,7 @@ export const trustSignals = ['Axiom Legal Academy', 'Blackwell School of Law', '
 const studentDashboardNav: NavItem[] = [
   { href: '/app/dashboard', icon: Scale, label: 'Dashboard' },
   { href: '/app/library', icon: BookOpenText, label: 'Library' },
-  { href: '/app/bar-final-exams-mls-mcq', icon: ClipboardList, label: 'Bar Final Exams MLS-MCQ (Q & A)' },
+  { href: '/app/bar-final-exams-nls-mcq', icon: ClipboardList, label: 'Bar Final Exams NLS-MCQ (Q & A)' },
   { href: '/app/cbt', icon: CheckSquare, label: 'CBT / Assessments' },
   { href: '/connect?from=dashboard', icon: MessageSquareMore, label: 'Helar Connect' },
   { href: '/app/subscription', icon: ShieldCheck, label: 'Subscription' },
@@ -40,7 +40,7 @@ const studentDashboardNav: NavItem[] = [
 const adminDashboardNav: NavItem[] = [
   { href: '/app/dashboard', icon: Scale, label: 'Admin Overview' },
   { href: '/app/admin/users', icon: Users2, label: 'Users' },
-  { href: '/app/admin/bar-final-exams-mls-mcq', icon: ClipboardList, label: 'Bar Final Exams MLS-MCQ (Q & A)' },
+  { href: '/app/admin/bar-final-exams-nls-mcq', icon: ClipboardList, label: 'Bar Final Exams NLS-MCQ (Q & A)' },
   { href: '/app/admin/cbt', icon: CheckSquare, label: 'CBT Management' },
   { href: '/app/admin/content', icon: GraduationCap, label: 'Content Review' },
   { href: '/app/admin/payments', icon: CreditCard, label: 'Payments' },

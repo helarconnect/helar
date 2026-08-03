@@ -1,10 +1,15 @@
 import type { Prisma } from "@prisma/client";
-import { ContentPublicationStatus, SubjectSummaryCaseStatus } from "@prisma/client";
+import { BarFinalExamQuestionStatus, ContentPublicationStatus, SubjectSummaryCaseStatus } from "@prisma/client";
 
 import { prisma } from "./lib/prisma.js";
 import { runInTransaction } from "./lib/transactions.js";
 
-export type AdminNotificationItemType = "library_material" | "subject_summary_case" | "subject_summary_entry" | "user_notification";
+export type AdminNotificationItemType =
+  | "library_material"
+  | "subject_summary_case"
+  | "subject_summary_entry"
+  | "bar_final_exam_question"
+  | "user_notification";
 
 export type AdminNotificationCenterItem = {
   actionPath: string;
@@ -36,6 +41,7 @@ export type AdminApprovalQueueSnapshot = {
   items: AdminApprovalQueueItem[];
   summary: {
     itemsSubmittedToday: number;
+    barFinalExamQuestions: number;
     libraryMaterials: number;
     oldestPendingHours: number;
     subjectSummaryCases: number;
@@ -175,7 +181,7 @@ async function findLatestContentAdminActorDetails(resourceId: string, actions: s
 }
 
 async function listPendingApprovalItems() {
-  const [pendingLibraryMaterials, pendingCases, pendingEntries] = await Promise.all([
+  const [pendingLibraryMaterials, pendingCases, pendingEntries, pendingBarFinalExamQuestions] = await Promise.all([
     prisma.studyMaterial.findMany({
       where: {
         deletedAt: null,
@@ -240,6 +246,26 @@ async function listPendingApprovalItems() {
         },
         updatedAt: true
       }
+    }),
+    prisma.barFinalExamQuestion.findMany({
+      where: {
+        deletedAt: null,
+        status: BarFinalExamQuestionStatus.PENDING_APPROVAL
+      },
+      orderBy: {
+        updatedAt: "desc"
+      },
+      take: 8,
+      select: {
+        id: true,
+        question: true,
+        subject: {
+          select: {
+            name: true
+          }
+        },
+        updatedAt: true
+      }
     })
   ]);
 
@@ -273,12 +299,22 @@ async function listPendingApprovalItems() {
       resourceId: item.id,
       title: item.question,
       type: "subject_summary_entry"
+    })),
+    ...pendingBarFinalExamQuestions.map<AdminNotificationCenterItem>((item) => ({
+      actionPath: "/app/admin/bar-final-exams-nls-mcq",
+      body: `${item.subject.name} bar final exam question is waiting for approval.`,
+      canApprove: true,
+      createdAt: item.updatedAt.toISOString(),
+      id: `bar-final-exam-question-${item.id}`,
+      resourceId: item.id,
+      title: item.question,
+      type: "bar_final_exam_question"
     }))
   ].sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
 }
 
 export async function getSuperAdminApprovalQueue(): Promise<AdminApprovalQueueSnapshot> {
-  const [pendingLibraryMaterials, pendingCases, pendingEntries] = await Promise.all([
+  const [pendingLibraryMaterials, pendingCases, pendingEntries, pendingBarFinalExamQuestions] = await Promise.all([
     prisma.studyMaterial.findMany({
       where: {
         deletedAt: null,
@@ -327,6 +363,25 @@ export async function getSuperAdminApprovalQueue(): Promise<AdminApprovalQueueSn
       where: {
         deletedAt: null,
         status: SubjectSummaryCaseStatus.PENDING_APPROVAL
+      },
+      orderBy: {
+        updatedAt: "desc"
+      },
+      select: {
+        id: true,
+        question: true,
+        subject: {
+          select: {
+            name: true
+          }
+        },
+        updatedAt: true
+      }
+    }),
+    prisma.barFinalExamQuestion.findMany({
+      where: {
+        deletedAt: null,
+        status: BarFinalExamQuestionStatus.PENDING_APPROVAL
       },
       orderBy: {
         updatedAt: "desc"
@@ -410,7 +465,31 @@ export async function getSuperAdminApprovalQueue(): Promise<AdminApprovalQueueSn
     })
   );
 
-  const items = [...libraryItems, ...caseItems, ...entryItems].sort(
+  const barFinalExamItems = await Promise.all(
+    pendingBarFinalExamQuestions.map(async (item): Promise<AdminApprovalQueueItem> => {
+      const actor = await findLatestContentAdminActorDetails(item.id, [
+        "admin.bar-final-exams.question.created",
+        "admin.bar-final-exams.question.updated"
+      ]);
+
+      return {
+        actionPath: "/app/admin/bar-final-exams-nls-mcq",
+        contentTypeLabel: "Bar Final Exam Question",
+        createdAt: (actor.createdAt ?? item.updatedAt).toISOString(),
+        editPath: "/app/admin/bar-final-exams-nls-mcq",
+        id: `bar-final-exam-question-${item.id}`,
+        reviewPath: "/app/admin/bar-final-exams-nls-mcq",
+        resourceId: item.id,
+        submittedBy: actor.fullName,
+        submittedRoleLabel: "Content Admin",
+        subtitle: `${item.subject.name} bar final exams`,
+        title: item.question,
+        type: "bar_final_exam_question"
+      };
+    })
+  );
+
+  const items = [...libraryItems, ...caseItems, ...entryItems, ...barFinalExamItems].sort(
     (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
   );
 
@@ -422,6 +501,7 @@ export async function getSuperAdminApprovalQueue(): Promise<AdminApprovalQueueSn
     items,
     summary: {
       itemsSubmittedToday: items.filter((item) => new Date(item.createdAt).getTime() >= startOfToday.getTime()).length,
+      barFinalExamQuestions: barFinalExamItems.length,
       libraryMaterials: libraryItems.length,
       oldestPendingHours: items.length
         ? Math.max(1, Math.round((now - Math.min(...items.map((item) => new Date(item.createdAt).getTime()))) / (1000 * 60 * 60)))
@@ -725,6 +805,84 @@ export async function declineSubjectSummaryEntry(entryId: string, reason: string
         data: {
           reviewFeedback: reason,
           status: SubjectSummaryCaseStatus.DRAFT
+        }
+      });
+    }
+  });
+}
+
+export async function approveBarFinalExamQuestion(questionId: string, approverUserId: string) {
+  return runApprovalMutation<{ id: string; question: string }>({
+    buildNotification: (item) => ({
+      body: `Your bar final exam question "${item.question}" was approved by the super admin and is now published.`,
+      title: "Bar final exam approved"
+    }),
+    createResult: (item) => ({
+      id: item.id,
+      success: true as const
+    }),
+    loadPendingItem: (tx) =>
+      tx.barFinalExamQuestion.findFirst({
+        where: {
+          deletedAt: null,
+          id: questionId,
+          status: BarFinalExamQuestionStatus.PENDING_APPROVAL
+        },
+        select: {
+          id: true,
+          question: true
+        }
+      }),
+    notificationActions: ["admin.bar-final-exams.question.created", "admin.bar-final-exams.question.updated"],
+    updatePendingItem: async (tx, item) => {
+      await tx.barFinalExamQuestion.update({
+        where: {
+          id: item.id
+        },
+        data: {
+          approvedAt: new Date(),
+          approvedBy: approverUserId,
+          reviewFeedback: null,
+          status: BarFinalExamQuestionStatus.PUBLISHED
+        }
+      });
+    }
+  });
+}
+
+export async function declineBarFinalExamQuestion(questionId: string, approverUserId: string, reason: string) {
+  return runApprovalMutation<{ id: string; question: string }>({
+    buildNotification: (item) => ({
+      body: `Your bar final exam question "${item.question}" was returned for revision by the super admin. Reason: ${reason}`,
+      title: "Bar final exam declined"
+    }),
+    createResult: (item) => ({
+      id: item.id,
+      success: true as const
+    }),
+    loadPendingItem: (tx) =>
+      tx.barFinalExamQuestion.findFirst({
+        where: {
+          deletedAt: null,
+          id: questionId,
+          status: BarFinalExamQuestionStatus.PENDING_APPROVAL
+        },
+        select: {
+          id: true,
+          question: true
+        }
+      }),
+    notificationActions: ["admin.bar-final-exams.question.created", "admin.bar-final-exams.question.updated"],
+    updatePendingItem: async (tx, item) => {
+      await tx.barFinalExamQuestion.update({
+        where: {
+          id: item.id
+        },
+        data: {
+          approvedAt: null,
+          approvedBy: null,
+          reviewFeedback: reason,
+          status: BarFinalExamQuestionStatus.DRAFT
         }
       });
     }

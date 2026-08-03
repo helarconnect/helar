@@ -237,7 +237,7 @@ function buildSearchResults(query: string, report: {
     ...findSectionMatches("title", "Title", report.title, query),
     ...findSectionMatches("court", "Court", prettifyCourt(report.materialType), query),
     ...findSectionMatches("date", "Date", formatDate(report.reportDate), query),
-    ...findSectionMatches("report-number", "Report Number", report.reportNumber ?? "Pending assignment", query),
+    ...findSectionMatches("report-number", "Case Number", report.reportNumber ?? "Pending assignment", query),
     ...findSectionMatches("suit-number", "Suit Number", report.storageUrl, query),
     ...findSectionMatches("summary", "Summary", stripHtml(report.summary), query),
     ...findSectionMatches("body", "Body", stripHtml(report.body), query)
@@ -950,7 +950,7 @@ export function AdminLawReportReader() {
         </div>
         <div className="flex flex-wrap gap-2">
           {[
-            report.reportNumber ?? "Pending report number",
+            report.reportNumber ?? "Pending case number",
             prettifyCourt(report.materialType),
             report.estimatedMins ? `${report.estimatedMins} min read` : "Reading time pending"
           ].map((item) => (
@@ -971,12 +971,14 @@ export function AdminLawReportReader() {
         <div className="space-y-6 xl:h-full xl:min-h-0 xl:overflow-y-auto xl:pr-2" ref={contentScrollRef}>
           <Surface className="p-6 lg:p-7" isDark={isDark}>
             <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4" ref={overviewRef}>
-              {[
-                { icon: Scale, label: "Court", value: prettifyCourt(report.materialType) },
-                { icon: CalendarDays, label: "Date", value: formatDate(report.reportDate) },
-                { icon: FileSearch, label: "Report Number", value: report.reportNumber ?? "Pending assignment" },
-                { icon: FileSearch, label: "Suit Number", value: report.storageUrl }
-              ].map((item) => {
+              {(
+                [
+                  { icon: Scale, id: "court", label: "Court", value: prettifyCourt(report.materialType) },
+                  { icon: CalendarDays, id: "date", label: "Date", value: formatDate(report.reportDate) },
+                  { icon: FileSearch, id: "report-number", label: "Case Number", value: report.reportNumber ?? "Pending assignment" },
+                  { icon: FileSearch, id: "suit-number", label: "Suit Number", value: report.storageUrl }
+                ] as const
+              ).map((item) => {
                 const Icon = item.icon;
 
                 return (
@@ -996,13 +998,7 @@ export function AdminLawReportReader() {
                         item.value,
                         searchTerm,
                         highlightClassName,
-                        item.label === "Court"
-                          ? "court"
-                          : item.label === "Date"
-                            ? "date"
-                            : item.label === "Report Number"
-                              ? "report-number"
-                              : "suit-number"
+                        item.id
                       )}
                     </p>
                   </div>

@@ -28,6 +28,7 @@ import {
   deleteSubjectSummaryCase,
   deleteSubjectSummarySubject,
   deleteSubjectSummaryTopic,
+  fetchSubjectSummaryCaseDetail,
   fetchSubjectSummaryCases,
   fetchSubjectSummaryHierarchy,
   fetchSubjectSummaryHierarchyCases,
@@ -439,7 +440,7 @@ function IconButton({
 }: {
   children: ReactNode;
   isDark: boolean;
-  onClick?: () => void;
+  onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;
   title: string;
 }) {
   return (
@@ -997,12 +998,20 @@ type HierarchyTopicSelection = {
 function HierarchyTopicItem({
   isDark,
   onAddCase,
+  onDeleteCase,
+  onDeleteTopic,
+  onEditCase,
+  onEditTopic,
   onSelectTopic,
   selectedTopicId,
   topic
 }: {
   isDark: boolean;
   onAddCase: (selection: HierarchyTopicSelection) => void;
+  onDeleteCase: (caseId: string) => void;
+  onDeleteTopic: (topic: SubjectSummaryTopic) => void;
+  onEditCase: (caseId: string) => void;
+  onEditTopic: (topic: SubjectSummaryTopic) => void;
   onSelectTopic: (selection: HierarchyTopicSelection) => void;
   selectedTopicId: string | null;
   topic: SubjectSummaryTopic & { hasCases: boolean };
@@ -1052,6 +1061,28 @@ function HierarchyTopicItem({
         <div className="flex items-center gap-3">
           <StatusBadge isDark={isDark} value={topic.status} />
           <span className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-500")}>{topic.caseCount} cases</span>
+          <div className="flex items-center gap-2">
+            <IconButton
+              isDark={isDark}
+              onClick={(event) => {
+                event.stopPropagation();
+                onEditTopic(topic);
+              }}
+              title="Edit topic"
+            >
+              <Pencil className="h-4 w-4" />
+            </IconButton>
+            <IconButton
+              isDark={isDark}
+              onClick={(event) => {
+                event.stopPropagation();
+                onDeleteTopic(topic);
+              }}
+              title="Delete topic"
+            >
+              <Trash2 className="h-4 w-4" />
+            </IconButton>
+          </div>
         </div>
       </button>
       {isExpanded ? (
@@ -1075,19 +1106,47 @@ function HierarchyTopicItem({
           ) : casesQuery.data?.items.length ? (
             <div className="space-y-3">
               {casesQuery.data.items.map((item) => (
-                <Link
-                  className={cn("block rounded-[20px] border px-4 py-3 transition", isDark ? "border-slate-800 bg-slate-950 hover:border-slate-700" : "border-slate-200 bg-slate-50 hover:border-slate-300")}
+                <div
+                  className={cn(
+                    "flex items-center justify-between gap-3 rounded-[20px] border px-4 py-3",
+                    isDark ? "border-slate-800 bg-slate-950" : "border-slate-200 bg-slate-50"
+                  )}
                   key={item.id}
-                  to={`/app/admin/library/subject-summaries/cases/${item.id}`}
                 >
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className={cn("font-medium", isDark ? "text-white" : "text-slate-950")}>{item.title}</p>
-                      <p className={cn("mt-1 text-sm", isDark ? "text-slate-400" : "text-slate-600")}>{item.citation || item.court || "No citation yet."}</p>
+                  <Link
+                    className={cn(
+                      "flex-1 rounded-[16px] pr-3 transition",
+                      isDark ? "hover:text-white" : "hover:text-slate-950"
+                    )}
+                    to={`/app/admin/library/subject-summaries/cases/${item.id}`}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className={cn("font-medium", isDark ? "text-white" : "text-slate-950")}>{item.title}</p>
+                        <p className={cn("mt-1 text-sm", isDark ? "text-slate-400" : "text-slate-600")}>
+                          {item.citation || item.court || "No citation yet."}
+                        </p>
+                      </div>
+                      <StatusBadge isDark={isDark} value={item.status} />
                     </div>
-                    <StatusBadge isDark={isDark} value={item.status} />
+                  </Link>
+                  <div className="flex items-center gap-2">
+                    <IconButton
+                      isDark={isDark}
+                      onClick={() => onEditCase(item.id)}
+                      title="Edit case"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </IconButton>
+                    <IconButton
+                      isDark={isDark}
+                      onClick={() => onDeleteCase(item.id)}
+                      title="Delete case"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </IconButton>
                   </div>
-                </Link>
+                </div>
               ))}
             </div>
           ) : (
@@ -1102,12 +1161,26 @@ function HierarchyTopicItem({
 function HierarchySubjectItem({
   isDark,
   onAddCase,
+  onAddTopic,
+  onDeleteSubject,
+  onDeleteTopic,
+  onEditSubject,
+  onEditTopic,
+  onEditCase,
+  onDeleteCase,
   onSelectTopic,
   selectedTopicId,
   subject
 }: {
   isDark: boolean;
   onAddCase: (selection: HierarchyTopicSelection) => void;
+  onAddTopic: (subject: SubjectSummarySubject) => void;
+  onDeleteSubject: (subjectId: string) => void;
+  onDeleteTopic: (topic: SubjectSummaryTopic) => void;
+  onEditSubject: (subject: SubjectSummarySubject) => void;
+  onEditTopic: (topic: SubjectSummaryTopic) => void;
+  onEditCase: (caseId: string) => void;
+  onDeleteCase: (caseId: string) => void;
   onSelectTopic: (selection: HierarchyTopicSelection) => void;
   selectedTopicId: string | null;
   subject: SubjectSummarySubject & { hasTopics: boolean };
@@ -1135,6 +1208,38 @@ function HierarchySubjectItem({
           <StatusBadge isDark={isDark} value={subject.status} />
           <span className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-500")}>{subject.topicCount} topics</span>
           <span className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-500")}>{subject.caseCount} cases</span>
+          <div className="flex items-center gap-2">
+            <IconButton
+              isDark={isDark}
+              onClick={(event) => {
+                event.stopPropagation();
+                onAddTopic(subject);
+              }}
+              title="Add topic"
+            >
+              <Plus className="h-4 w-4" />
+            </IconButton>
+            <IconButton
+              isDark={isDark}
+              onClick={(event) => {
+                event.stopPropagation();
+                onEditSubject(subject);
+              }}
+              title="Edit subject"
+            >
+              <Pencil className="h-4 w-4" />
+            </IconButton>
+            <IconButton
+              isDark={isDark}
+              onClick={(event) => {
+                event.stopPropagation();
+                onDeleteSubject(subject.id);
+              }}
+              title="Delete subject"
+            >
+              <Trash2 className="h-4 w-4" />
+            </IconButton>
+          </div>
         </div>
       </button>
       {isExpanded ? (
@@ -1147,6 +1252,10 @@ function HierarchySubjectItem({
                 isDark={isDark}
                 key={topic.id}
                 onAddCase={onAddCase}
+                onDeleteCase={onDeleteCase}
+                onDeleteTopic={onDeleteTopic}
+                onEditCase={onEditCase}
+                onEditTopic={onEditTopic}
                 onSelectTopic={onSelectTopic}
                 selectedTopicId={selectedTopicId}
                 topic={topic}
@@ -1208,6 +1317,15 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
     window.setTimeout(() => {
       setToasts((current) => current.filter((toast) => toast.id !== id));
     }, 4000);
+  }
+
+  async function openCaseModalById(caseId: string) {
+    try {
+      const item = await fetchSubjectSummaryCaseDetail(caseId);
+      openCaseModal(item);
+    } catch {
+      showToast("Could not load this case for editing.", "error");
+    }
   }
 
   async function invalidateSubjectSummaryQueries() {
@@ -1906,6 +2024,17 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
                     isDark={isDark}
                     key={subject.id}
                     onAddCase={(selection) => openCaseModal(undefined, selection)}
+                    onAddTopic={(value) => {
+                      setEditingTopic(null);
+                      setTopicDraft(createTopicDraft(value.id));
+                      setTopicModalOpen(true);
+                    }}
+                    onDeleteCase={(caseId) => deleteCaseMutation.mutate(caseId)}
+                    onDeleteSubject={(subjectId) => deleteSubjectMutation.mutate(subjectId)}
+                    onDeleteTopic={(topic) => deleteTopicMutation.mutate(topic.id)}
+                    onEditCase={(caseId) => void openCaseModalById(caseId)}
+                    onEditSubject={(value) => openSubjectModal(value)}
+                    onEditTopic={(value) => openTopicModal(value)}
                     onSelectTopic={setSelectedHierarchyTopic}
                     selectedTopicId={selectedHierarchyTopic?.topicId ?? null}
                     subject={subject}

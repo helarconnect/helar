@@ -93,6 +93,10 @@ export const router = createBrowserRouter([
           },
           {
             path: 'bar-final-exams-mls-mcq',
+            element: <Navigate replace to="/app/bar-final-exams-nls-mcq" />,
+          },
+          {
+            path: 'bar-final-exams-nls-mcq',
             element: <StudentBarFinalExamsMlsMcqPage />,
           },
           { path: 'library/law-reports/:materialId', element: <AdminLawReportReaderPage /> },
@@ -147,7 +151,8 @@ export const router = createBrowserRouter([
               { path: 'library/subject-summaries/cases/:caseId', element: <AdminSubjectSummaryCaseReaderPage /> },
               { path: 'library/cases-and-ratios', element: <AdminCasesAndRatiosPage /> },
               { path: 'library/cases-and-ratios/materials', element: <AdminCasesAndRatiosMaterialsPage /> },
-              { path: 'bar-final-exams-mls-mcq', element: <AdminBarFinalExamsMlsMcqPage /> },
+              { path: 'bar-final-exams-mls-mcq', element: <Navigate replace to="/app/admin/bar-final-exams-nls-mcq" /> },
+              { path: 'bar-final-exams-nls-mcq', element: <AdminBarFinalExamsMlsMcqPage /> },
               { path: 'content', element: <AdminContentPage /> },
               {
                 path: 'payments',
