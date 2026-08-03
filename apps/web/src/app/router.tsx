@@ -40,6 +40,7 @@ import { WorkspaceDashboardPage } from '@/pages/WorkspaceDashboardPage'
 import { WorkspacePlaceholderPage } from '@/pages/WorkspacePlaceholderPage'
 import { StudentLawReportsPage, StudentSubjectSummariesPage } from '@/pages/StudentLibraryPage'
 import { AdminBarFinalExamsMlsMcqPage, StudentBarFinalExamsMlsMcqPage } from '@/pages/BarFinalExamsMlsMcqPage'
+import { StudentBarFinalExamQuestionPage } from '@/pages/BarFinalExamQuestionPage'
 
 export const router = createBrowserRouter([
   {
@@ -98,6 +99,10 @@ export const router = createBrowserRouter([
           {
             path: 'bar-final-exams-nls-mcq',
             element: <StudentBarFinalExamsMlsMcqPage />,
+          },
+          {
+            path: 'bar-final-exams-nls-mcq/:subjectId/questions/:questionId',
+            element: <StudentBarFinalExamQuestionPage />,
           },
           { path: 'library/law-reports/:materialId', element: <AdminLawReportReaderPage /> },
           { path: 'library/subject-summaries/cases/:caseId', element: <AdminSubjectSummaryCaseReaderPage /> },

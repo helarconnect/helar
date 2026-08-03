@@ -3,6 +3,7 @@ import { AxiosError } from "axios";
 import { CheckCircle2, ChevronRight, Eye, Pencil, Plus, Search, Trash2, X, XCircle } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import { RichTextEditor } from "@/components/ui/RichTextEditor";
 import { useTheme } from "@/hooks/useTheme";
@@ -561,9 +562,10 @@ export function AdminBarFinalExamsMlsMcqPage() {
 
 export function StudentBarFinalExamsMlsMcqPage() {
   const { isDark } = useTheme();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [search, setSearch] = useState("");
   const [selectedSubjectId, setSelectedSubjectId] = useState("");
-  const [expandedQuestionId, setExpandedQuestionId] = useState("");
   const [activeQuestionId, setActiveQuestionId] = useState("");
   const questionRefs = useRef(new Map<string, HTMLDivElement>());
 
@@ -581,6 +583,17 @@ export function StudentBarFinalExamsMlsMcqPage() {
   const subjects = subjectsQuery.data?.subjects ?? [];
   const questions = questionsQuery.data?.items ?? [];
   const activeSubject = subjects.find((subject) => subject.id === selectedSubjectId) ?? null;
+
+  useEffect(() => {
+    const stateSubjectId = (location.state as any)?.subjectId;
+    if (!stateSubjectId || typeof stateSubjectId !== "string") {
+      return;
+    }
+    if (stateSubjectId === selectedSubjectId) {
+      return;
+    }
+    setSelectedSubjectId(stateSubjectId);
+  }, [location.key, location.state, selectedSubjectId]);
 
   useEffect(() => {
     if (!selectedSubjectId) {
@@ -621,8 +634,6 @@ export function StudentBarFinalExamsMlsMcqPage() {
     setActiveQuestionId(nextQuestionId);
     scrollToQuestion(nextQuestionId);
   }
-
-  const expandedQuestion = expandedQuestionId ? questions.find((item) => item.id === expandedQuestionId) ?? null : null;
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-8">
@@ -680,7 +691,6 @@ export function StudentBarFinalExamsMlsMcqPage() {
                       key={subject.id}
                       onClick={() => {
                         setSelectedSubjectId(subject.id);
-                        setExpandedQuestionId("");
                       }}
                       type="button"
                     >
@@ -755,7 +765,7 @@ export function StudentBarFinalExamsMlsMcqPage() {
                             )}
                             onClick={() => {
                               setActiveQuestionId(item.id);
-                              setExpandedQuestionId(item.id);
+                              navigate(`/app/bar-final-exams-nls-mcq/${selectedSubjectId}/questions/${item.id}`);
                             }}
                             type="button"
                           >
@@ -773,69 +783,6 @@ export function StudentBarFinalExamsMlsMcqPage() {
           )}
         </div>
 
-        {expandedQuestion ? (
-          <div className="fixed inset-0 z-[150] flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/55" onClick={() => setExpandedQuestionId("")} />
-            <div
-              className={cn(
-                "relative w-full max-w-3xl overflow-hidden rounded-[32px] border",
-                isDark ? "border-slate-800 bg-slate-950" : "border-slate-200 bg-white"
-              )}
-              style={{ maxHeight: "86vh" }}
-            >
-              <div className={cn("flex items-start justify-between gap-4 border-b p-5", isDark ? "border-slate-800" : "border-slate-200")}>
-                <div className="space-y-1">
-                  <p className={cn("text-lg font-semibold", isDark ? "text-white" : "text-slate-950")}>Full question & answer</p>
-                  <p className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-600")}>
-                    {activeSubject?.name ?? "Subject"} • Question {questions.findIndex((item) => item.id === expandedQuestion.id) + 1}
-                  </p>
-                </div>
-                <button
-                  className={cn(
-                    "inline-flex h-10 w-10 items-center justify-center rounded-2xl border",
-                    isDark ? "border-slate-800 bg-slate-950/40 text-slate-200" : "border-slate-200 bg-white text-slate-700"
-                  )}
-                  onClick={() => setExpandedQuestionId("")}
-                  type="button"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-
-              <div className="min-h-0 overflow-y-auto p-5">
-                <div className="space-y-5">
-                  <div>
-                    <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>
-                      Question
-                    </p>
-                    <div
-                      className={cn("prose prose-sm mt-2 max-w-none leading-7", isDark ? "prose-invert text-slate-200" : "text-slate-900")}
-                      dangerouslySetInnerHTML={{ __html: expandedQuestion.question }}
-                    />
-                  </div>
-
-                  <div
-                    className={cn(
-                      "rounded-3xl border p-4",
-                      isDark
-                        ? "border-emerald-500/25 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.18),transparent_45%),linear-gradient(180deg,rgba(15,23,42,0.55)_0%,rgba(2,6,23,0.75)_100%)] text-slate-100"
-                        : "border-emerald-200 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.12),transparent_45%),linear-gradient(180deg,#ffffff_0%,#f0fdf4_100%)] text-slate-800"
-                    )}
-                  >
-                    <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-emerald-200/90" : "text-emerald-700")}>
-                      Answer
-                    </p>
-                    <div
-                      className={cn("prose prose-sm mt-2 max-w-none leading-7", isDark ? "prose-invert text-slate-100" : "text-slate-800")}
-                      dangerouslySetInnerHTML={{ __html: expandedQuestion.answer }}
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : null}
-
         {typeof document !== "undefined" && selectedSubjectId && questions.length > 0
           ? createPortal(
               <div className="pointer-events-none fixed right-6 top-1/2 z-[140] flex -translate-y-1/2 flex-col gap-2">
@@ -848,7 +795,6 @@ export function StudentBarFinalExamsMlsMcqPage() {
                   )}
                   disabled={!activeQuestionId || questions[0]?.id === activeQuestionId}
                   onClick={() => {
-                    setExpandedQuestionId("");
                     const currentIndex = questions.findIndex((item) => item.id === activeQuestionId);
                     if (currentIndex <= 0) {
                       return;
@@ -871,7 +817,6 @@ export function StudentBarFinalExamsMlsMcqPage() {
                   )}
                   disabled={!activeQuestionId || questions[questions.length - 1]?.id === activeQuestionId}
                   onClick={() => {
-                    setExpandedQuestionId("");
                     goToNextQuestion(activeQuestionId);
                   }}
                   title="Next question"
