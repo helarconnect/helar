@@ -1193,10 +1193,11 @@ export async function updateAdminUserDeviceLimitOverride(
   actorUserId: string
 ) {
   const updated = await runInTransaction(async (tx) => {
+    const notDeletedWhere = usesMongoRuntime ? { OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }] } : { deletedAt: null };
     const user = await tx.user.findFirst({
       where: {
-        deletedAt: null,
-        id: userId
+        id: userId,
+        ...notDeletedWhere
       },
       select: {
         id: true
@@ -1237,10 +1238,11 @@ export async function updateAdminUserDeviceLimitOverride(
 
 export async function resetAdminUserDevices(userId: string, actorUserId: string) {
   const updated = await runInTransaction(async (tx) => {
+    const notDeletedWhere = usesMongoRuntime ? { OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }] } : { deletedAt: null };
     const user = await tx.user.findFirst({
       where: {
-        deletedAt: null,
-        id: userId
+        id: userId,
+        ...notDeletedWhere
       },
       select: {
         id: true
@@ -1253,8 +1255,8 @@ export async function resetAdminUserDevices(userId: string, actorUserId: string)
 
     await tx.device.updateMany({
       where: {
-        deletedAt: null,
-        userId: user.id
+        userId: user.id,
+        ...(usesMongoRuntime ? { OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }] } : { deletedAt: null })
       },
       data: {
         deletedAt: new Date()
