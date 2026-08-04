@@ -78,12 +78,6 @@ const adminManagedRoles = [
 const activeDatabaseUrl = process.env.DATABASE_URL ?? "";
 const usesMongoRuntime = activeDatabaseUrl.startsWith("mongodb");
 
-const notDeletedUserWhere: UserWhereInput = usesMongoRuntime
-  ? ({
-      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }]
-    } as unknown as UserWhereInput)
-  : ({ deletedAt: null } as UserWhereInput);
-
 export type AdminUserFilters = z.infer<typeof adminUserFiltersSchema>;
 export type AdminUserStatusInput = z.infer<typeof adminUserStatusSchema>;
 export type AdminUserRolesInput = z.infer<typeof adminUserRolesSchema>;
@@ -178,7 +172,7 @@ function createBaseUserWhere(filters: AdminUserFilters): UserWhereInput {
   const registeredTo = createDate(filters.registeredTo, true);
 
   return {
-    ...notDeletedUserWhere,
+    deletedAt: null,
     ...(filters.status !== "all" ? { status: filters.status } : {}),
     ...(filters.role !== "all"
       ? {
@@ -513,7 +507,6 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
   const search = filters.search.trim();
   const where = createUserWhere(filters);
   const baseWhere = createBaseUserWhere(filters);
-  const totalRegisteredUsersPromise = prisma.user.count({ where: notDeletedUserWhere });
   const registrationWindow = createRegistrationWindow(filters);
   const previousWindowDuration = registrationWindow.end.getTime() - registrationWindow.start.getTime() + 1;
   const previousWindowStart = new Date(registrationWindow.start.getTime() - previousWindowDuration);
@@ -521,7 +514,7 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
   const skip = (filters.page - 1) * filters.pageSize;
 
   if (usesMongoRuntime && search) {
-    const [allUsers, availableRoles, totalRegisteredUsers] = await Promise.all([
+    const [allUsers, availableRoles] = await Promise.all([
       prisma.user.findMany({
         where: baseWhere,
         include: {
@@ -585,8 +578,7 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
           }
         }
       }),
-      managedRolesPromise,
-      totalRegisteredUsersPromise
+      managedRolesPromise
     ]);
 
     const matchedUsers = allUsers
@@ -632,7 +624,6 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
 
     return {
       summary: {
-        registeredUsers: totalRegisteredUsers,
         totalUsers: filteredTotal,
         activeUsers,
         pendingUsers,
@@ -685,21 +676,8 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
     };
   }
 
-  const [
-    totalRegisteredUsers,
-    filteredTotal,
-    activeUsers,
-    pendingUsers,
-    suspendedUsers,
-    verifiedUsers,
-    registrationsInWindow,
-    registrationsInPreviousWindow,
-    usersForTimeline,
-    pagedUsers,
-    availableRoles
-  ] =
+  const [filteredTotal, activeUsers, pendingUsers, suspendedUsers, verifiedUsers, registrationsInWindow, registrationsInPreviousWindow, usersForTimeline, pagedUsers, availableRoles] =
     await Promise.all([
-      totalRegisteredUsersPromise,
       prisma.user.count({ where }),
       prisma.user.count({ where: { ...where, status: "ACTIVE" } }),
       prisma.user.count({ where: { ...where, status: "PENDING" } }),
@@ -851,7 +829,6 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
 
   return {
     summary: {
-      registeredUsers: totalRegisteredUsers,
       totalUsers: filteredTotal,
       activeUsers,
       pendingUsers,
