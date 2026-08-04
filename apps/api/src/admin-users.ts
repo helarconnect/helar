@@ -170,15 +170,21 @@ function createRegistrationWindow(filters: Pick<AdminUserFilters, "registeredFro
 function createBaseUserWhere(filters: AdminUserFilters): UserWhereInput {
   const registeredFrom = createDate(filters.registeredFrom);
   const registeredTo = createDate(filters.registeredTo, true);
+  const notDeletedWhere: UserWhereInput = usesMongoRuntime
+    ? { OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }] }
+    : { deletedAt: null };
+  const notDeletedUserRoleWhere = usesMongoRuntime
+    ? { OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }] }
+    : { deletedAt: null };
 
   return {
-    deletedAt: null,
+    ...notDeletedWhere,
     ...(filters.status !== "all" ? { status: filters.status } : {}),
     ...(filters.role !== "all"
       ? {
           roles: {
             some: {
-              deletedAt: null,
+              ...notDeletedUserRoleWhere,
               role: {
                 code: filters.role
               }
@@ -506,7 +512,11 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
   const managedRolesPromise = ensureAdminManagedRoles();
   const totalRegisteredUsersPromise = prisma.user.count({
     where: {
-      deletedAt: null
+      ...(usesMongoRuntime
+        ? {
+            OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }]
+          }
+        : { deletedAt: null })
     }
   });
   const search = filters.search.trim();
