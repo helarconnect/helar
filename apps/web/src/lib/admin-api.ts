@@ -1133,6 +1133,7 @@ export type AdminUsersSnapshot = {
   summary: {
     activeUsers: number;
     pendingUsers: number;
+    registeredUsers: number;
     registrationsInWindow: number;
     suspendedUsers: number;
     totalUsers: number;
