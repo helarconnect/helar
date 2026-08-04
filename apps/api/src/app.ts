@@ -633,6 +633,14 @@ function resolveAccountDeviceLimit(deviceLimitOverride: number | null | undefine
   return Math.max(1, limit);
 }
 
+function shouldEnforceAccountDeviceLimit(roleCodes: string[] = []) {
+  if (roleCodes.includes("super_admin") || roleCodes.includes("content_admin")) {
+    return false;
+  }
+
+  return roleCodes.includes("student") || roleCodes.includes("lawyer");
+}
+
 function createDatabaseFallbackErrorMessage() {
   return "The MongoDB database is not ready yet. Helar is using the temporary auth fallback so you can keep working."
 }
@@ -640,7 +648,8 @@ function createDatabaseFallbackErrorMessage() {
 async function registerUserDevice(
   tx: Prisma.TransactionClient,
   userId: string,
-  rawDeviceName: string | undefined
+  rawDeviceName: string | undefined,
+  roleCodes?: string[]
 ) {
   const deviceName = rawDeviceName?.trim();
 
@@ -669,21 +678,44 @@ async function registerUserDevice(
     return;
   }
 
-  const registeredDeviceCount = await tx.device.count({
-    where: {
-      ...notDeletedDeviceWhere,
-      userId
+  const resolvedRoleCodes =
+    roleCodes ??
+    (
+      await tx.user
+        .findUnique({
+          where: { id: userId },
+          select: {
+            roles: {
+              select: {
+                role: {
+                  select: {
+                    code: true
+                  }
+                }
+              }
+            }
+          }
+        })
+        .then((user) => user?.roles.map((item) => item.role.code) ?? [])
+    );
+
+  if (shouldEnforceAccountDeviceLimit(resolvedRoleCodes)) {
+    const registeredDeviceCount = await tx.device.count({
+      where: {
+        ...notDeletedDeviceWhere,
+        userId
+      }
+    });
+
+    const user = await tx.user.findUnique({
+      where: { id: userId },
+      select: { deviceLimitOverride: true }
+    });
+    const deviceLimit = resolveAccountDeviceLimit(user?.deviceLimitOverride);
+
+    if (registeredDeviceCount >= deviceLimit) {
+      throw new DeviceLimitError(deviceLimit);
     }
-  });
-
-  const user = await tx.user.findUnique({
-    where: { id: userId },
-    select: { deviceLimitOverride: true }
-  });
-  const deviceLimit = resolveAccountDeviceLimit(user?.deviceLimitOverride);
-
-  if (registeredDeviceCount >= deviceLimit) {
-    throw new DeviceLimitError(deviceLimit);
   }
 
   await tx.device.create({
@@ -987,7 +1019,12 @@ async function persistRegister(payload: z.infer<typeof registerSchema>) {
       include: userRelationsInclude
     });
 
-    await registerUserDevice(tx, createdUser.id, payload.deviceName);
+    await registerUserDevice(
+      tx,
+      createdUser.id,
+      payload.deviceName,
+      createdUser.roles.map((userRole) => userRole.role.code)
+    );
 
     const refreshToken = await createRefreshToken(createdUser.id, tx);
 
@@ -1069,7 +1106,12 @@ async function persistSignIn(payload: z.infer<typeof signInSchema>) {
   }
 
   const signedInSession = await runInTransaction(async (tx: Prisma.TransactionClient) => {
-    await registerUserDevice(tx, user.id, payload.deviceName);
+    await registerUserDevice(
+      tx,
+      user.id,
+      payload.deviceName,
+      user.roles.map((userRole) => userRole.role.code)
+    );
 
     const refreshToken = await createRefreshToken(user.id, tx);
 
