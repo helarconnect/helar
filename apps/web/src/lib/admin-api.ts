@@ -1117,6 +1117,9 @@ export type AdminUsersSnapshot = {
     code: string;
     name: string;
   }>;
+  globalSummary: {
+    totalUsers: number;
+  };
   metrics: DashboardMetric[];
   pagination: {
     page: number;

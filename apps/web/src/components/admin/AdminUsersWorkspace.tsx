@@ -1153,6 +1153,7 @@ export function AdminUsersWorkspace() {
     }
   }
 
+  const totalRegisteredUsersValue = usersQuery.data?.globalSummary.totalUsers.toLocaleString() ?? "0";
   const totalUsersValue = usersQuery.data?.summary.totalUsers.toLocaleString() ?? "0";
   const activeUsersValue = usersQuery.data?.summary.activeUsers.toLocaleString() ?? "0";
   const verifiedUsersValue = usersQuery.data?.summary.verifiedUsers.toLocaleString() ?? "0";
@@ -1196,7 +1197,7 @@ export function AdminUsersWorkspace() {
         </section>
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <MiniMetric isDark={isDark} label="Matched users" value={totalUsersValue} />
+          <MiniMetric isDark={isDark} label="Total registered users" value={totalRegisteredUsersValue} />
           <MiniMetric isDark={isDark} label="Active accounts" value={activeUsersValue} />
           <MiniMetric isDark={isDark} label="Verified email" value={verifiedUsersValue} />
           <MiniMetric isDark={isDark} label="Registrations" value={registrationWindowValue} />
@@ -1402,9 +1403,22 @@ export function AdminUsersWorkspace() {
 
           {usersQuery.data?.users.length ? (
             <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
-              <p className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-600")}>
-                Page {usersQuery.data.pagination.page} of {usersQuery.data.pagination.totalPages}
-              </p>
+              <div className={cn("space-y-1 text-sm", isDark ? "text-slate-400" : "text-slate-600")}>
+                <p>
+                  Page {usersQuery.data.pagination.page} of {usersQuery.data.pagination.totalPages}
+                </p>
+                <p className={cn("text-xs", isDark ? "text-slate-500" : "text-slate-500")}>
+                  {(() => {
+                    const page = usersQuery.data.pagination.page;
+                    const pageSize = usersQuery.data.pagination.pageSize;
+                    const matchedTotal = usersQuery.data.pagination.totalItems;
+                    const currentCount = usersQuery.data.users.length;
+                    const start = matchedTotal === 0 ? 0 : (page - 1) * pageSize + 1;
+                    const end = matchedTotal === 0 ? 0 : (page - 1) * pageSize + currentCount;
+                    return `Showing ${start}-${end} of ${matchedTotal.toLocaleString()} matched users • ${totalRegisteredUsersValue} total registered`;
+                  })()}
+                </p>
+              </div>
               <div className="flex items-center gap-3">
                 <button
                   className="button-secondary !px-4 !py-3"

@@ -504,6 +504,11 @@ function resolveDeviceLimit(deviceLimitOverride: number | null | undefined) {
 export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: string[]) {
   const assignableRoleCodes = getAssignableRoleCodes(actorRoleCodes);
   const managedRolesPromise = ensureAdminManagedRoles();
+  const totalRegisteredUsersPromise = prisma.user.count({
+    where: {
+      deletedAt: null
+    }
+  });
   const search = filters.search.trim();
   const where = createUserWhere(filters);
   const baseWhere = createBaseUserWhere(filters);
@@ -514,7 +519,7 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
   const skip = (filters.page - 1) * filters.pageSize;
 
   if (usesMongoRuntime && search) {
-    const [allUsers, availableRoles] = await Promise.all([
+    const [allUsers, availableRoles, totalRegisteredUsers] = await Promise.all([
       prisma.user.findMany({
         where: baseWhere,
         include: {
@@ -578,7 +583,8 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
           }
         }
       }),
-      managedRolesPromise
+      managedRolesPromise,
+      totalRegisteredUsersPromise
     ]);
 
     const matchedUsers = allUsers
@@ -623,6 +629,9 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
     const pagedUsers = matchedUsers.slice(skip, skip + filters.pageSize);
 
     return {
+      globalSummary: {
+        totalUsers: totalRegisteredUsers
+      },
       summary: {
         totalUsers: filteredTotal,
         activeUsers,
@@ -676,7 +685,19 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
     };
   }
 
-  const [filteredTotal, activeUsers, pendingUsers, suspendedUsers, verifiedUsers, registrationsInWindow, registrationsInPreviousWindow, usersForTimeline, pagedUsers, availableRoles] =
+  const [
+    filteredTotal,
+    activeUsers,
+    pendingUsers,
+    suspendedUsers,
+    verifiedUsers,
+    registrationsInWindow,
+    registrationsInPreviousWindow,
+    usersForTimeline,
+    pagedUsers,
+    availableRoles,
+    totalRegisteredUsers
+  ] =
     await Promise.all([
       prisma.user.count({ where }),
       prisma.user.count({ where: { ...where, status: "ACTIVE" } }),
@@ -798,7 +819,8 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
           }
         }
       }),
-      managedRolesPromise
+      managedRolesPromise,
+      totalRegisteredUsersPromise
     ]);
 
   const timelineMap = new Map<string, number>();
@@ -828,6 +850,9 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
   const totalPages = Math.max(1, Math.ceil(filteredTotal / filters.pageSize));
 
   return {
+    globalSummary: {
+      totalUsers: totalRegisteredUsers
+    },
     summary: {
       totalUsers: filteredTotal,
       activeUsers,
