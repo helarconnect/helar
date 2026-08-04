@@ -1420,22 +1420,26 @@ export function AdminUsersWorkspace() {
                 </p>
               </div>
               <div className="flex items-center gap-3">
-                <button
-                  className="button-secondary !px-4 !py-3"
-                  disabled={filters.page <= 1}
-                  onClick={() => updateFilters({ page: Math.max(1, filters.page - 1) })}
-                  type="button"
-                >
-                  Previous
-                </button>
-                <button
-                  className="button-primary !px-4 !py-3"
-                  disabled={filters.page >= (usersQuery.data?.pagination.totalPages ?? 1)}
-                  onClick={() => updateFilters({ page: Math.min(usersQuery.data?.pagination.totalPages ?? 1, filters.page + 1) })}
-                  type="button"
-                >
-                  Next
-                </button>
+                {filters.page > 1 ? (
+                  <button
+                    className="button-secondary !px-4 !py-3"
+                    onClick={() => updateFilters({ page: Math.max(1, filters.page - 1) })}
+                    type="button"
+                  >
+                    Previous
+                  </button>
+                ) : null}
+                {filters.page < (usersQuery.data?.pagination.totalPages ?? 1) ? (
+                  <button
+                    className="button-primary !px-4 !py-3"
+                    onClick={() =>
+                      updateFilters({ page: Math.min(usersQuery.data?.pagination.totalPages ?? 1, filters.page + 1) })
+                    }
+                    type="button"
+                  >
+                    Next
+                  </button>
+                ) : null}
               </div>
             </div>
           ) : null}

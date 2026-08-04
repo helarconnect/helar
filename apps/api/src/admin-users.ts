@@ -917,9 +917,10 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
 }
 
 export async function getAdminUserMonthlyRegistrations(year = new Date().getFullYear()) {
+  const notDeletedWhere = usesMongoRuntime ? { OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }] } : { deletedAt: null };
   const registrationDates = await prisma.user.findMany({
     where: {
-      deletedAt: null
+      ...notDeletedWhere
     },
     select: {
       createdAt: true
@@ -941,7 +942,7 @@ export async function getAdminUserMonthlyRegistrations(year = new Date().getFull
 
   const users = await prisma.user.findMany({
     where: {
-      deletedAt: null,
+      ...notDeletedWhere,
       createdAt: {
         gte: rangeStart,
         lt: rangeEnd
@@ -968,15 +969,16 @@ export async function getAdminUserMonthlyRegistrations(year = new Date().getFull
 }
 
 export async function getAdminUserDetail(userId: string) {
+  const notDeletedWhere = usesMongoRuntime ? { OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }] } : { deletedAt: null };
   const user = await prisma.user.findFirst({
     where: {
       id: userId,
-      deletedAt: null
+      ...notDeletedWhere
     },
     include: {
       roles: {
         where: {
-          deletedAt: null
+          ...notDeletedWhere
         },
         include: {
           role: true
@@ -986,7 +988,7 @@ export async function getAdminUserDetail(userId: string) {
       tutor: true,
       devices: {
         where: {
-          deletedAt: null
+          ...notDeletedWhere
         },
         orderBy: {
           lastSeenAt: "desc"
@@ -994,7 +996,7 @@ export async function getAdminUserDetail(userId: string) {
       },
       sessions: {
         where: {
-          deletedAt: null
+          ...notDeletedWhere
         },
         orderBy: {
           updatedAt: "desc"
@@ -1002,7 +1004,7 @@ export async function getAdminUserDetail(userId: string) {
       },
       subscriptions: {
         where: {
-          deletedAt: null
+          ...notDeletedWhere
         },
         orderBy: {
           createdAt: "desc"
@@ -1011,7 +1013,7 @@ export async function getAdminUserDetail(userId: string) {
           plan: true,
           payments: {
             where: {
-              deletedAt: null
+              ...notDeletedWhere
             },
             orderBy: {
               createdAt: "desc"
@@ -1022,7 +1024,7 @@ export async function getAdminUserDetail(userId: string) {
       },
       payments: {
         where: {
-          deletedAt: null
+          ...notDeletedWhere
         },
         orderBy: {
           createdAt: "desc"
@@ -1031,7 +1033,7 @@ export async function getAdminUserDetail(userId: string) {
       },
       activityLogs: {
         where: {
-          deletedAt: null
+          ...notDeletedWhere
         },
         orderBy: {
           createdAt: "desc"
@@ -1040,7 +1042,7 @@ export async function getAdminUserDetail(userId: string) {
       },
       auditLogs: {
         where: {
-          deletedAt: null
+          ...notDeletedWhere
         },
         orderBy: {
           createdAt: "desc"
