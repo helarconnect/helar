@@ -87,15 +87,26 @@ import {
 } from "./subject-summary-module.js";
 import {
   createAdminBarFinalExamQuestion,
+  createAdminBarFinalExamMcqQuestion,
   deleteAdminBarFinalExamQuestion,
+  deleteAdminBarFinalExamMcqQuestion,
   fetchBarFinalExamFormOptions,
   listAdminBarFinalExamQuestions,
+  listAdminBarFinalExamMcqQuestions,
   listStudentBarFinalExamQuestions,
+  listStudentBarFinalExamMcqQuestions,
+  listStudentBarFinalExamMcqSubjects,
   listStudentBarFinalExamSubjects,
+  parseAdminBarFinalExamMcqQuestionFilters,
   parseAdminBarFinalExamQuestionFilters,
+  parseBarFinalExamMcqQuestionInput,
   parseBarFinalExamQuestionInput,
+  parseStudentBarFinalExamMcqAttemptInput,
+  parseStudentBarFinalExamMcqQuestionsQuery,
   parseStudentBarFinalExamQuestionsQuery,
   parseStudentBarFinalExamSubjectsQuery,
+  submitStudentBarFinalExamMcqAttempt,
+  updateAdminBarFinalExamMcqQuestion,
   updateAdminBarFinalExamQuestion
 } from "./bar-final-exams.js";
 import {
@@ -3618,6 +3629,242 @@ export function createApp(options: AppOptions = {}) {
   );
 
   app.get(
+    "/api/v1/admin/bar-final-exams-mcq/questions",
+    authenticateRequest,
+    requireAdminRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required for bar final exam MCQ questions."
+          }
+        });
+      }
+
+      try {
+        const filters = parseAdminBarFinalExamMcqQuestionFilters(request.query as Record<string, string | string[] | undefined>);
+        const data = await listAdminBarFinalExamMcqQuestions(filters);
+
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return response.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "The bar final exam MCQ query is invalid.",
+              details: error.flatten()
+            }
+          });
+        }
+
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "BAR_FINAL_EXAMS_MCQ_FETCH_FAILED",
+            message: "Could not load bar final exam MCQ questions."
+          }
+        });
+      }
+    }
+  );
+
+  app.get(
+    "/api/v1/admin/bar-final-exams-mcq/form-options",
+    authenticateRequest,
+    requireAdminRequest,
+    async (_request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required for bar final exam MCQ form options."
+          }
+        });
+      }
+
+      try {
+        const data = await fetchBarFinalExamFormOptions();
+
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "BAR_FINAL_EXAMS_MCQ_FORM_OPTIONS_FAILED",
+            message: "Could not load bar final exam MCQ form options."
+          }
+        });
+      }
+    }
+  );
+
+  app.post(
+    "/api/v1/admin/bar-final-exams-mcq/questions",
+    authenticateRequest,
+    requireAdminRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required to create bar final exam MCQ questions."
+          }
+        });
+      }
+
+      try {
+        const payload = parseBarFinalExamMcqQuestionInput(request.body);
+        const data = await createAdminBarFinalExamMcqQuestion(payload, request.auth!.roleCodes, request.auth!.userId);
+
+        return response.status(201).json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return response.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "The bar final exam MCQ payload is invalid.",
+              details: error.flatten()
+            }
+          });
+        }
+
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "BAR_FINAL_EXAMS_MCQ_CREATE_FAILED",
+            message: "Could not create the bar final exam MCQ question."
+          }
+        });
+      }
+    }
+  );
+
+  app.patch(
+    "/api/v1/admin/bar-final-exams-mcq/questions/:questionId",
+    authenticateRequest,
+    requireAdminRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required to update bar final exam MCQ questions."
+          }
+        });
+      }
+
+      try {
+        const payload = parseBarFinalExamMcqQuestionInput(request.body);
+        const data = await updateAdminBarFinalExamMcqQuestion(
+          String(request.params.questionId),
+          payload,
+          request.auth!.roleCodes,
+          request.auth!.userId
+        );
+
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return response.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "The bar final exam MCQ payload is invalid.",
+              details: error.flatten()
+            }
+          });
+        }
+
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+          return response.status(404).json({
+            success: false,
+            error: {
+              code: "BAR_FINAL_EXAMS_MCQ_NOT_FOUND",
+              message: "The requested bar final exam MCQ question could not be found."
+            }
+          });
+        }
+
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "BAR_FINAL_EXAMS_MCQ_UPDATE_FAILED",
+            message: "Could not update the bar final exam MCQ question."
+          }
+        });
+      }
+    }
+  );
+
+  app.delete(
+    "/api/v1/admin/bar-final-exams-mcq/questions/:questionId",
+    authenticateRequest,
+    requireAdminRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required to delete bar final exam MCQ questions."
+          }
+        });
+      }
+
+      try {
+        const data = await deleteAdminBarFinalExamMcqQuestion(String(request.params.questionId));
+
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+          return response.status(404).json({
+            success: false,
+            error: {
+              code: "BAR_FINAL_EXAMS_MCQ_NOT_FOUND",
+              message: "The requested bar final exam MCQ question could not be found."
+            }
+          });
+        }
+
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "BAR_FINAL_EXAMS_MCQ_DELETE_FAILED",
+            message: "Could not delete the bar final exam MCQ question."
+          }
+        });
+      }
+    }
+  );
+
+  app.get(
     "/api/v1/admin/subject-summaries/reading-insights",
     authenticateRequest,
     requireAdminRequest,
@@ -6234,6 +6481,168 @@ export function createApp(options: AppOptions = {}) {
           error: {
             code: "BAR_FINAL_EXAMS_QUESTIONS_FAILED",
             message: "Could not load bar final exam questions."
+          }
+        });
+      }
+    }
+  );
+
+  app.get(
+    "/api/v1/library/bar-final-exams-mcq/subjects",
+    authenticateRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required for bar final exam MCQ subjects."
+          }
+        });
+      }
+
+      try {
+        const query = parseStudentBarFinalExamSubjectsQuery(request.query as Record<string, string | string[] | undefined>);
+        const data = await listStudentBarFinalExamMcqSubjects(query);
+
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return response.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "The bar final exam MCQ subjects query is invalid.",
+              details: error.flatten()
+            }
+          });
+        }
+
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "BAR_FINAL_EXAMS_MCQ_SUBJECTS_FAILED",
+            message: "Could not load bar final exam MCQ subjects."
+          }
+        });
+      }
+    }
+  );
+
+  app.get(
+    "/api/v1/library/bar-final-exams-mcq/questions",
+    authenticateRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required for bar final exam MCQ questions."
+          }
+        });
+      }
+
+      try {
+        const query = parseStudentBarFinalExamMcqQuestionsQuery(request.query as Record<string, string | string[] | undefined>);
+        const data = await listStudentBarFinalExamMcqQuestions(query);
+
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return response.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "The bar final exam MCQ questions query is invalid.",
+              details: error.flatten()
+            }
+          });
+        }
+
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "BAR_FINAL_EXAMS_MCQ_QUESTIONS_FAILED",
+            message: "Could not load bar final exam MCQ questions."
+          }
+        });
+      }
+    }
+  );
+
+  app.post(
+    "/api/v1/library/bar-final-exams-mcq/questions/:questionId/attempt",
+    authenticateRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required for bar final exam MCQ attempts."
+          }
+        });
+      }
+
+      try {
+        const payload = parseStudentBarFinalExamMcqAttemptInput(request.body);
+        const data = await submitStudentBarFinalExamMcqAttempt(
+          request.auth!.userId,
+          String(request.params.questionId),
+          payload
+        );
+
+        if (!data) {
+          return response.status(404).json({
+            success: false,
+            error: {
+              code: "BAR_FINAL_EXAMS_MCQ_NOT_FOUND",
+              message: "The requested bar final exam MCQ question could not be found."
+            }
+          });
+        }
+
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return response.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "The bar final exam MCQ attempt payload is invalid.",
+              details: error.flatten()
+            }
+          });
+        }
+
+        if (error instanceof Error && error.message === "INVALID_OPTION") {
+          return response.status(400).json({
+            success: false,
+            error: {
+              code: "INVALID_OPTION",
+              message: "The selected answer option is invalid."
+            }
+          });
+        }
+
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "BAR_FINAL_EXAMS_MCQ_ATTEMPT_FAILED",
+            message: "Could not submit the MCQ attempt."
           }
         });
       }

@@ -41,6 +41,11 @@ import { WorkspacePlaceholderPage } from '@/pages/WorkspacePlaceholderPage'
 import { StudentLawReportsPage, StudentSubjectSummariesPage } from '@/pages/StudentLibraryPage'
 import { AdminBarFinalExamsMlsMcqPage, StudentBarFinalExamsMlsMcqPage } from '@/pages/BarFinalExamsMlsMcqPage'
 import { StudentBarFinalExamQuestionPage } from '@/pages/BarFinalExamQuestionPage'
+import {
+  AdminBarFinalExamsMcqPage,
+  StudentBarFinalExamMcqQuestionPage,
+  StudentBarFinalExamsMcqPage,
+} from '@/pages/BarFinalExamsMcqPage'
 
 export const router = createBrowserRouter([
   {
@@ -102,16 +107,15 @@ export const router = createBrowserRouter([
           },
           {
             path: 'bar-final-exams-mcq',
-            element: (
-              <WorkspacePlaceholderPage
-                title="Bar Final Exam • MCQ"
-                description="This MCQ workspace is being prepared. For now, use NLS Theory to review the uploaded questions and answers."
-              />
-            ),
+            element: <StudentBarFinalExamsMcqPage />,
           },
           {
             path: 'bar-final-exams-nls-mcq/:subjectId/questions/:questionId',
             element: <StudentBarFinalExamQuestionPage />,
+          },
+          {
+            path: 'bar-final-exams-mcq/:subjectId/questions/:questionId',
+            element: <StudentBarFinalExamMcqQuestionPage />,
           },
           { path: 'library/law-reports/:materialId', element: <AdminLawReportReaderPage /> },
           { path: 'library/subject-summaries/cases/:caseId', element: <AdminSubjectSummaryCaseReaderPage /> },
@@ -169,12 +173,7 @@ export const router = createBrowserRouter([
               { path: 'bar-final-exams-nls-mcq', element: <AdminBarFinalExamsMlsMcqPage /> },
               {
                 path: 'bar-final-exams-mcq',
-                element: (
-                  <WorkspacePlaceholderPage
-                    title="Bar Final Exam • MCQ"
-                    description="This MCQ workspace is being prepared. For now, use NLS Theory to review the uploaded questions and answers."
-                  />
-                ),
+                element: <AdminBarFinalExamsMcqPage />,
               },
               { path: 'content', element: <AdminContentPage /> },
               {

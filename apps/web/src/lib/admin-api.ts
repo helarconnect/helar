@@ -729,6 +729,72 @@ export type AdminBarFinalExamQuestionList = {
   }>;
 };
 
+export type BarFinalExamMcqQuestion = {
+  correctOptionIndex: number;
+  createdAt: string;
+  examDate: string | null;
+  id: string;
+  options: string[];
+  question: string;
+  status: BarFinalExamQuestionStatus;
+  subject: {
+    id: string;
+    name: string;
+  };
+  subjectId: string;
+  updatedAt: string;
+};
+
+export type BarFinalExamMcqQuestionInput = {
+  correctOptionIndex: number;
+  examDate: string;
+  options: string[];
+  question: string;
+  status: BarFinalExamQuestionStatus;
+  subjectId: string;
+};
+
+export type AdminBarFinalExamMcqQuestionList = {
+  items: BarFinalExamMcqQuestion[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    totalItems: number;
+    totalPages: number;
+  };
+  subjects: Array<{
+    id: string;
+    name: string;
+  }>;
+};
+
+export type StudentBarFinalExamMcqSubjectsResponse = {
+  subjects: Array<{
+    id: string;
+    name: string;
+  }>;
+};
+
+export type StudentBarFinalExamMcqQuestionsResponse = {
+  items: Array<{
+    examDate: string | null;
+    id: string;
+    options: string[];
+    question: string;
+  }>;
+};
+
+export type StudentBarFinalExamMcqAttemptInput = {
+  selectedOptionIndex: number;
+};
+
+export type StudentBarFinalExamMcqAttemptResponse = {
+  correctOptionIndex: number;
+  id: string;
+  isCorrect: boolean;
+  selectedOptionIndex: number;
+};
+
 export type BarFinalExamFormOptions = {
   subjects: Array<{
     id: string;
@@ -1829,6 +1895,57 @@ export async function deleteAdminBarFinalExamQuestion(questionId: string) {
   return response.data.data;
 }
 
+export async function fetchAdminBarFinalExamMcqQuestions(filters: {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  status?: "all" | BarFinalExamQuestionStatus;
+  subjectId?: string;
+}) {
+  const response = await authenticatedHttp.get<{ success: true; data: AdminBarFinalExamMcqQuestionList }>(
+    "/api/v1/admin/bar-final-exams-mcq/questions",
+    {
+      params: Object.fromEntries(createQueryParams(filters).entries())
+    }
+  );
+
+  return response.data.data;
+}
+
+export async function fetchBarFinalExamMcqFormOptions() {
+  const response = await authenticatedHttp.get<{ success: true; data: BarFinalExamFormOptions }>(
+    "/api/v1/admin/bar-final-exams-mcq/form-options"
+  );
+
+  return response.data.data;
+}
+
+export async function createAdminBarFinalExamMcqQuestion(payload: BarFinalExamMcqQuestionInput) {
+  const response = await authenticatedHttp.post<{ success: true; data: BarFinalExamMcqQuestion }>(
+    "/api/v1/admin/bar-final-exams-mcq/questions",
+    payload
+  );
+
+  return response.data.data;
+}
+
+export async function updateAdminBarFinalExamMcqQuestion(questionId: string, payload: BarFinalExamMcqQuestionInput) {
+  const response = await authenticatedHttp.patch<{ success: true; data: BarFinalExamMcqQuestion }>(
+    `/api/v1/admin/bar-final-exams-mcq/questions/${questionId}`,
+    payload
+  );
+
+  return response.data.data;
+}
+
+export async function deleteAdminBarFinalExamMcqQuestion(questionId: string) {
+  const response = await authenticatedHttp.delete<{ success: true; data: { id: string; success: true } }>(
+    `/api/v1/admin/bar-final-exams-mcq/questions/${questionId}`
+  );
+
+  return response.data.data;
+}
+
 export async function fetchStudentBarFinalExamSubjects(search = "") {
   const response = await authenticatedHttp.get<{ success: true; data: StudentBarFinalExamSubjectsResponse }>(
     "/api/v1/library/bar-final-exams-nls-mcq/subjects",
@@ -1846,6 +1963,37 @@ export async function fetchStudentBarFinalExamQuestions(subjectId: string) {
     {
       params: { subjectId }
     }
+  );
+
+  return response.data.data;
+}
+
+export async function fetchStudentBarFinalExamMcqSubjects(search = "") {
+  const response = await authenticatedHttp.get<{ success: true; data: StudentBarFinalExamMcqSubjectsResponse }>(
+    "/api/v1/library/bar-final-exams-mcq/subjects",
+    {
+      params: { search }
+    }
+  );
+
+  return response.data.data;
+}
+
+export async function fetchStudentBarFinalExamMcqQuestions(subjectId: string) {
+  const response = await authenticatedHttp.get<{ success: true; data: StudentBarFinalExamMcqQuestionsResponse }>(
+    "/api/v1/library/bar-final-exams-mcq/questions",
+    {
+      params: { subjectId }
+    }
+  );
+
+  return response.data.data;
+}
+
+export async function submitStudentBarFinalExamMcqAttempt(questionId: string, payload: StudentBarFinalExamMcqAttemptInput) {
+  const response = await authenticatedHttp.post<{ success: true; data: StudentBarFinalExamMcqAttemptResponse }>(
+    `/api/v1/library/bar-final-exams-mcq/questions/${questionId}/attempt`,
+    payload
   );
 
   return response.data.data;

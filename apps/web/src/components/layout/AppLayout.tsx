@@ -82,8 +82,12 @@ export function AppLayout() {
         ? 'Case Detail'
         : location.pathname.startsWith('/app/bar-final-exams-nls-mcq/')
           ? 'Bar Final Exam'
-          : location.pathname.startsWith('/app/admin/bar-final-exams-nls-mcq/')
+          : location.pathname.startsWith('/app/bar-final-exams-mcq/')
             ? 'Bar Final Exam'
+            : location.pathname.startsWith('/app/admin/bar-final-exams-nls-mcq/')
+              ? 'Bar Final Exam'
+              : location.pathname.startsWith('/app/admin/bar-final-exams-mcq/')
+                ? 'Bar Final Exam'
         : location.pathname.startsWith('/app/admin/library/law-reports/')
           ? 'Law Report Reader'
           : location.pathname.startsWith('/app/admin/library/subject-summaries/cases/')
