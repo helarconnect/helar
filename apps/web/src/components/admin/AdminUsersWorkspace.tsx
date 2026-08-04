@@ -1153,7 +1153,9 @@ export function AdminUsersWorkspace() {
     }
   }
 
-  const totalUsersValue = usersQuery.data?.summary.registeredUsers.toLocaleString() ?? "0";
+  const registeredUsersCount =
+    usersQuery.data?.summary.registeredUsers ?? usersQuery.data?.summary.totalUsers ?? 0;
+  const totalUsersValue = registeredUsersCount.toLocaleString();
   const activeUsersValue = usersQuery.data?.summary.activeUsers.toLocaleString() ?? "0";
   const verifiedUsersValue = usersQuery.data?.summary.verifiedUsers.toLocaleString() ?? "0";
   const registrationWindowValue = usersQuery.data?.summary.registrationsInWindow.toLocaleString() ?? "0";
