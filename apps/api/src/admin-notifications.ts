@@ -343,7 +343,6 @@ export async function getSuperAdminApprovalQueue(): Promise<AdminApprovalQueueSn
       orderBy: { updatedAt: "desc" },
       select: {
         createdAt: true,
-        createdBy: true,
         id: true,
         subject: { select: { name: true } },
         title: true,
@@ -368,7 +367,6 @@ export async function getSuperAdminApprovalQueue(): Promise<AdminApprovalQueueSn
       orderBy: { updatedAt: "desc" },
       select: {
         createdAt: true,
-        createdBy: true,
         id: true,
         question: true,
         subject: { select: { name: true } },
@@ -380,7 +378,6 @@ export async function getSuperAdminApprovalQueue(): Promise<AdminApprovalQueueSn
       orderBy: { updatedAt: "desc" },
       select: {
         createdAt: true,
-        createdBy: true,
         id: true,
         question: true,
         subject: { select: { name: true } },
@@ -389,24 +386,89 @@ export async function getSuperAdminApprovalQueue(): Promise<AdminApprovalQueueSn
     })
   ]);
 
-  // Resolve creator/submitter names in bulk using `createdBy` user IDs (if available).
-  // This eliminates the previous N+1 audit-log lookups per item (the single largest source of slow loads).
-  const createdByIds = Array.from(
+  // (1) Direct createdBy-based creators (these tables store createdBy on the row).
+  const directUserIds = Array.from(
     new Set(
       [
         ...pendingLibraryMaterials.map((r) => r.createdBy),
-        ...pendingCases.map((r) => r.createdBy),
-        ...pendingEntries.map((r) => r.createdBy),
-        ...pendingBarFinalExamQuestions.map((r) => r.createdBy),
-        ...pendingBarFinalExamMcqQuestions.map((r) => r.createdBy)
+        ...pendingEntries.map((r) => r.createdBy)
       ].filter((v): v is string => Boolean(v))
     )
   );
 
+  // (2) Subject-summary cases / bar exam theory / bar exam MCQ rows do not have a createdBy
+  // column on the model, so we resolve submitters via a SINGLE bulk audit-log query
+  // (resourceIds IN ...) for a bounded set of audit actions per resource type.
+  // This is O(1) queries instead of N+1 per item, and stays fast even with large queues.
+  const caseIds = pendingCases.map((c) => c.id);
+  const barQuestionIds = pendingBarFinalExamQuestions.map((q) => q.id);
+  const barMcqIds = pendingBarFinalExamMcqQuestions.map((q) => q.id);
+  const caseActions = ["admin.subject-summary.case.created", "admin.subject-summary.case.updated"];
+  const barTheoryActions = ["admin.bar-final-exams.question.created", "admin.bar-final-exams.question.updated"];
+  const barMcqActions = ["admin.bar-final-exams.mcq-question.created", "admin.bar-final-exams.mcq-question.updated"];
+
+  const auditResourceIds = [...caseIds, ...barQuestionIds, ...barMcqIds];
+  const auditActions = [...caseActions, ...barTheoryActions, ...barMcqActions];
+
+  type AuditLookupRow = {
+    action: string;
+    createdAt: Date;
+    resource: string | null;
+    userId: string | null;
+    user: { fullName: string } | null;
+  };
+  const auditMatches: AuditLookupRow[] = auditResourceIds.length
+    ? await prisma.auditLog.findMany({
+        where: {
+          deletedAt: null,
+          action: { in: auditActions },
+          resource: { in: auditResourceIds },
+          user: {
+            deletedAt: null,
+            roles: {
+              some: {
+                deletedAt: null,
+                role: {
+                  code: "content_admin",
+                  deletedAt: null
+                }
+              }
+            }
+          }
+        },
+        // Order newest-first so when we iterate + group, the first entry per resource is the latest.
+        orderBy: { createdAt: "desc" },
+        select: {
+          action: true,
+          createdAt: true,
+          resource: true,
+          userId: true,
+          user: { select: { fullName: true } }
+        }
+      })
+    : [];
+
+  // Latest audit actor grouped by resource id. Cases/theory/mcq share ids only within their own
+  // id-space (Prisma ObjectIds are globally unique enough), but a single AuditLog.resource value
+  // only ever refers to one table type per-query (it's the primary key for that content record).
+  const auditByResourceId = new Map<string, AuditLookupRow>();
+  for (const row of auditMatches) {
+    if (!row.resource || auditByResourceId.has(row.resource)) {
+      continue;
+    }
+    auditByResourceId.set(row.resource, row);
+  }
+  // Collect distinct user ids referenced by the audit matches, then bulk-lookup names once.
+  const auditUserIds = Array.from(
+    new Set(auditMatches.map((r) => r.userId).filter((v): v is string => Boolean(v)))
+  );
+  // Also union directUserIds so we run just ONE user lookup for both paths.
+  const allDistinctUserIds = Array.from(new Set([...directUserIds, ...auditUserIds]));
+
   const userNamesById = new Map<string, string>();
-  if (createdByIds.length > 0) {
+  if (allDistinctUserIds.length > 0) {
     const users = await prisma.user.findMany({
-      where: { deletedAt: null, id: { in: createdByIds } },
+      where: { deletedAt: null, id: { in: allDistinctUserIds } },
       select: { id: true, fullName: true }
     });
     for (const user of users) {
@@ -414,12 +476,25 @@ export async function getSuperAdminApprovalQueue(): Promise<AdminApprovalQueueSn
     }
   }
 
-  const defaultActor = (item: { createdAt: Date; updatedAt: Date; createdBy?: string | null }) => ({
-    createdAt: item.createdAt ?? item.updatedAt,
-    fullName: item.createdBy && userNamesById.has(item.createdBy)
-      ? (userNamesById.get(item.createdBy) as string)
-      : "Content admin"
-  });
+  // Helper: given a pending item (with optional createdBy) and optional fallback audit row,
+  // return { createdAt, fullName } for the submitter.
+  const defaultActor = (
+    item: { createdAt: Date; updatedAt: Date; createdBy?: string | null },
+    auditRow?: AuditLookupRow | undefined
+  ) => {
+    const directName =
+      item.createdBy && userNamesById.has(item.createdBy)
+        ? (userNamesById.get(item.createdBy) as string)
+        : null;
+    const auditName =
+      auditRow?.userId && userNamesById.has(auditRow.userId)
+        ? (userNamesById.get(auditRow.userId) as string)
+        : auditRow?.user?.fullName ?? null;
+    return {
+      createdAt: auditRow?.createdAt ?? item.createdAt ?? item.updatedAt,
+      fullName: directName ?? auditName ?? "Content admin"
+    };
+  };
 
   const libraryItems: AdminApprovalQueueItem[] = pendingLibraryMaterials.map((item) => {
     const actor = defaultActor(item);
@@ -443,7 +518,7 @@ export async function getSuperAdminApprovalQueue(): Promise<AdminApprovalQueueSn
   });
 
   const caseItems: AdminApprovalQueueItem[] = pendingCases.map((item) => {
-    const actor = defaultActor(item);
+    const actor = defaultActor(item, auditByResourceId.get(item.id));
     return {
       actionPath: "/app/admin/library/subject-summaries/cases",
       contentTypeLabel: "Subject Summary Case",
@@ -479,7 +554,7 @@ export async function getSuperAdminApprovalQueue(): Promise<AdminApprovalQueueSn
   });
 
   const barFinalExamItems: AdminApprovalQueueItem[] = pendingBarFinalExamQuestions.map((item) => {
-    const actor = defaultActor(item);
+    const actor = defaultActor(item, auditByResourceId.get(item.id));
     return {
       actionPath: "/app/admin/bar-final-exams-nls-mcq",
       contentTypeLabel: "Bar Final Exam Question",
@@ -498,7 +573,7 @@ export async function getSuperAdminApprovalQueue(): Promise<AdminApprovalQueueSn
 
   // MCQ questions use the same review path (both theory + MCQ share the bar final exams nav entry).
   const barFinalExamMcqItems: AdminApprovalQueueItem[] = pendingBarFinalExamMcqQuestions.map((item) => {
-    const actor = defaultActor(item);
+    const actor = defaultActor(item, auditByResourceId.get(item.id));
     return {
       actionPath: "/app/admin/bar-final-exams-mcq",
       contentTypeLabel: "Bar Final Exam MCQ",
@@ -1028,31 +1103,39 @@ async function loadBulkApprovalNotificationRecipients(): Promise<{
     }
   };
 
-  const typeBuckets = [
+  const typeBuckets: Array<{
+    actions: string[];
+    key:
+      | "barFinalExamMcqQuestions"
+      | "barFinalExamQuestions"
+      | "libraryMaterials"
+      | "subjectSummaryCases"
+      | "subjectSummaryEntries";
+  }> = [
     {
-      key: "libraryMaterials" as const,
+      key: "libraryMaterials",
       actions: ["admin.library.material.created", "admin.library.material.updated"]
     },
     {
-      key: "subjectSummaryCases" as const,
+      key: "subjectSummaryCases",
       actions: ["admin.subject-summary.case.created", "admin.subject-summary.case.updated"]
     },
     {
-      key: "subjectSummaryEntries" as const,
+      key: "subjectSummaryEntries",
       actions: ["subject_summary_entry_created", "subject_summary_entry_updated"]
     },
     {
-      key: "barFinalExamQuestions" as const,
+      key: "barFinalExamQuestions",
       actions: ["admin.bar-final-exams.question.created", "admin.bar-final-exams.question.updated"]
     },
     {
-      key: "barFinalExamMcqQuestions" as const,
+      key: "barFinalExamMcqQuestions",
       actions: [
         "admin.bar-final-exams.mcq-question.created",
         "admin.bar-final-exams.mcq-question.updated"
       ]
     }
-  ] as const;
+  ];
 
   const results = await Promise.all(
     typeBuckets.map(async (bucket) => {

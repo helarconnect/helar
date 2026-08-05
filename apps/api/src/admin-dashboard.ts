@@ -303,7 +303,7 @@ export async function getAdminDashboardOverview() {
     canceledSubscriptionsCount,
     expiredSubscriptionsCount,
     pastDueSubscriptionsCount,
-    inactiveSubscriptionsCount,
+    trialingSubscriptionsCount,
     paymentStatusCounts,
     succeededPayments,
     failedPaymentsCount,
@@ -326,8 +326,11 @@ export async function getAdminDashboardOverview() {
     averageStudyProgressTime,
     caseReadProgressCount,
     lawReportProgressCount,
-    studyNoteProgressCount,
+    revisionMaterialProgressCount,
+    statuteProgressCount,
     subjectSummaryEntryProgressCount,
+    subjectSummarySubjectProgressCount,
+    subjectSummaryTopicProgressCount,
     studyBookmarkCount,
     studyNoteCount,
     studyDownloadCount,
@@ -444,7 +447,7 @@ export async function getAdminDashboardOverview() {
       where: { deletedAt: null, status: SubscriptionStatus.PAST_DUE }
     }),
     prisma.subscription.count({
-      where: { deletedAt: null, status: SubscriptionStatus.INACTIVE }
+      where: { deletedAt: null, status: SubscriptionStatus.TRIALING }
     }),
     prisma.payment.findMany({
       where: { deletedAt: null },
@@ -537,10 +540,19 @@ export async function getAdminDashboardOverview() {
       where: { deletedAt: null, contentType: StudentStudyContentType.LAW_REPORT }
     }),
     prisma.studentStudyProgress.count({
-      where: { deletedAt: null, contentType: StudentStudyContentType.STUDY_NOTE }
+      where: { deletedAt: null, contentType: StudentStudyContentType.REVISION_MATERIAL }
+    }),
+    prisma.studentStudyProgress.count({
+      where: { deletedAt: null, contentType: StudentStudyContentType.STATUTE }
     }),
     prisma.studentStudyProgress.count({
       where: { deletedAt: null, contentType: StudentStudyContentType.SUBJECT_SUMMARY_ENTRY }
+    }),
+    prisma.studentStudyProgress.count({
+      where: { deletedAt: null, contentType: StudentStudyContentType.SUBJECT_SUMMARY_SUBJECT }
+    }),
+    prisma.studentStudyProgress.count({
+      where: { deletedAt: null, contentType: StudentStudyContentType.SUBJECT_SUMMARY_TOPIC }
     }),
     prisma.studentStudyBookmark.count({
       where: { deletedAt: null }
@@ -1358,7 +1370,7 @@ export async function getAdminDashboardOverview() {
     [SubscriptionStatus.CANCELED, canceledSubscriptionsCount],
     [SubscriptionStatus.EXPIRED, expiredSubscriptionsCount],
     [SubscriptionStatus.PAST_DUE, pastDueSubscriptionsCount],
-    [SubscriptionStatus.INACTIVE, inactiveSubscriptionsCount]
+    [SubscriptionStatus.TRIALING, trialingSubscriptionsCount]
   ]);
   const paymentStatusMap = summarizePayments(paymentStatusCounts);
   const subjectCaseStatusMap = new Map<SubjectSummaryCaseStatus, number>([
@@ -1375,9 +1387,12 @@ export async function getAdminDashboardOverview() {
   ]);
   const studyProgressByTypeMap = new Map<StudentStudyContentType, number>([
     [StudentStudyContentType.LAW_REPORT, lawReportProgressCount],
-    [StudentStudyContentType.STUDY_NOTE, studyNoteProgressCount],
+    [StudentStudyContentType.REVISION_MATERIAL, revisionMaterialProgressCount],
+    [StudentStudyContentType.STATUTE, statuteProgressCount],
     [StudentStudyContentType.SUBJECT_SUMMARY_CASE, caseReadProgressCount],
-    [StudentStudyContentType.SUBJECT_SUMMARY_ENTRY, subjectSummaryEntryProgressCount]
+    [StudentStudyContentType.SUBJECT_SUMMARY_ENTRY, subjectSummaryEntryProgressCount],
+    [StudentStudyContentType.SUBJECT_SUMMARY_SUBJECT, subjectSummarySubjectProgressCount],
+    [StudentStudyContentType.SUBJECT_SUMMARY_TOPIC, subjectSummaryTopicProgressCount]
   ]);
   const categoryCountMap = new Map(libraryCategories.map((item) => [item.slug, item._count.materials]));
 
