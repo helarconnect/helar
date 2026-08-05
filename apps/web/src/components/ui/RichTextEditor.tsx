@@ -3,6 +3,7 @@ import {
   AlignLeft,
   AlignRight,
   Bold,
+  Highlighter,
   Italic,
   Link2,
   List,
@@ -16,6 +17,7 @@ import { cn } from '@/lib/utils'
 
 type ToolbarItem =
   | { command: 'bold' | 'italic' | 'underline' | 'strikeThrough' | 'justifyLeft' | 'justifyCenter' | 'justifyRight' | 'insertUnorderedList' | 'insertOrderedList'; icon: any; label: string }
+  | { command: 'foreColor'; icon: any; label: string }
   | { command: 'formatBlock'; value: string; label: string }
   | { command: 'createLink'; icon: any; label: string }
 
@@ -37,6 +39,8 @@ export function RichTextEditor({
   value: string
 }) {
   const editorRef = useRef<HTMLDivElement | null>(null)
+  const colorInputRef = useRef<HTMLInputElement | null>(null)
+  const selectionRef = useRef<Range | null>(null)
 
   useEffect(() => {
     if (!editorRef.current || editorRef.current.innerHTML === value) {
@@ -50,12 +54,50 @@ export function RichTextEditor({
     editorRef.current?.focus()
   }
 
+  function saveSelection() {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const selection = window.getSelection()
+    if (!selection || selection.rangeCount === 0) {
+      return
+    }
+
+    const range = selection.getRangeAt(0)
+    if (!editorRef.current?.contains(range.commonAncestorContainer)) {
+      return
+    }
+
+    selectionRef.current = range.cloneRange()
+  }
+
+  function restoreSelection() {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const range = selectionRef.current
+    if (!range) {
+      return
+    }
+
+    const selection = window.getSelection()
+    if (!selection) {
+      return
+    }
+
+    selection.removeAllRanges()
+    selection.addRange(range)
+  }
+
   function applyCommand(command: string, commandValue?: string) {
     if (!editorRef.current) {
       return
     }
 
     focusEditor()
+    restoreSelection()
     document.execCommand(command, false, commandValue)
     onChange(editorRef.current.innerHTML)
   }
@@ -65,6 +107,7 @@ export function RichTextEditor({
       return
     }
 
+    saveSelection()
     const url = window.prompt('Enter the link URL')
     if (!url) {
       return
@@ -80,6 +123,7 @@ export function RichTextEditor({
     { command: 'strikeThrough', icon: Strikethrough, label: 'Strikethrough' },
     { command: 'formatBlock', value: '<h2>', label: 'H2' },
     { command: 'formatBlock', value: '<h3>', label: 'H3' },
+    { command: 'foreColor', icon: Highlighter, label: 'Text color' },
     { command: 'justifyLeft', icon: AlignLeft, label: 'Align left' },
     { command: 'justifyCenter', icon: AlignCenter, label: 'Align center' },
     { command: 'justifyRight', icon: AlignRight, label: 'Align right' },
@@ -139,6 +183,11 @@ export function RichTextEditor({
                 key={`${item.command}-${item.label}`}
                 onMouseDown={(event) => {
                   event.preventDefault()
+                  if (item.command === 'foreColor') {
+                    saveSelection()
+                    colorInputRef.current?.click()
+                    return
+                  }
                   if (item.command === 'createLink') {
                     insertLink()
                     return
@@ -152,6 +201,12 @@ export function RichTextEditor({
               </button>
             )
           })}
+          <input
+            className="sr-only"
+            onChange={(event) => applyCommand('foreColor', event.target.value)}
+            ref={colorInputRef}
+            type="color"
+          />
         </div>
 
         <div
@@ -176,6 +231,8 @@ export function RichTextEditor({
             className={cn('prose prose-sm max-w-none px-4 py-3 leading-7 outline-none', isDark ? 'prose-invert text-slate-200' : 'text-slate-900')}
             contentEditable
             onInput={(event) => onChange(event.currentTarget.innerHTML)}
+            onKeyUp={saveSelection}
+            onMouseUp={saveSelection}
             ref={editorRef}
             suppressContentEditableWarning
             tabIndex={0}

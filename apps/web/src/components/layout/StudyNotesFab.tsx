@@ -239,6 +239,7 @@ function NoteEditor({
   const editorRef = useRef<HTMLDivElement | null>(null);
   const colorInputRef = useRef<HTMLInputElement | null>(null);
   const highlightInputRef = useRef<HTMLInputElement | null>(null);
+  const selectionRef = useRef<Range | null>(null);
 
   useEffect(() => {
     if (!editorRef.current || editorRef.current.innerHTML === value) {
@@ -252,12 +253,50 @@ function NoteEditor({
     editorRef.current?.focus();
   }
 
+  function saveSelection() {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) {
+      return;
+    }
+
+    const range = selection.getRangeAt(0);
+    if (!editorRef.current?.contains(range.commonAncestorContainer)) {
+      return;
+    }
+
+    selectionRef.current = range.cloneRange();
+  }
+
+  function restoreSelection() {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const range = selectionRef.current;
+    if (!range) {
+      return;
+    }
+
+    const selection = window.getSelection();
+    if (!selection) {
+      return;
+    }
+
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
   function applyCommand(command: string, valueArg?: string) {
     if (!editorRef.current) {
       return;
     }
 
     focusEditor();
+    restoreSelection();
     document.execCommand(command, false, valueArg);
     onChange(editorRef.current.innerHTML);
   }
@@ -274,6 +313,7 @@ function NoteEditor({
   }
 
   function insertLink() {
+    saveSelection();
     const url = window.prompt("Enter the link URL");
 
     if (!url) {
@@ -284,6 +324,7 @@ function NoteEditor({
   }
 
   function insertImage() {
+    saveSelection();
     const url = window.prompt("Enter the image URL");
 
     if (!url) {
@@ -323,7 +364,14 @@ function NoteEditor({
         <ToolbarButton isDark={isDark} onClick={() => applyCommand("fontSize", "4")} title="Larger text">
           <span className="text-xs font-semibold">A+</span>
         </ToolbarButton>
-        <ToolbarButton isDark={isDark} onClick={() => colorInputRef.current?.click()} title="Font color">
+        <ToolbarButton
+          isDark={isDark}
+          onClick={() => {
+            saveSelection();
+            colorInputRef.current?.click();
+          }}
+          title="Font color"
+        >
           <span className="text-xs font-semibold">A</span>
         </ToolbarButton>
         <input
@@ -332,7 +380,14 @@ function NoteEditor({
           ref={colorInputRef}
           type="color"
         />
-        <ToolbarButton isDark={isDark} onClick={() => highlightInputRef.current?.click()} title="Highlight">
+        <ToolbarButton
+          isDark={isDark}
+          onClick={() => {
+            saveSelection();
+            highlightInputRef.current?.click();
+          }}
+          title="Highlight"
+        >
           <Highlighter className="h-4 w-4" />
         </ToolbarButton>
         <input
@@ -383,6 +438,8 @@ function NoteEditor({
         className={cn("min-h-[280px] px-4 py-3 text-sm leading-7 outline-none", isDark ? "text-white" : "text-slate-950")}
         contentEditable
         onInput={(event) => onChange(event.currentTarget.innerHTML)}
+        onKeyUp={saveSelection}
+        onMouseUp={saveSelection}
         ref={editorRef}
         suppressContentEditableWarning
       />

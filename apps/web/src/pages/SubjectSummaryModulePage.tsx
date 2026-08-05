@@ -12,6 +12,7 @@ import {
   Filter,
   Italic,
   List,
+  ListOrdered,
   Pencil,
   Plus,
   Search,
@@ -175,6 +176,8 @@ function RichTextField({
   value: string;
 }) {
   const editorRef = useRef<HTMLDivElement | null>(null);
+  const colorInputRef = useRef<HTMLInputElement | null>(null);
+  const selectionRef = useRef<Range | null>(null);
 
   useEffect(() => {
     if (!editorRef.current || editorRef.current.innerHTML === value) {
@@ -184,13 +187,51 @@ function RichTextField({
     editorRef.current.innerHTML = value;
   }, [value]);
 
-  function applyCommand(command: string) {
+  function saveSelection() {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) {
+      return;
+    }
+
+    const range = selection.getRangeAt(0);
+    if (!editorRef.current?.contains(range.commonAncestorContainer)) {
+      return;
+    }
+
+    selectionRef.current = range.cloneRange();
+  }
+
+  function restoreSelection() {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const range = selectionRef.current;
+    if (!range) {
+      return;
+    }
+
+    const selection = window.getSelection();
+    if (!selection) {
+      return;
+    }
+
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  function applyCommand(command: string, commandValue?: string) {
     if (!editorRef.current) {
       return;
     }
 
     editorRef.current.focus();
-    document.execCommand(command, false);
+    restoreSelection();
+    document.execCommand(command, false, commandValue);
     onChange(editorRef.current.innerHTML);
   }
 
@@ -206,7 +247,8 @@ function RichTextField({
             { command: "justifyLeft", icon: AlignLeft, label: "Align left" },
             { command: "justifyCenter", icon: AlignCenter, label: "Align center" },
             { command: "justifyRight", icon: AlignRight, label: "Align right" },
-            { command: "insertUnorderedList", icon: List, label: "Bullet list" }
+            { command: "insertUnorderedList", icon: List, label: "Bullet list" },
+            { command: "insertOrderedList", icon: ListOrdered, label: "Numbered list" }
           ].map((item) => {
             const Icon = item.icon;
 
@@ -230,6 +272,24 @@ function RichTextField({
               </button>
             );
           })}
+          <button
+            className={cn(
+              "inline-flex h-9 w-9 items-center justify-center rounded-2xl border text-xs font-semibold transition",
+              isDark
+                ? "border-slate-700 bg-slate-950 text-slate-200 hover:border-slate-600 hover:text-white"
+                : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950"
+            )}
+            onMouseDown={(event) => {
+              event.preventDefault();
+              saveSelection();
+              colorInputRef.current?.click();
+            }}
+            title="Text color"
+            type="button"
+          >
+            A
+          </button>
+          <input className="sr-only" onChange={(event) => applyCommand("foreColor", event.target.value)} ref={colorInputRef} type="color" />
         </div>
         <div
           className="relative cursor-text"
@@ -247,6 +307,8 @@ function RichTextField({
             contentEditable
             role="textbox"
             onInput={(event) => onChange(event.currentTarget.innerHTML)}
+            onKeyUp={saveSelection}
+            onMouseUp={saveSelection}
             ref={editorRef}
             suppressContentEditableWarning
             tabIndex={0}
