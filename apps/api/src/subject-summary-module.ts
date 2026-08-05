@@ -370,12 +370,16 @@ async function countEntryStatuses(where: Prisma.SubjectSummaryEntryWhereInput) {
   };
 }
 
-async function assertCasesBelongToSubject(subjectId: string, relatedCaseIds: string[]) {
+async function assertCasesBelongToSubject(
+  subjectId: string,
+  relatedCaseIds: string[],
+  db: Prisma.TransactionClient | typeof prisma = prisma
+) {
   if (!relatedCaseIds.length) {
     return;
   }
 
-  const count = await prisma.subjectSummaryCase.count({
+  const count = await db.subjectSummaryCase.count({
     where: {
       deletedAt: null,
       id: {
@@ -746,9 +750,17 @@ export async function createSubjectSummaryTopicEntries(input: TopicBulkInput, ac
     let displayOrderCursor = (existingMax?.displayOrder ?? -1) + 1;
     let serialCursor = serialStart;
 
-    for (const entryInput of input.entries) {
-      await assertCasesBelongToSubject(input.subjectId, entryInput.relatedCaseIds);
+    const relatedCaseIdSet = new Set<string>();
 
+    for (const entryInput of input.entries) {
+      for (const caseId of entryInput.relatedCaseIds) {
+        relatedCaseIdSet.add(caseId);
+      }
+    }
+
+    await assertCasesBelongToSubject(input.subjectId, Array.from(relatedCaseIdSet), tx);
+
+    for (const entryInput of input.entries) {
       await tx.subjectSummaryEntry.create({
         data: {
           answer: entryInput.answer,

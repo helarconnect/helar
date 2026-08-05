@@ -1078,11 +1078,19 @@ export function AdminSubjectSummaryModulePage() {
     }
   });
   const bulkCreateMutation = useMutation({
-    mutationFn: () =>
-      createSubjectSummaryModuleTopicEntries({
-        ...topicDraft,
-        entries: topicDraft.entries.map(({ clientId: _clientId, orderNumber: _orderNumber, ...entry }) => entry)
-      }),
+    mutationFn: async () => {
+      const sanitizedEntries = topicDraft.entries.map(({ clientId: _clientId, orderNumber: _orderNumber, ...entry }) => entry);
+      const chunkSize = 20;
+
+      for (let offset = 0; offset < sanitizedEntries.length; offset += chunkSize) {
+        await createSubjectSummaryModuleTopicEntries({
+          ...topicDraft,
+          entries: sanitizedEntries.slice(offset, offset + chunkSize)
+        });
+      }
+
+      return { createdCount: sanitizedEntries.length };
+    },
     onSuccess: async () => {
       setTopicSaveError(null);
       await Promise.all([

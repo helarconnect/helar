@@ -1440,7 +1440,7 @@ export function createApp(options: AppOptions = {}) {
 
   app.use(cors());
   app.use(helmet());
-  app.use(express.json({ limit: "15mb" }));
+  app.use(express.json({ limit: "30mb" }));
   app.use(morgan("dev"));
   app.use(
     ["/api/v1/auth/demo-sign-in", "/api/v1/auth/register", "/api/v1/auth/forgot-password", "/api/v1/auth/reset-password"],
