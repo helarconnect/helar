@@ -238,8 +238,13 @@ export function AdminBarFinalExamsMcqPage() {
     countSubjectId && modalMode?.kind === "create" ? (questionCountQuery.data?.pagination.totalItems ?? 0) + 1 : null;
   const canOpenCreate = !formOptionsQuery.isLoading && subjects.length > 0;
   const normalizedOptions = draft.options.map((value) => value.trim());
-  const hasEnoughOptions = normalizedOptions.filter(Boolean).length >= 2;
-  const correctIndexValid = draft.correctOptionIndex >= 0 && draft.correctOptionIndex < normalizedOptions.length;
+  const optionIndexMap = normalizedOptions.reduce<number[]>((acc, option, index) => {
+    if (option) acc.push(index);
+    return acc;
+  }, []);
+  const hasEnoughOptions = optionIndexMap.length >= 2;
+  const selectedCorrectOption = normalizedOptions[draft.correctOptionIndex] ?? "";
+  const correctIndexValid = Boolean(selectedCorrectOption) && optionIndexMap.includes(draft.correctOptionIndex);
   const canSaveDraft = Boolean(draft.subjectId) && stripHtml(draft.question).length >= 2 && hasEnoughOptions && correctIndexValid;
 
   function openCreate() {
@@ -644,9 +649,28 @@ export function AdminBarFinalExamsMcqPage() {
                 )}
                 disabled={!canSaveDraft || createMutation.isPending || updateMutation.isPending}
                 onClick={() => {
+                  const trimmedOptions = draft.options.map((option) => option.trim());
+                  const cleanOptions: string[] = [];
+                  const indexMap: number[] = [];
+
+                  for (let index = 0; index < trimmedOptions.length; index += 1) {
+                    const option = trimmedOptions[index];
+                    if (!option) continue;
+                    indexMap.push(index);
+                    cleanOptions.push(option);
+                  }
+
+                  const remappedCorrectIndex = indexMap.indexOf(draft.correctOptionIndex);
+
+                  if (remappedCorrectIndex < 0) {
+                    showToast("Correct option cannot be empty.", "error");
+                    return;
+                  }
+
                   const payload: BarFinalExamMcqQuestionInput = {
                     ...draft,
-                    options: draft.options.map((option) => option.trim()).filter(Boolean)
+                    correctOptionIndex: remappedCorrectIndex,
+                    options: cleanOptions
                   };
                   if (modalMode.kind === "create") {
                     createMutation.mutate(payload);
