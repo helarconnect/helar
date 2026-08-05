@@ -21,6 +21,7 @@ import { useTheme } from '@/hooks/useTheme'
 import {
   activateAdminSubscriptionManually,
   approveAdminLibraryMaterial,
+  approveAllPendingAdminContent,
   approveAdminBarFinalExamQuestion,
   approveAdminSubjectSummaryCase,
   approveAdminSubjectSummaryEntry,
@@ -279,6 +280,37 @@ export function AdminContentPage() {
     queryKey: queryKeys.adminContentReview,
     queryFn: fetchAdminContentReviewQueue,
     enabled: isSuperAdminWorkspace,
+  })
+
+  // Bulk approve: approves every pending item across all content types + MCQ questions in one request.
+  // On success, shows a summary toast and refreshes every affected query so counts/tables reflect the new statuses.
+  const bulkApproveMutation = useMutation({
+    mutationFn: approveAllPendingAdminContent,
+    onSuccess: async (data) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.adminContentReview }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.adminNotifications }),
+        queryClient.invalidateQueries({ queryKey: ['admin-library'] }),
+        queryClient.invalidateQueries({ queryKey: ['subject-summary-cases'] }),
+        queryClient.invalidateQueries({ queryKey: ['subject-summary-module-admin-entries'] }),
+        queryClient.invalidateQueries({ queryKey: ['admin-bar-final-exam-questions'] }),
+        queryClient.invalidateQueries({ queryKey: ['admin-bar-final-exam-mcq-questions'] }),
+      ])
+
+      const summary = [
+        data.counts.libraryMaterials ? `${data.counts.libraryMaterials} library items` : null,
+        data.counts.subjectSummaryCases ? `${data.counts.subjectSummaryCases} subject summary cases` : null,
+        data.counts.subjectSummaryEntries ? `${data.counts.subjectSummaryEntries} subject summary entries` : null,
+        data.counts.barFinalExamQuestions ? `${data.counts.barFinalExamQuestions} NLS theory questions` : null,
+        data.counts.barFinalExamMcqQuestions ? `${data.counts.barFinalExamMcqQuestions} MCQ questions` : null,
+      ].filter(Boolean)
+
+      window.alert(
+        data.skippedCount > 0
+          ? `Approved ${data.approvedCount} pending items, skipped ${data.skippedCount} (already resolved).`
+          : `Approved all ${data.approvedCount} pending items.` + (summary.length ? `\n• ${summary.join('\n• ')}` : '')
+      )
+    },
   })
 
   const approveMutation = useMutation({
@@ -541,9 +573,22 @@ export function AdminContentPage() {
               <p className={cn('text-xs uppercase tracking-[0.22em]', isDark ? 'text-slate-500' : 'text-slate-400')}>Release workflow</p>
               <h3 className={cn('mt-1 font-heading text-3xl', isDark ? 'text-white' : 'text-slate-950')}>Pending approval queue</h3>
             </div>
-            <AdminStatusPill isDark={isDark} tone="amber">
-              {reviewQueue?.summary.totalPending ?? 0} waiting for decision
-            </AdminStatusPill>
+            <div className="flex flex-wrap items-center gap-3">
+              <AdminStatusPill isDark={isDark} tone="amber">
+                {reviewQueue?.summary.totalPending ?? 0} waiting for decision
+              </AdminStatusPill>
+              <button
+                className="button-primary !px-5 !py-3"
+                disabled={!reviewQueue?.summary.totalPending || bulkApproveMutation.isPending || approveMutation.isPending || declineMutation.isPending}
+                onClick={() => void bulkApproveMutation.mutateAsync()}
+                type="button"
+              >
+                <span className="inline-flex items-center gap-2">
+                  <CheckCheck className="h-4 w-4" />
+                  {bulkApproveMutation.isPending ? 'Approving all pending...' : 'Approve all pending'}
+                </span>
+              </button>
+            </div>
           </div>
 
           <div className="mt-6 space-y-3">

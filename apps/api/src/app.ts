@@ -224,8 +224,9 @@ import {
   verifySubscriptionPayment
 } from "./subscriptions.js";
 import {
-  approveLibraryMaterial,
+  approveAllPendingContent,
   approveBarFinalExamQuestion,
+  approveLibraryMaterial,
   approveSubjectSummaryCase,
   approveSubjectSummaryEntry,
   declineBarFinalExamQuestion,
@@ -1654,6 +1655,31 @@ export function createApp(options: AppOptions = {}) {
           error: {
             code: "ADMIN_NOTIFICATIONS_UPDATE_FAILED",
             message: "Could not update admin notifications."
+          }
+        });
+      }
+    }
+  );
+
+  app.post(
+    "/api/v1/admin/approvals/approve-all-pending",
+    authenticateRequest,
+    requireSuperAdminRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      try {
+        const data = await approveAllPendingContent(request.auth!.userId);
+
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "ADMIN_BULK_APPROVAL_FAILED",
+            message: "Could not approve all pending content."
           }
         });
       }

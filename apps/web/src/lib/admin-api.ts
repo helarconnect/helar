@@ -2418,6 +2418,29 @@ export async function approveAdminBarFinalExamQuestion(questionId: string) {
   return response.data.data;
 }
 
+export type AdminBulkApprovalResponse = {
+  approvedCount: number;
+  counts: {
+    barFinalExamMcqQuestions: number;
+    barFinalExamQuestions: number;
+    libraryMaterials: number;
+    subjectSummaryCases: number;
+    subjectSummaryEntries: number;
+  };
+  finishedAt: string;
+  skippedCount: number;
+  startedAt: string;
+  success: true;
+};
+
+export async function approveAllPendingAdminContent() {
+  const response = await authenticatedHttp.post<{ success: true; data: AdminBulkApprovalResponse }>(
+    "/api/v1/admin/approvals/approve-all-pending"
+  );
+
+  return response.data.data;
+}
+
 export async function declineAdminLibraryMaterial(materialId: string, reason: string) {
   const response = await authenticatedHttp.post<{ success: true; data: { id: string; success: true } }>(
     `/api/v1/admin/approvals/library-materials/${materialId}/decline`,

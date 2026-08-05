@@ -850,6 +850,171 @@ export async function approveBarFinalExamQuestion(questionId: string, approverUs
   });
 }
 
+// Approves every pending content item across all 4 content types (plus MCQ questions) in a single operation.
+// Uses per-record transactional helpers to preserve notification + audit behavior and fail only for records
+// that are no longer pending (partial success is reported back to the admin UI).
+export async function approveAllPendingContent(approverUserId: string) {
+  const startedAt = new Date();
+
+  // Load all pending IDs first so we can orchestrate sequential approvals and aggregate counts.
+  const pending = await prisma.$transaction(async (tx) => {
+    const [libraryMaterials, subjectSummaryCases, subjectSummaryEntries, barFinalExamQuestions, barFinalExamMcqQuestions] =
+      await Promise.all([
+        tx.studyMaterial.findMany({
+          where: {
+            deletedAt: null,
+            publicationStatus: ContentPublicationStatus.PENDING_APPROVAL
+          },
+          orderBy: { updatedAt: "desc" },
+          select: { id: true, title: true }
+        }),
+        tx.subjectSummaryCase.findMany({
+          where: {
+            deletedAt: null,
+            status: SubjectSummaryCaseStatus.PENDING_APPROVAL
+          },
+          orderBy: { updatedAt: "desc" },
+          select: { id: true, title: true }
+        }),
+        tx.subjectSummaryEntry.findMany({
+          where: {
+            deletedAt: null,
+            status: SubjectSummaryCaseStatus.PENDING_APPROVAL
+          },
+          orderBy: { updatedAt: "desc" },
+          select: { id: true, question: true }
+        }),
+        tx.barFinalExamQuestion.findMany({
+          where: {
+            deletedAt: null,
+            status: BarFinalExamQuestionStatus.PENDING_APPROVAL
+          },
+          orderBy: { updatedAt: "desc" },
+          select: { id: true, question: true }
+        }),
+        tx.barFinalExamMcqQuestion.findMany({
+          where: {
+            deletedAt: null,
+            status: BarFinalExamQuestionStatus.PENDING_APPROVAL
+          },
+          orderBy: { updatedAt: "desc" },
+          select: { id: true, question: true }
+        })
+      ]);
+
+    return {
+      barFinalExamMcqQuestions,
+      barFinalExamQuestions,
+      libraryMaterials,
+      subjectSummaryCases,
+      subjectSummaryEntries
+    };
+  });
+
+  // Approve each record using the existing per-item helpers so notifications + audit logs remain consistent.
+  const approvalResults = await Promise.all([
+    ...pending.libraryMaterials.map(async (item) => ({
+      type: "libraryMaterials" as const,
+      id: item.id,
+      result: await approveLibraryMaterial(item.id, approverUserId)
+    })),
+    ...pending.subjectSummaryCases.map(async (item) => ({
+      type: "subjectSummaryCases" as const,
+      id: item.id,
+      result: await approveSubjectSummaryCase(item.id)
+    })),
+    ...pending.subjectSummaryEntries.map(async (item) => ({
+      type: "subjectSummaryEntries" as const,
+      id: item.id,
+      result: await approveSubjectSummaryEntry(item.id)
+    })),
+    ...pending.barFinalExamQuestions.map(async (item) => ({
+      type: "barFinalExamQuestions" as const,
+      id: item.id,
+      result: await approveBarFinalExamQuestion(item.id, approverUserId)
+    })),
+    ...pending.barFinalExamMcqQuestions.map(async (item) => ({
+      type: "barFinalExamMcqQuestions" as const,
+      id: item.id,
+      result: await approveBarFinalExamMcqQuestion(item.id, approverUserId)
+    }))
+  ]);
+
+  // Count successful approvals per content type (null means already resolved / not pending anymore).
+  const counts = {
+    barFinalExamMcqQuestions: 0,
+    barFinalExamQuestions: 0,
+    libraryMaterials: 0,
+    subjectSummaryCases: 0,
+    subjectSummaryEntries: 0
+  };
+
+  for (const approval of approvalResults) {
+    if (approval.result?.success) {
+      counts[approval.type] += 1;
+    }
+  }
+
+  const approvedCount =
+    counts.barFinalExamMcqQuestions +
+    counts.barFinalExamQuestions +
+    counts.libraryMaterials +
+    counts.subjectSummaryCases +
+    counts.subjectSummaryEntries;
+
+  const skippedCount = approvalResults.length - approvedCount;
+
+  return {
+    approvedCount,
+    skippedCount,
+    counts,
+    finishedAt: new Date().toISOString(),
+    startedAt: startedAt.toISOString(),
+    success: true as const
+  };
+}
+
+// Approves a single pending MCQ question (NLS MCQ module) using the same transaction/notification pattern
+// used for NLS theory questions.
+export async function approveBarFinalExamMcqQuestion(questionId: string, approverUserId: string) {
+  return runApprovalMutation<{ id: string; question: string }>({
+    buildNotification: (item) => ({
+      body: `Your bar final exam MCQ question "${item.question}" was approved by the super admin and is now published.`,
+      title: "Bar final exam MCQ approved"
+    }),
+    createResult: (item) => ({
+      id: item.id,
+      success: true as const
+    }),
+    loadPendingItem: (tx) =>
+      tx.barFinalExamMcqQuestion.findFirst({
+        where: {
+          deletedAt: null,
+          id: questionId,
+          status: BarFinalExamQuestionStatus.PENDING_APPROVAL
+        },
+        select: {
+          id: true,
+          question: true
+        }
+      }),
+    notificationActions: ["admin.bar-final-exams-mcq.question.created", "admin.bar-final-exams-mcq.question.updated"],
+    updatePendingItem: async (tx, item) => {
+      await tx.barFinalExamMcqQuestion.update({
+        where: {
+          id: item.id
+        },
+        data: {
+          approvedAt: new Date(),
+          approvedBy: approverUserId,
+          reviewFeedback: null,
+          status: BarFinalExamQuestionStatus.PUBLISHED
+        }
+      });
+    }
+  });
+}
+
 export async function declineBarFinalExamQuestion(questionId: string, approverUserId: string, reason: string) {
   return runApprovalMutation<{ id: string; question: string }>({
     buildNotification: (item) => ({
