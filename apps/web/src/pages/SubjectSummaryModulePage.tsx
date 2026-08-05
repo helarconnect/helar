@@ -389,6 +389,7 @@ function AdminEntryModal({
   onChange,
   onClose,
   onSubmit,
+  onSubmitAndAddQuestions,
   relatedCases,
   subjects,
   title
@@ -399,6 +400,7 @@ function AdminEntryModal({
   onChange: <K extends keyof SubjectSummaryModuleEntryInput>(field: K, value: SubjectSummaryModuleEntryInput[K]) => void;
   onClose: () => void;
   onSubmit: () => void;
+  onSubmitAndAddQuestions: () => void;
   relatedCases: Array<{
     citation: string;
     id: string;
@@ -619,6 +621,23 @@ function AdminEntryModal({
               type="button"
             >
               Cancel
+            </button>
+            <button
+              className={cn(
+                "rounded-2xl border px-4 py-3 text-sm font-medium",
+                isSaving || draft.topic.trim().length < 2
+                  ? isDark
+                    ? "cursor-not-allowed border-slate-800 bg-slate-950 text-slate-600"
+                    : "cursor-not-allowed border-slate-200 bg-white text-slate-400"
+                  : isDark
+                    ? "border-slate-700 bg-slate-950 text-slate-200 hover:border-slate-600 hover:text-white"
+                    : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950"
+              )}
+              disabled={isSaving || draft.topic.trim().length < 2}
+              onClick={onSubmitAndAddQuestions}
+              type="button"
+            >
+              Save + add questions
             </button>
             <button className="button-primary !px-5 !py-3" disabled={isSaving} onClick={onSubmit} type="button">
               {isSaving ? "Saving..." : "Save subject summary"}
@@ -881,6 +900,7 @@ function AdminTopicModal({
   draft,
   isDark,
   isSaving,
+  onAddQuestion,
   onClose,
   onSubmit,
   onUpdate,
@@ -890,6 +910,7 @@ function AdminTopicModal({
   draft: TopicDraftState;
   isDark: boolean;
   isSaving: boolean;
+  onAddQuestion: () => void;
   onClose: () => void;
   onSubmit: () => void;
   onUpdate: (nextDraft: TopicDraftState) => void;
@@ -969,27 +990,7 @@ function AdminTopicModal({
                 "inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium",
                 isDark ? "border-slate-700 bg-slate-950 text-slate-200" : "border-slate-200 bg-white text-slate-700"
               )}
-              onClick={() =>
-                onUpdate({
-                  ...draft,
-                  entries: [
-                    {
-                      clientId: createClientId(),
-                      orderNumber: entries.reduce((max, item) => Math.max(max, item.orderNumber), 0) + 1,
-                      answer: "",
-                      difficulty: "EASY",
-                      estimatedReadingTime: 2,
-                      examTip: "",
-                      keyPrinciple: "",
-                      question: "",
-                      relatedCaseIds: [],
-                      relatedStatutes: [],
-                      tags: []
-                    },
-                    ...entries
-                  ]
-                })
-              }
+              onClick={onAddQuestion}
               type="button"
             >
               <Plus className="h-4 w-4" />
@@ -1108,6 +1109,7 @@ export function AdminSubjectSummaryModulePage() {
     subjectId: incomingSubjectId,
     topic: ""
   }));
+  const [savedTopicEntryClientIds, setSavedTopicEntryClientIds] = useState(() => new Set<string>());
   const [modalMode, setModalMode] = useState<"entry" | "topic" | null>(null);
   const [topicSaveError, setTopicSaveError] = useState<string | null>(null);
 
@@ -1144,8 +1146,14 @@ export function AdminSubjectSummaryModulePage() {
   });
   const bulkCreateMutation = useMutation({
     mutationFn: async () => {
-      const sanitizedEntries = topicDraft.entries.map(({ clientId: _clientId, orderNumber: _orderNumber, ...entry }) => entry);
+      const sanitizedEntries = topicDraft.entries
+        .filter((entry) => !savedTopicEntryClientIds.has(entry.clientId))
+        .map(({ clientId: _clientId, orderNumber: _orderNumber, ...entry }) => entry);
       const chunkSize = 20;
+
+      if (sanitizedEntries.length === 0) {
+        return { createdCount: 0 };
+      }
 
       for (let offset = 0; offset < sanitizedEntries.length; offset += chunkSize) {
         await createSubjectSummaryModuleTopicEntries({
@@ -1158,6 +1166,7 @@ export function AdminSubjectSummaryModulePage() {
     },
     onSuccess: async () => {
       setTopicSaveError(null);
+      setSavedTopicEntryClientIds(new Set());
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.subjectSummaryModuleAdminEntries(filters) }),
         queryClient.invalidateQueries({
@@ -1203,6 +1212,7 @@ export function AdminSubjectSummaryModulePage() {
     setEditingEntry(null);
     setModalMode("topic");
     setTopicSaveError(null);
+    setSavedTopicEntryClientIds(new Set());
     setTopicDraft({
       entries: [
         {
@@ -1224,6 +1234,135 @@ export function AdminSubjectSummaryModulePage() {
       subjectId: filters.subjectId,
       topic: filters.topic
     });
+  }
+
+  function buildNextTopicEntryOrderNumber(currentEntries: TopicDraftState["entries"]) {
+    return currentEntries.reduce((max, item) => Math.max(max, item.orderNumber), 0) + 1;
+  }
+
+  function hasTopicEntryContent(entry: TopicDraftState["entries"][number]) {
+    return stripHtml(entry.question).length >= 2 || stripHtml(entry.answer).length >= 2;
+  }
+
+  function isTopicEntryValid(entry: TopicDraftState["entries"][number]) {
+    return stripHtml(entry.question).length >= 2 && stripHtml(entry.answer).length >= 2;
+  }
+
+  async function autoSaveTopicEntries() {
+    const trimmedTopic = topicDraft.topic.trim();
+
+    if (!topicDraft.subjectId || trimmedTopic.length < 2) {
+      return { savedCount: 0, didSave: false };
+    }
+
+    const unsavedEntries = topicDraft.entries.filter((entry) => !savedTopicEntryClientIds.has(entry.clientId));
+    const unsavedWithContent = unsavedEntries.filter(hasTopicEntryContent);
+
+    if (unsavedWithContent.length === 0) {
+      return { savedCount: 0, didSave: false };
+    }
+
+    if (unsavedWithContent.some((entry) => !isTopicEntryValid(entry))) {
+      setTopicSaveError("Please complete the current question and answer before adding another one.");
+      return { savedCount: 0, didSave: false };
+    }
+
+    const sanitizedEntries = unsavedWithContent.map(({ clientId: _clientId, orderNumber: _orderNumber, ...entry }) => entry);
+    const chunkSize = 20;
+
+    for (let offset = 0; offset < sanitizedEntries.length; offset += chunkSize) {
+      await createSubjectSummaryModuleTopicEntries({
+        ...topicDraft,
+        topic: trimmedTopic,
+        entries: sanitizedEntries.slice(offset, offset + chunkSize)
+      });
+    }
+
+    setSavedTopicEntryClientIds((current) => {
+      const next = new Set(current);
+      for (const entry of unsavedWithContent) {
+        next.add(entry.clientId);
+      }
+      return next;
+    });
+
+    return { savedCount: sanitizedEntries.length, didSave: true };
+  }
+
+  async function handleTopicAddQuestion() {
+    setTopicSaveError(null);
+
+    try {
+      await autoSaveTopicEntries();
+    } catch (error: any) {
+      setTopicSaveError(error?.response?.data?.error?.message || error?.message || "Could not save the current questions right now.");
+      return;
+    }
+
+    setTopicDraft((current) => {
+      const nextOrderNumber = buildNextTopicEntryOrderNumber(current.entries);
+      return {
+        ...current,
+        entries: [
+          {
+            clientId: createClientId(),
+            orderNumber: nextOrderNumber,
+            answer: "",
+            difficulty: "EASY",
+            estimatedReadingTime: 2,
+            examTip: "",
+            keyPrinciple: "",
+            question: "",
+            relatedCaseIds: [],
+            relatedStatutes: [],
+            tags: []
+          },
+          ...(current.entries ?? [])
+        ]
+      };
+    });
+  }
+
+  async function handleSaveAndAddQuestions() {
+    const trimmedTopic = draft.topic.trim();
+
+    if (trimmedTopic.length < 2) {
+      setTopicSaveError("Please set a topic name before adding more questions.");
+      return;
+    }
+
+    try {
+      await saveMutation.mutateAsync();
+    } catch {
+      return;
+    }
+
+    setEditingEntry(null);
+    setSavedTopicEntryClientIds(new Set());
+    setTopicSaveError(null);
+    setTopicDraft({
+      entries: [
+        {
+          clientId: createClientId(),
+          orderNumber: 1,
+          answer: "",
+          difficulty: "EASY",
+          estimatedReadingTime: 2,
+          examTip: "",
+          keyPrinciple: "",
+          question: "",
+          relatedCaseIds: [],
+          relatedStatutes: [],
+          tags: []
+        }
+      ],
+      moduleType: draft.moduleType,
+      status: draft.status,
+      subjectId: draft.subjectId,
+      topic: trimmedTopic
+    });
+    setModalMode("topic");
+    setDraft(createDraft("", filters.moduleType));
   }
 
   function openEditModal(entry: SubjectSummaryModuleAdminEntry) {
@@ -1517,6 +1656,7 @@ export function AdminSubjectSummaryModulePage() {
             setDraft(createDraft("", filters.moduleType));
           }}
           onSubmit={() => saveMutation.mutate()}
+          onSubmitAndAddQuestions={handleSaveAndAddQuestions}
           relatedCases={formOptionsQuery.data?.relatedCases ?? []}
           subjects={formOptionsQuery.data?.subjects ?? []}
           title="Edit subject summary"
@@ -1528,9 +1668,11 @@ export function AdminSubjectSummaryModulePage() {
           draft={topicDraft}
           isDark={isDark}
           isSaving={bulkCreateMutation.isPending}
+          onAddQuestion={handleTopicAddQuestion}
           onClose={() => {
             setModalMode(null);
             setTopicSaveError(null);
+            setSavedTopicEntryClientIds(new Set());
           }}
           onSubmit={() => bulkCreateMutation.mutate()}
           onUpdate={(nextDraft) => setTopicDraft(nextDraft)}
