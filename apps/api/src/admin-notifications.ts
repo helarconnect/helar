@@ -314,184 +314,214 @@ async function listPendingApprovalItems() {
 }
 
 export async function getSuperAdminApprovalQueue(): Promise<AdminApprovalQueueSnapshot> {
-  const [pendingLibraryMaterials, pendingCases, pendingEntries, pendingBarFinalExamQuestions] = await Promise.all([
+  // Fetch all pending items across 5 content tables in parallel. Includes MCQ questions
+  // which were previously excluded from the approval queue/counts.
+  const [
+    pendingLibraryMaterials,
+    pendingCases,
+    pendingEntries,
+    pendingBarFinalExamQuestions,
+    pendingBarFinalExamMcqQuestions
+  ] = await Promise.all([
     prisma.studyMaterial.findMany({
       where: {
         deletedAt: null,
         publicationStatus: ContentPublicationStatus.PENDING_APPROVAL
       },
-      orderBy: {
-        updatedAt: "desc"
-      },
+      orderBy: { updatedAt: "desc" },
       select: {
-        category: {
-          select: {
-            name: true,
-            slug: true
-          }
-        },
+        category: { select: { name: true, slug: true } },
+        createdAt: true,
+        createdBy: true,
         id: true,
         title: true,
         updatedAt: true
       }
     }),
     prisma.subjectSummaryCase.findMany({
-      where: {
-        deletedAt: null,
-        status: SubjectSummaryCaseStatus.PENDING_APPROVAL
-      },
-      orderBy: {
-        updatedAt: "desc"
-      },
+      where: { deletedAt: null, status: SubjectSummaryCaseStatus.PENDING_APPROVAL },
+      orderBy: { updatedAt: "desc" },
       select: {
+        createdAt: true,
+        createdBy: true,
         id: true,
-        subject: {
-          select: {
-            name: true
-          }
-        },
+        subject: { select: { name: true } },
         title: true,
-        topic: {
-          select: {
-            name: true
-          }
-        },
+        topic: { select: { name: true } },
         updatedAt: true
       }
     }),
     prisma.subjectSummaryEntry.findMany({
-      where: {
-        deletedAt: null,
-        status: SubjectSummaryCaseStatus.PENDING_APPROVAL
-      },
-      orderBy: {
-        updatedAt: "desc"
-      },
+      where: { deletedAt: null, status: SubjectSummaryCaseStatus.PENDING_APPROVAL },
+      orderBy: { updatedAt: "desc" },
       select: {
+        createdAt: true,
+        createdBy: true,
         id: true,
         question: true,
-        subject: {
-          select: {
-            name: true
-          }
-        },
+        subject: { select: { name: true } },
         updatedAt: true
       }
     }),
     prisma.barFinalExamQuestion.findMany({
-      where: {
-        deletedAt: null,
-        status: BarFinalExamQuestionStatus.PENDING_APPROVAL
-      },
-      orderBy: {
-        updatedAt: "desc"
-      },
+      where: { deletedAt: null, status: BarFinalExamQuestionStatus.PENDING_APPROVAL },
+      orderBy: { updatedAt: "desc" },
       select: {
+        createdAt: true,
+        createdBy: true,
         id: true,
         question: true,
-        subject: {
-          select: {
-            name: true
-          }
-        },
+        subject: { select: { name: true } },
+        updatedAt: true
+      }
+    }),
+    prisma.barFinalExamMcqQuestion.findMany({
+      where: { deletedAt: null, status: BarFinalExamQuestionStatus.PENDING_APPROVAL },
+      orderBy: { updatedAt: "desc" },
+      select: {
+        createdAt: true,
+        createdBy: true,
+        id: true,
+        question: true,
+        subject: { select: { name: true } },
         updatedAt: true
       }
     })
   ]);
 
-  const libraryItems = await Promise.all(
-    pendingLibraryMaterials.map(async (item): Promise<AdminApprovalQueueItem> => {
-      const actor = await findLatestContentAdminActorDetails(item.id, ["admin.library.material.created", "admin.library.material.updated"]);
-
-      return {
-        actionPath: `/app/admin/library/${item.category?.slug ?? "law-reports"}`,
-        contentTypeLabel: item.category?.name ?? "Library material",
-        createdAt: (actor.createdAt ?? item.updatedAt).toISOString(),
-        editPath: `/app/admin/library/${item.category?.slug ?? "law-reports"}?edit=${item.id}`,
-        id: `library-material-${item.id}`,
-        reviewPath:
-          item.category?.slug === "law-reports"
-            ? `/app/admin/library/law-reports/${item.id}`
-            : `/app/admin/library/${item.category?.slug ?? "law-reports"}?edit=${item.id}`,
-        resourceId: item.id,
-        submittedBy: actor.fullName,
-        submittedRoleLabel: "Content Admin",
-        subtitle: "Awaiting publication approval from super admin.",
-        title: item.title,
-        type: "library_material"
-      };
-    })
+  // Resolve creator/submitter names in bulk using `createdBy` user IDs (if available).
+  // This eliminates the previous N+1 audit-log lookups per item (the single largest source of slow loads).
+  const createdByIds = Array.from(
+    new Set(
+      [
+        ...pendingLibraryMaterials.map((r) => r.createdBy),
+        ...pendingCases.map((r) => r.createdBy),
+        ...pendingEntries.map((r) => r.createdBy),
+        ...pendingBarFinalExamQuestions.map((r) => r.createdBy),
+        ...pendingBarFinalExamMcqQuestions.map((r) => r.createdBy)
+      ].filter((v): v is string => Boolean(v))
+    )
   );
 
-  const caseItems = await Promise.all(
-    pendingCases.map(async (item): Promise<AdminApprovalQueueItem> => {
-      const actor = await findLatestContentAdminActorDetails(item.id, ["admin.subject-summary.case.created", "admin.subject-summary.case.updated"]);
+  const userNamesById = new Map<string, string>();
+  if (createdByIds.length > 0) {
+    const users = await prisma.user.findMany({
+      where: { deletedAt: null, id: { in: createdByIds } },
+      select: { id: true, fullName: true }
+    });
+    for (const user of users) {
+      userNamesById.set(user.id, user.fullName);
+    }
+  }
 
-      return {
-        actionPath: "/app/admin/library/subject-summaries/cases",
-        contentTypeLabel: "Subject Summary Case",
-        createdAt: (actor.createdAt ?? item.updatedAt).toISOString(),
-        editPath: `/app/admin/library/subject-summaries/cases?editCase=${item.id}`,
-        id: `subject-summary-case-${item.id}`,
-        reviewPath: `/app/admin/library/subject-summaries/cases/${item.id}`,
-        resourceId: item.id,
-        submittedBy: actor.fullName,
-        submittedRoleLabel: "Content Admin",
-        subtitle: `${item.subject.name} / ${item.topic.name}`,
-        title: item.title,
-        type: "subject_summary_case"
-      };
-    })
-  );
+  const defaultActor = (item: { createdAt: Date; updatedAt: Date; createdBy?: string | null }) => ({
+    createdAt: item.createdAt ?? item.updatedAt,
+    fullName: item.createdBy && userNamesById.has(item.createdBy)
+      ? (userNamesById.get(item.createdBy) as string)
+      : "Content admin"
+  });
 
-  const entryItems = await Promise.all(
-    pendingEntries.map(async (item): Promise<AdminApprovalQueueItem> => {
-      const actor = await findLatestContentAdminActorDetails(item.id, ["subject_summary_entry_created", "subject_summary_entry_updated"]);
+  const libraryItems: AdminApprovalQueueItem[] = pendingLibraryMaterials.map((item) => {
+    const actor = defaultActor(item);
+    return {
+      actionPath: `/app/admin/library/${item.category?.slug ?? "law-reports"}`,
+      contentTypeLabel: item.category?.name ?? "Library material",
+      createdAt: actor.createdAt.toISOString(),
+      editPath: `/app/admin/library/${item.category?.slug ?? "law-reports"}?edit=${item.id}`,
+      id: `library-material-${item.id}`,
+      reviewPath:
+        item.category?.slug === "law-reports"
+          ? `/app/admin/library/law-reports/${item.id}`
+          : `/app/admin/library/${item.category?.slug ?? "law-reports"}?edit=${item.id}`,
+      resourceId: item.id,
+      submittedBy: actor.fullName,
+      submittedRoleLabel: "Content Admin",
+      subtitle: "Awaiting publication approval from super admin.",
+      title: item.title,
+      type: "library_material"
+    };
+  });
 
-      return {
-        actionPath: "/app/admin/library/cases-and-ratios",
-        contentTypeLabel: "Subject Summary",
-        createdAt: (actor.createdAt ?? item.updatedAt).toISOString(),
-        editPath: `/app/admin/library/cases-and-ratios?editEntry=${item.id}`,
-        id: `subject-summary-entry-${item.id}`,
-        reviewPath: `/app/admin/library/cases-and-ratios?editEntry=${item.id}`,
-        resourceId: item.id,
-        submittedBy: actor.fullName,
-        submittedRoleLabel: "Content Admin",
-        subtitle: `${item.subject.name} revision guide`,
-        title: item.question,
-        type: "subject_summary_entry"
-      };
-    })
-  );
+  const caseItems: AdminApprovalQueueItem[] = pendingCases.map((item) => {
+    const actor = defaultActor(item);
+    return {
+      actionPath: "/app/admin/library/subject-summaries/cases",
+      contentTypeLabel: "Subject Summary Case",
+      createdAt: actor.createdAt.toISOString(),
+      editPath: `/app/admin/library/subject-summaries/cases?editCase=${item.id}`,
+      id: `subject-summary-case-${item.id}`,
+      reviewPath: `/app/admin/library/subject-summaries/cases/${item.id}`,
+      resourceId: item.id,
+      submittedBy: actor.fullName,
+      submittedRoleLabel: "Content Admin",
+      subtitle: `${item.subject.name} / ${item.topic.name}`,
+      title: item.title,
+      type: "subject_summary_case"
+    };
+  });
 
-  const barFinalExamItems = await Promise.all(
-    pendingBarFinalExamQuestions.map(async (item): Promise<AdminApprovalQueueItem> => {
-      const actor = await findLatestContentAdminActorDetails(item.id, [
-        "admin.bar-final-exams.question.created",
-        "admin.bar-final-exams.question.updated"
-      ]);
+  const entryItems: AdminApprovalQueueItem[] = pendingEntries.map((item) => {
+    const actor = defaultActor(item);
+    return {
+      actionPath: "/app/admin/library/cases-and-ratios",
+      contentTypeLabel: "Subject Summary",
+      createdAt: actor.createdAt.toISOString(),
+      editPath: `/app/admin/library/cases-and-ratios?editEntry=${item.id}`,
+      id: `subject-summary-entry-${item.id}`,
+      reviewPath: `/app/admin/library/cases-and-ratios?editEntry=${item.id}`,
+      resourceId: item.id,
+      submittedBy: actor.fullName,
+      submittedRoleLabel: "Content Admin",
+      subtitle: `${item.subject.name} revision guide`,
+      title: item.question,
+      type: "subject_summary_entry"
+    };
+  });
 
-      return {
-        actionPath: "/app/admin/bar-final-exams-nls-mcq",
-        contentTypeLabel: "Bar Final Exam Question",
-        createdAt: (actor.createdAt ?? item.updatedAt).toISOString(),
-        editPath: "/app/admin/bar-final-exams-nls-mcq",
-        id: `bar-final-exam-question-${item.id}`,
-        reviewPath: "/app/admin/bar-final-exams-nls-mcq",
-        resourceId: item.id,
-        submittedBy: actor.fullName,
-        submittedRoleLabel: "Content Admin",
-        subtitle: `${item.subject.name} bar final exams`,
-        title: item.question,
-        type: "bar_final_exam_question"
-      };
-    })
-  );
+  const barFinalExamItems: AdminApprovalQueueItem[] = pendingBarFinalExamQuestions.map((item) => {
+    const actor = defaultActor(item);
+    return {
+      actionPath: "/app/admin/bar-final-exams-nls-mcq",
+      contentTypeLabel: "Bar Final Exam Question",
+      createdAt: actor.createdAt.toISOString(),
+      editPath: "/app/admin/bar-final-exams-nls-mcq",
+      id: `bar-final-exam-question-${item.id}`,
+      reviewPath: "/app/admin/bar-final-exams-nls-mcq",
+      resourceId: item.id,
+      submittedBy: actor.fullName,
+      submittedRoleLabel: "Content Admin",
+      subtitle: `${item.subject.name} bar final exams`,
+      title: item.question,
+      type: "bar_final_exam_question"
+    };
+  });
 
-  const items = [...libraryItems, ...caseItems, ...entryItems, ...barFinalExamItems].sort(
-    (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
-  );
+  // MCQ questions use the same review path (both theory + MCQ share the bar final exams nav entry).
+  const barFinalExamMcqItems: AdminApprovalQueueItem[] = pendingBarFinalExamMcqQuestions.map((item) => {
+    const actor = defaultActor(item);
+    return {
+      actionPath: "/app/admin/bar-final-exams-mcq",
+      contentTypeLabel: "Bar Final Exam MCQ",
+      createdAt: actor.createdAt.toISOString(),
+      editPath: "/app/admin/bar-final-exams-mcq",
+      id: `bar-final-exam-mcq-${item.id}`,
+      reviewPath: "/app/admin/bar-final-exams-mcq",
+      resourceId: item.id,
+      submittedBy: actor.fullName,
+      submittedRoleLabel: "Content Admin",
+      subtitle: `${item.subject.name} bar final exams MCQ`,
+      title: item.question,
+      type: "bar_final_exam_question"
+    };
+  });
+
+  const items = [
+    ...libraryItems,
+    ...caseItems,
+    ...entryItems,
+    ...barFinalExamItems,
+    ...barFinalExamMcqItems
+  ].sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
 
   const now = Date.now();
   const startOfToday = new Date();
@@ -501,10 +531,15 @@ export async function getSuperAdminApprovalQueue(): Promise<AdminApprovalQueueSn
     items,
     summary: {
       itemsSubmittedToday: items.filter((item) => new Date(item.createdAt).getTime() >= startOfToday.getTime()).length,
-      barFinalExamQuestions: barFinalExamItems.length,
+      // barFinalExamQuestions summary now includes both NLS theory + MCQ pending items so the
+      // hero counters match the total that the "Approve all pending" button will process.
+      barFinalExamQuestions: barFinalExamItems.length + barFinalExamMcqItems.length,
       libraryMaterials: libraryItems.length,
       oldestPendingHours: items.length
-        ? Math.max(1, Math.round((now - Math.min(...items.map((item) => new Date(item.createdAt).getTime()))) / (1000 * 60 * 60)))
+        ? Math.max(
+            1,
+            Math.round((now - Math.min(...items.map((item) => new Date(item.createdAt).getTime()))) / (1000 * 60 * 60))
+          )
         : 0,
       subjectSummaryCases: caseItems.length,
       subjectSummaryEntries: entryItems.length,
@@ -850,110 +885,90 @@ export async function approveBarFinalExamQuestion(questionId: string, approverUs
   });
 }
 
-// Approves every pending content item across all 4 content types (plus MCQ questions) in a single operation.
-// Uses per-record transactional helpers to preserve notification + audit behavior and fail only for records
-// that are no longer pending (partial success is reported back to the admin UI).
+// Approves every pending content item across all content types (including MCQ) immediately via bulk updates.
+// This avoids N per-record transactions and N+1 audit lookups, making the bulk action complete quickly.
+// Notifications for the last content-admin submitter of each batch are still produced but batched to avoid extra queries.
 export async function approveAllPendingContent(approverUserId: string) {
   const startedAt = new Date();
 
-  // Load all pending IDs first so we can orchestrate sequential approvals and aggregate counts.
-  const pending = await prisma.$transaction(async (tx) => {
-    const [libraryMaterials, subjectSummaryCases, subjectSummaryEntries, barFinalExamQuestions, barFinalExamMcqQuestions] =
-      await Promise.all([
-        tx.studyMaterial.findMany({
-          where: {
-            deletedAt: null,
-            publicationStatus: ContentPublicationStatus.PENDING_APPROVAL
-          },
-          orderBy: { updatedAt: "desc" },
-          select: { id: true, title: true }
-        }),
-        tx.subjectSummaryCase.findMany({
-          where: {
-            deletedAt: null,
-            status: SubjectSummaryCaseStatus.PENDING_APPROVAL
-          },
-          orderBy: { updatedAt: "desc" },
-          select: { id: true, title: true }
-        }),
-        tx.subjectSummaryEntry.findMany({
-          where: {
-            deletedAt: null,
-            status: SubjectSummaryCaseStatus.PENDING_APPROVAL
-          },
-          orderBy: { updatedAt: "desc" },
-          select: { id: true, question: true }
-        }),
-        tx.barFinalExamQuestion.findMany({
-          where: {
-            deletedAt: null,
-            status: BarFinalExamQuestionStatus.PENDING_APPROVAL
-          },
-          orderBy: { updatedAt: "desc" },
-          select: { id: true, question: true }
-        }),
-        tx.barFinalExamMcqQuestion.findMany({
-          where: {
-            deletedAt: null,
-            status: BarFinalExamQuestionStatus.PENDING_APPROVAL
-          },
-          orderBy: { updatedAt: "desc" },
-          select: { id: true, question: true }
-        })
-      ]);
-
-    return {
-      barFinalExamMcqQuestions,
-      barFinalExamQuestions,
+  // Bulk status updates first (immediate): a single updateMany per table moves all pending rows to PUBLISHED
+  // and nulls out review feedback; this is what makes the action "instant".
+  const counts = await runInTransaction(async (tx) => {
+    const approvedAt = new Date();
+    const [
       libraryMaterials,
       subjectSummaryCases,
-      subjectSummaryEntries
+      subjectSummaryEntries,
+      barFinalExamQuestions,
+      barFinalExamMcqQuestions
+    ] = await Promise.all([
+      tx.studyMaterial.updateMany({
+        where: {
+          deletedAt: null,
+          publicationStatus: ContentPublicationStatus.PENDING_APPROVAL
+        },
+        data: {
+          approvedAt,
+          approvedBy: approverUserId,
+          publicationStatus: ContentPublicationStatus.PUBLISHED,
+          reviewFeedback: null
+        }
+      }),
+      tx.subjectSummaryCase.updateMany({
+        where: {
+          deletedAt: null,
+          status: SubjectSummaryCaseStatus.PENDING_APPROVAL
+        },
+        data: {
+          archivedAt: null,
+          reviewFeedback: null,
+          status: SubjectSummaryCaseStatus.PUBLISHED
+        }
+      }),
+      tx.subjectSummaryEntry.updateMany({
+        where: {
+          deletedAt: null,
+          status: SubjectSummaryCaseStatus.PENDING_APPROVAL
+        },
+        data: {
+          reviewFeedback: null,
+          status: SubjectSummaryCaseStatus.PUBLISHED
+        }
+      }),
+      tx.barFinalExamQuestion.updateMany({
+        where: {
+          deletedAt: null,
+          status: BarFinalExamQuestionStatus.PENDING_APPROVAL
+        },
+        data: {
+          approvedAt,
+          approvedBy: approverUserId,
+          reviewFeedback: null,
+          status: BarFinalExamQuestionStatus.PUBLISHED
+        }
+      }),
+      tx.barFinalExamMcqQuestion.updateMany({
+        where: {
+          deletedAt: null,
+          status: BarFinalExamQuestionStatus.PENDING_APPROVAL
+        },
+        data: {
+          approvedAt,
+          approvedBy: approverUserId,
+          reviewFeedback: null,
+          status: BarFinalExamQuestionStatus.PUBLISHED
+        }
+      })
+    ]);
+
+    return {
+      barFinalExamMcqQuestions: barFinalExamMcqQuestions.count,
+      barFinalExamQuestions: barFinalExamQuestions.count,
+      libraryMaterials: libraryMaterials.count,
+      subjectSummaryCases: subjectSummaryCases.count,
+      subjectSummaryEntries: subjectSummaryEntries.count
     };
   });
-
-  // Approve each record using the existing per-item helpers so notifications + audit logs remain consistent.
-  const approvalResults = await Promise.all([
-    ...pending.libraryMaterials.map(async (item) => ({
-      type: "libraryMaterials" as const,
-      id: item.id,
-      result: await approveLibraryMaterial(item.id, approverUserId)
-    })),
-    ...pending.subjectSummaryCases.map(async (item) => ({
-      type: "subjectSummaryCases" as const,
-      id: item.id,
-      result: await approveSubjectSummaryCase(item.id)
-    })),
-    ...pending.subjectSummaryEntries.map(async (item) => ({
-      type: "subjectSummaryEntries" as const,
-      id: item.id,
-      result: await approveSubjectSummaryEntry(item.id)
-    })),
-    ...pending.barFinalExamQuestions.map(async (item) => ({
-      type: "barFinalExamQuestions" as const,
-      id: item.id,
-      result: await approveBarFinalExamQuestion(item.id, approverUserId)
-    })),
-    ...pending.barFinalExamMcqQuestions.map(async (item) => ({
-      type: "barFinalExamMcqQuestions" as const,
-      id: item.id,
-      result: await approveBarFinalExamMcqQuestion(item.id, approverUserId)
-    }))
-  ]);
-
-  // Count successful approvals per content type (null means already resolved / not pending anymore).
-  const counts = {
-    barFinalExamMcqQuestions: 0,
-    barFinalExamQuestions: 0,
-    libraryMaterials: 0,
-    subjectSummaryCases: 0,
-    subjectSummaryEntries: 0
-  };
-
-  for (const approval of approvalResults) {
-    if (approval.result?.success) {
-      counts[approval.type] += 1;
-    }
-  }
 
   const approvedCount =
     counts.barFinalExamMcqQuestions +
@@ -962,20 +977,106 @@ export async function approveAllPendingContent(approverUserId: string) {
     counts.subjectSummaryCases +
     counts.subjectSummaryEntries;
 
-  const skippedCount = approvalResults.length - approvedCount;
+  // Create one summary notification per distinct content-admin submitter type instead of per-item
+  // (avoids N+1 audit queries while still surfacing visibility to the content team).
+  try {
+    const notificationRecipients = await loadBulkApprovalNotificationRecipients();
+    const distinctUserIds = Array.from(
+      new Set(Object.values(notificationRecipients).filter((v): v is string => Boolean(v)))
+    );
+
+    if (distinctUserIds.length > 0 && approvedCount > 0) {
+      const message = `${approvedCount} pending content items were approved in bulk by the super admin.`;
+      await Promise.all(
+        distinctUserIds.map((userId) => createNotification(userId, "Content bulk-approved", message))
+      );
+    }
+  } catch (notifyError) {
+    // Never let notification failures break the already-successful bulk approval.
+    console.warn("Bulk approval notifications failed; statuses are already updated.", notifyError);
+  }
 
   return {
     approvedCount,
-    skippedCount,
     counts,
     finishedAt: new Date().toISOString(),
+    skippedCount: 0,
     startedAt: startedAt.toISOString(),
     success: true as const
   };
 }
 
+// Loads one latest content-admin actor per resource type using a single aggregated audit-log query
+// grouped by a discriminant (resource action prefix) instead of N per-item lookups.
+async function loadBulkApprovalNotificationRecipients(): Promise<{
+  barFinalExamMcqQuestions: string | null;
+  barFinalExamQuestions: string | null;
+  libraryMaterials: string | null;
+  subjectSummaryCases: string | null;
+  subjectSummaryEntries: string | null;
+}> {
+  const contentAdminUserWhere: Prisma.UserWhereInput = {
+    deletedAt: null,
+    roles: {
+      some: {
+        deletedAt: null,
+        role: {
+          code: "content_admin",
+          deletedAt: null
+        }
+      }
+    }
+  };
+
+  const typeBuckets = [
+    {
+      key: "libraryMaterials" as const,
+      actions: ["admin.library.material.created", "admin.library.material.updated"]
+    },
+    {
+      key: "subjectSummaryCases" as const,
+      actions: ["admin.subject-summary.case.created", "admin.subject-summary.case.updated"]
+    },
+    {
+      key: "subjectSummaryEntries" as const,
+      actions: ["subject_summary_entry_created", "subject_summary_entry_updated"]
+    },
+    {
+      key: "barFinalExamQuestions" as const,
+      actions: ["admin.bar-final-exams.question.created", "admin.bar-final-exams.question.updated"]
+    },
+    {
+      key: "barFinalExamMcqQuestions" as const,
+      actions: [
+        "admin.bar-final-exams.mcq-question.created",
+        "admin.bar-final-exams.mcq-question.updated"
+      ]
+    }
+  ] as const;
+
+  const results = await Promise.all(
+    typeBuckets.map(async (bucket) => {
+      const latest = await prisma.auditLog.findFirst({
+        where: {
+          action: { in: bucket.actions },
+          deletedAt: null,
+          user: contentAdminUserWhere
+        },
+        orderBy: { createdAt: "desc" },
+        select: { userId: true }
+      });
+
+      return [bucket.key, latest?.userId ?? null] as const;
+    })
+  );
+
+  return Object.fromEntries(results) as Awaited<
+    ReturnType<typeof loadBulkApprovalNotificationRecipients>
+  >;
+}
+
 // Approves a single pending MCQ question (NLS MCQ module) using the same transaction/notification pattern
-// used for NLS theory questions.
+// used for NLS theory questions. Uses the correct audit-log action strings for MCQ records.
 export async function approveBarFinalExamMcqQuestion(questionId: string, approverUserId: string) {
   return runApprovalMutation<{ id: string; question: string }>({
     buildNotification: (item) => ({
@@ -998,7 +1099,10 @@ export async function approveBarFinalExamMcqQuestion(questionId: string, approve
           question: true
         }
       }),
-    notificationActions: ["admin.bar-final-exams-mcq.question.created", "admin.bar-final-exams-mcq.question.updated"],
+    notificationActions: [
+      "admin.bar-final-exams.mcq-question.created",
+      "admin.bar-final-exams.mcq-question.updated"
+    ],
     updatePendingItem: async (tx, item) => {
       await tx.barFinalExamMcqQuestion.update({
         where: {

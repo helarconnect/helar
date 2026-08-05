@@ -293,11 +293,17 @@ export async function getAdminDashboardOverview() {
 
   const [
     totalUsers,
-    userStatusCounts,
+    activeUsersCount,
+    pendingUsersCount,
+    suspendedUsersCount,
     totalStudents,
     totalAdmins,
     totalSubscriptions,
-    subscriptionStatusCounts,
+    activeSubscriptionsCount,
+    canceledSubscriptionsCount,
+    expiredSubscriptionsCount,
+    pastDueSubscriptionsCount,
+    inactiveSubscriptionsCount,
     paymentStatusCounts,
     succeededPayments,
     failedPaymentsCount,
@@ -305,14 +311,23 @@ export async function getAdminDashboardOverview() {
     subjectSummarySubjectCount,
     subjectSummaryTopicCount,
     subjectSummaryCaseCount,
-    subjectSummaryCaseStatusCounts,
+    archivedCasesCount,
+    draftCasesCount,
+    pendingApprovalCasesCount,
+    publishedCasesCount,
     subjectSummaryEntryCount,
-    subjectSummaryEntryStatusCounts,
+    archivedEntriesCount,
+    draftEntriesCount,
+    pendingApprovalEntriesCount,
+    publishedEntriesCount,
     caseViewsCount,
     studyProgressCount,
     studyProgressTime,
     averageStudyProgressTime,
-    studyProgressByType,
+    caseReadProgressCount,
+    lawReportProgressCount,
+    studyNoteProgressCount,
+    subjectSummaryEntryProgressCount,
     studyBookmarkCount,
     studyNoteCount,
     studyDownloadCount,
@@ -388,11 +403,14 @@ export async function getAdminDashboardOverview() {
     prisma.user.count({
       where: { deletedAt: null }
     }),
-    prisma.user.findMany({
-      where: { deletedAt: null },
-      select: {
-        status: true
-      }
+    prisma.user.count({
+      where: { deletedAt: null, status: UserStatus.ACTIVE }
+    }),
+    prisma.user.count({
+      where: { deletedAt: null, status: UserStatus.PENDING }
+    }),
+    prisma.user.count({
+      where: { deletedAt: null, status: UserStatus.SUSPENDED }
     }),
     prisma.student.count({
       where: { deletedAt: null }
@@ -413,11 +431,20 @@ export async function getAdminDashboardOverview() {
     prisma.subscription.count({
       where: { deletedAt: null }
     }),
-    prisma.subscription.findMany({
-      where: { deletedAt: null },
-      select: {
-        status: true
-      }
+    prisma.subscription.count({
+      where: { deletedAt: null, status: SubscriptionStatus.ACTIVE }
+    }),
+    prisma.subscription.count({
+      where: { deletedAt: null, status: SubscriptionStatus.CANCELED }
+    }),
+    prisma.subscription.count({
+      where: { deletedAt: null, status: SubscriptionStatus.EXPIRED }
+    }),
+    prisma.subscription.count({
+      where: { deletedAt: null, status: SubscriptionStatus.PAST_DUE }
+    }),
+    prisma.subscription.count({
+      where: { deletedAt: null, status: SubscriptionStatus.INACTIVE }
     }),
     prisma.payment.findMany({
       where: { deletedAt: null },
@@ -464,20 +491,32 @@ export async function getAdminDashboardOverview() {
     prisma.subjectSummaryCase.count({
       where: { deletedAt: null }
     }),
-    prisma.subjectSummaryCase.findMany({
-      where: { deletedAt: null },
-      select: {
-        status: true
-      }
+    prisma.subjectSummaryCase.count({
+      where: { deletedAt: null, status: SubjectSummaryCaseStatus.ARCHIVED }
+    }),
+    prisma.subjectSummaryCase.count({
+      where: { deletedAt: null, status: SubjectSummaryCaseStatus.DRAFT }
+    }),
+    prisma.subjectSummaryCase.count({
+      where: { deletedAt: null, status: SubjectSummaryCaseStatus.PENDING_APPROVAL }
+    }),
+    prisma.subjectSummaryCase.count({
+      where: { deletedAt: null, status: SubjectSummaryCaseStatus.PUBLISHED }
     }),
     prisma.subjectSummaryEntry.count({
       where: { deletedAt: null }
     }),
-    prisma.subjectSummaryEntry.findMany({
-      where: { deletedAt: null },
-      select: {
-        status: true
-      }
+    prisma.subjectSummaryEntry.count({
+      where: { deletedAt: null, status: SubjectSummaryCaseStatus.ARCHIVED }
+    }),
+    prisma.subjectSummaryEntry.count({
+      where: { deletedAt: null, status: SubjectSummaryCaseStatus.DRAFT }
+    }),
+    prisma.subjectSummaryEntry.count({
+      where: { deletedAt: null, status: SubjectSummaryCaseStatus.PENDING_APPROVAL }
+    }),
+    prisma.subjectSummaryEntry.count({
+      where: { deletedAt: null, status: SubjectSummaryCaseStatus.PUBLISHED }
     }),
     prisma.subjectSummaryCaseView.count(),
     prisma.studentStudyProgress.count({
@@ -491,11 +530,17 @@ export async function getAdminDashboardOverview() {
       where: { deletedAt: null },
       _avg: { timeSpentSeconds: true }
     }),
-    prisma.studentStudyProgress.findMany({
-      where: { deletedAt: null },
-      select: {
-        contentType: true
-      }
+    prisma.studentStudyProgress.count({
+      where: { deletedAt: null, contentType: StudentStudyContentType.SUBJECT_SUMMARY_CASE }
+    }),
+    prisma.studentStudyProgress.count({
+      where: { deletedAt: null, contentType: StudentStudyContentType.LAW_REPORT }
+    }),
+    prisma.studentStudyProgress.count({
+      where: { deletedAt: null, contentType: StudentStudyContentType.STUDY_NOTE }
+    }),
+    prisma.studentStudyProgress.count({
+      where: { deletedAt: null, contentType: StudentStudyContentType.SUBJECT_SUMMARY_ENTRY }
     }),
     prisma.studentStudyBookmark.count({
       where: { deletedAt: null }
@@ -1301,12 +1346,39 @@ export async function getAdminDashboardOverview() {
     )
   ]);
 
-  const userStatusMap = countValues(userStatusCounts.map((item) => item.status));
-  const subscriptionStatusMap = countValues(subscriptionStatusCounts.map((item) => item.status));
+  // Build status maps from DB-level count queries instead of loading all rows to tally in JS
+  // (dramatically faster as case/entry/user counts grow).
+  const userStatusMap = new Map<UserStatus, number>([
+    [UserStatus.ACTIVE, activeUsersCount],
+    [UserStatus.PENDING, pendingUsersCount],
+    [UserStatus.SUSPENDED, suspendedUsersCount]
+  ]);
+  const subscriptionStatusMap = new Map<SubscriptionStatus, number>([
+    [SubscriptionStatus.ACTIVE, activeSubscriptionsCount],
+    [SubscriptionStatus.CANCELED, canceledSubscriptionsCount],
+    [SubscriptionStatus.EXPIRED, expiredSubscriptionsCount],
+    [SubscriptionStatus.PAST_DUE, pastDueSubscriptionsCount],
+    [SubscriptionStatus.INACTIVE, inactiveSubscriptionsCount]
+  ]);
   const paymentStatusMap = summarizePayments(paymentStatusCounts);
-  const subjectCaseStatusMap = countValues(subjectSummaryCaseStatusCounts.map((item) => item.status));
-  const subjectEntryStatusMap = countValues(subjectSummaryEntryStatusCounts.map((item) => item.status));
-  const studyProgressByTypeMap = countValues(studyProgressByType.map((item) => item.contentType));
+  const subjectCaseStatusMap = new Map<SubjectSummaryCaseStatus, number>([
+    [SubjectSummaryCaseStatus.ARCHIVED, archivedCasesCount],
+    [SubjectSummaryCaseStatus.DRAFT, draftCasesCount],
+    [SubjectSummaryCaseStatus.PENDING_APPROVAL, pendingApprovalCasesCount],
+    [SubjectSummaryCaseStatus.PUBLISHED, publishedCasesCount]
+  ]);
+  const subjectEntryStatusMap = new Map<SubjectSummaryCaseStatus, number>([
+    [SubjectSummaryCaseStatus.ARCHIVED, archivedEntriesCount],
+    [SubjectSummaryCaseStatus.DRAFT, draftEntriesCount],
+    [SubjectSummaryCaseStatus.PENDING_APPROVAL, pendingApprovalEntriesCount],
+    [SubjectSummaryCaseStatus.PUBLISHED, publishedEntriesCount]
+  ]);
+  const studyProgressByTypeMap = new Map<StudentStudyContentType, number>([
+    [StudentStudyContentType.LAW_REPORT, lawReportProgressCount],
+    [StudentStudyContentType.STUDY_NOTE, studyNoteProgressCount],
+    [StudentStudyContentType.SUBJECT_SUMMARY_CASE, caseReadProgressCount],
+    [StudentStudyContentType.SUBJECT_SUMMARY_ENTRY, subjectSummaryEntryProgressCount]
+  ]);
   const categoryCountMap = new Map(libraryCategories.map((item) => [item.slug, item._count.materials]));
 
   const contentSections = [
