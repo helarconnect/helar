@@ -435,7 +435,10 @@ function NoteEditor({
         </ToolbarButton>
       </div>
       <div
-        className={cn("min-h-[280px] px-4 py-3 text-sm leading-7 outline-none", isDark ? "text-white" : "text-slate-950")}
+        className={cn(
+          "rich-text-content min-h-[280px] px-4 py-3 text-sm leading-7 outline-none",
+          isDark ? "text-white" : "text-slate-950"
+        )}
         contentEditable
         onInput={(event) => onChange(event.currentTarget.innerHTML)}
         onKeyUp={saveSelection}

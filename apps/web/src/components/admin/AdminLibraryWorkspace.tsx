@@ -439,7 +439,7 @@ function RichTextField({
           ) : null}
           <div
             className={cn(
-              "h-full min-h-full w-full px-3.5 py-3 text-sm leading-6 outline-none",
+              "rich-text-content h-full min-h-full w-full px-3.5 py-3 text-sm leading-6 outline-none",
               isDark ? "text-white" : "text-slate-950"
             )}
             contentEditable

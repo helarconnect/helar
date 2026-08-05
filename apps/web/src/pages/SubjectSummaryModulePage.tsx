@@ -303,7 +303,10 @@ function RichTextField({
           ) : null}
           <div
             aria-label={label}
-            className={cn("min-h-[240px] px-4 py-3 text-sm leading-7 outline-none", isDark ? "text-white" : "text-slate-950")}
+            className={cn(
+              "rich-text-content min-h-[240px] px-4 py-3 text-sm leading-7 outline-none",
+              isDark ? "text-white" : "text-slate-950"
+            )}
             contentEditable
             role="textbox"
             onInput={(event) => onChange(event.currentTarget.innerHTML)}

@@ -228,7 +228,10 @@ export function RichTextEditor({
           ) : null}
           <div
             aria-label={label}
-            className={cn('prose prose-sm max-w-none px-4 py-3 leading-7 outline-none', isDark ? 'prose-invert text-slate-200' : 'text-slate-900')}
+            className={cn(
+              'rich-text-content prose prose-sm max-w-none px-4 py-3 leading-7 outline-none',
+              isDark ? 'prose-invert text-slate-200' : 'text-slate-900',
+            )}
             contentEditable
             onInput={(event) => onChange(event.currentTarget.innerHTML)}
             onKeyUp={saveSelection}
