@@ -1440,7 +1440,7 @@ export function AdminSubjectSummaryModulePage() {
           <div className="max-w-3xl">
             <p className={cn("text-xs uppercase tracking-[0.24em]", isDark ? "text-slate-500" : "text-slate-400")}>Subject summary</p>
             <h2 className={cn("mt-3 font-heading text-3xl leading-tight", isDark ? "text-white" : "text-slate-950")}>
-              Build premium Q&amp;A revision guides from your Cases and Ratios subjects.
+              Build premium Q&amp;A revision guides from your Subjects, Cases and Ratios.
             </h2>
             <p className={cn("mt-3 text-sm leading-7", isDark ? "text-slate-300" : "text-slate-600")}>
               Each summary belongs to one existing subject and can link directly to related cases, statutes, exam tips, and student study actions.
