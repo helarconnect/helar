@@ -1331,11 +1331,20 @@ export function AdminSubjectSummaryModulePage() {
       return;
     }
 
+    let savedEntry: SubjectSummaryModuleAdminEntry | null = null;
     try {
-      await saveMutation.mutateAsync();
+      savedEntry = (await saveMutation.mutateAsync()) ?? null;
     } catch {
       return;
     }
+
+    // After saving, continue question numbering from the entry that was just saved
+    // so the next entry in the topic flow immediately follows the last saved one.
+    // Example: if the saved entry's displayOrder resolves to "Question 27", then
+    // the next added entry opens at "Question 28".
+    const savedDisplayOrder = savedEntry?.displayOrder ?? draft.displayOrder;
+    const lastQuestionNumber = savedDisplayOrder + 1;
+    const nextStartingOrder = Math.max(1, lastQuestionNumber + 1);
 
     setEditingEntry(null);
     setSavedTopicEntryClientIds(new Set());
@@ -1344,7 +1353,7 @@ export function AdminSubjectSummaryModulePage() {
       entries: [
         {
           clientId: createClientId(),
-          orderNumber: 1,
+          orderNumber: nextStartingOrder,
           answer: "",
           difficulty: "EASY",
           estimatedReadingTime: 2,
