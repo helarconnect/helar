@@ -1422,7 +1422,12 @@ export function AdminUsersWorkspace() {
               <div className="flex items-center gap-3">
                 {filters.page > 1 ? (
                   <button
-                    className="button-secondary !px-4 !py-3"
+                    className={cn(
+                      "!px-4 !py-3 inline-flex items-center gap-2 rounded-2xl border text-sm font-medium transition hover:-translate-y-0.5 disabled:opacity-60 disabled:hover:translate-y-0",
+                      isDark
+                        ? "border-slate-600 bg-slate-800 text-white hover:border-slate-500 hover:bg-slate-700 disabled:border-slate-700 disabled:bg-slate-900 disabled:text-slate-500"
+                        : "border-slate-300 bg-white text-slate-800 hover:border-slate-400 hover:bg-slate-50 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-500",
+                    )}
                     onClick={() => updateFilters({ page: Math.max(1, filters.page - 1) })}
                     type="button"
                   >
@@ -1526,7 +1531,12 @@ export function AdminUsersWorkspace() {
                   </button>
                   {selectedUserQuery.data.status !== "ACTIVE" ? (
                     <button
-                      className="button-secondary !px-4 !py-3"
+                      className={cn(
+                        "!px-4 !py-3 inline-flex items-center gap-2 rounded-2xl border text-sm font-medium transition hover:-translate-y-0.5 disabled:opacity-60 disabled:hover:translate-y-0",
+                        isDark
+                          ? "border-slate-600 bg-slate-800 text-white hover:border-slate-500 hover:bg-slate-700 disabled:border-slate-700 disabled:bg-slate-900 disabled:text-slate-500"
+                          : "border-slate-300 bg-white text-slate-800 hover:border-slate-400 hover:bg-slate-50 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-500",
+                      )}
                       disabled={statusMutation.isPending}
                       onClick={() => handleQuickStatusChange(selectedUserQuery.data.id, "ACTIVE")}
                       type="button"
@@ -1536,7 +1546,12 @@ export function AdminUsersWorkspace() {
                   ) : null}
                   {selectedUserQuery.data.status !== "PENDING" ? (
                     <button
-                      className="button-secondary !px-4 !py-3"
+                      className={cn(
+                        "!px-4 !py-3 inline-flex items-center gap-2 rounded-2xl border text-sm font-medium transition hover:-translate-y-0.5 disabled:opacity-60 disabled:hover:translate-y-0",
+                        isDark
+                          ? "border-slate-600 bg-slate-800 text-white hover:border-slate-500 hover:bg-slate-700 disabled:border-slate-700 disabled:bg-slate-900 disabled:text-slate-500"
+                          : "border-slate-300 bg-white text-slate-800 hover:border-slate-400 hover:bg-slate-50 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-500",
+                      )}
                       disabled={statusMutation.isPending}
                       onClick={() => handleQuickStatusChange(selectedUserQuery.data.id, "PENDING")}
                       type="button"
@@ -1546,7 +1561,12 @@ export function AdminUsersWorkspace() {
                   ) : null}
                   {selectedUserQuery.data.status !== "SUSPENDED" ? (
                     <button
-                      className="button-secondary !px-4 !py-3"
+                      className={cn(
+                        "!px-4 !py-3 inline-flex items-center gap-2 rounded-2xl border text-sm font-medium transition hover:-translate-y-0.5 disabled:opacity-60 disabled:hover:translate-y-0",
+                        isDark
+                          ? "border-slate-600 bg-slate-800 text-white hover:border-slate-500 hover:bg-slate-700 disabled:border-slate-700 disabled:bg-slate-900 disabled:text-slate-500"
+                          : "border-slate-300 bg-white text-slate-800 hover:border-slate-400 hover:bg-slate-50 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-500",
+                      )}
                       disabled={statusMutation.isPending}
                       onClick={() => handleQuickStatusChange(selectedUserQuery.data.id, "SUSPENDED")}
                       type="button"
@@ -1749,7 +1769,12 @@ export function AdminUsersWorkspace() {
                     </button>
 
                     <button
-                      className="button-secondary !px-4 !py-3"
+                      className={cn(
+                        "!px-4 !py-3 inline-flex items-center gap-2 rounded-2xl border text-sm font-medium transition hover:-translate-y-0.5 disabled:opacity-60 disabled:hover:translate-y-0",
+                        isDark
+                          ? "border-slate-600 bg-slate-800 text-white hover:border-slate-500 hover:bg-slate-700 disabled:border-slate-700 disabled:bg-slate-900 disabled:text-slate-500"
+                          : "border-slate-300 bg-white text-slate-800 hover:border-slate-400 hover:bg-slate-50 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-500",
+                      )}
                       disabled={deviceLimitMutation.isPending}
                       onClick={handleClearDeviceLimitOverride}
                       type="button"
