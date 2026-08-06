@@ -330,6 +330,9 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
           { answer: containsText(search) },
           { keyPrinciple: containsText(search) },
           { examTip: containsText(search) },
+          // FACULTY / NLS entries have unique serial numbers (e.g. FAC-0422) that
+          // admins/students use to look up a specific revision card directly.
+          { serialNumber: containsText(search) },
           { relatedStatutes: { has: search } },
           { tags: { has: search } },
           {
@@ -542,6 +545,7 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
           entry.answer,
           entry.keyPrinciple,
           entry.examTip,
+          entry.serialNumber,
           entry.relatedStatutes.join(" "),
           entry.tags.join(" "),
           entry.subject.name
@@ -636,7 +640,7 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
       key: "entries" as const,
       label: "Cases & Ratios",
       items: entries.map((entry) => ({
-        badge: entry.subject.name,
+        badge: entry.serialNumber ?? entry.subject.name,
         id: entry.id,
         kind: "subject_summary_entry" as const,
         path: buildPath("/app/admin/library/cases-and-ratios", {
@@ -644,7 +648,9 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
           search,
           subjectId: entry.subjectId
         }),
-        snippet: findSnippet(search, entry.answer, entry.keyPrinciple, entry.examTip, entry.relatedStatutes.join(", "), entry.tags.join(", ")),
+        // serialNumber is a common lookup key (FAC-0422 / NLS-0123), so include it
+        // before the long-text fields so the snippet surfaces matches against it.
+        snippet: findSnippet(search, entry.serialNumber, entry.answer, entry.keyPrinciple, entry.examTip, entry.relatedStatutes.join(", "), entry.tags.join(", ")),
         subtitle: `Revision entry in ${entry.subject.name}`,
         title: entry.question
       }))

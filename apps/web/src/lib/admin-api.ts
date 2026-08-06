@@ -669,6 +669,12 @@ export type SubjectSummaryModuleStudentEntry = SubjectSummaryModuleEntry & {
 export type SubjectSummaryModuleStudentRevisionResponse = {
   contentAccess: PremiumContentAccess;
   entries: SubjectSummaryModuleStudentEntry[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    totalItems: number;
+    totalPages: number;
+  };
   stats: {
     averageReadingTime: number;
     bookmarks: number;
@@ -1731,7 +1737,7 @@ export async function fetchSubjectSummaryModuleAdminEntries(filters: {
   page?: number;
   pageSize?: number;
   search?: string;
-  sortBy?: "createdAt" | "displayOrder" | "question" | "updatedAt";
+  sortBy?: "createdAt" | "displayOrder" | "question" | "serialNumber" | "updatedAt";
   sortOrder?: "asc" | "desc";
   status?: "all" | SubjectSummaryCaseStatus;
   subjectId?: string;
@@ -1833,6 +1839,10 @@ export async function fetchStudentSubjectSummaryModuleTopics(params: { moduleTyp
 
 export async function fetchStudentSubjectSummaryModuleEntries(params: {
   filter?: "all" | "bookmarked" | "difficult" | "easy" | "read" | "recentlyViewed" | "unread";
+  // 90 questions per page matches the Helar-FAC-100 / Helar-NLS-100 serial DESC
+  // default; the backend schema accepts pageSize up to 1000 for rare bulk views.
+  page?: number;
+  pageSize?: number;
   query?: string;
   subjectId: string;
   moduleType?: SubjectSummaryModuleType;

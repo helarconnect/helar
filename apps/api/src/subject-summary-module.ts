@@ -15,10 +15,15 @@ import { runInTransaction } from "./lib/transactions.js";
 
 const entryFiltersSchema = z.object({
   page: z.coerce.number().int().min(1).max(10_000).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(12),
+  // 90 questions per page is the shared default between FACULTY/NLS admin +
+  // student views; max 1000 for rare bulk exports.
+  pageSize: z.coerce.number().int().min(1).max(1_000).default(90),
   search: z.string().trim().max(160).default(""),
-  sortBy: z.enum(["createdAt", "displayOrder", "question", "updatedAt"]).default("displayOrder"),
-  sortOrder: z.enum(["asc", "desc"]).default("asc"),
+  // serialNumber uses the canonical Helar-FAC-100 / Helar-NLS-100 format, and
+  // sorts numerically by suffix so Helar-FAC-100 correctly renders DESC before
+  // Helar-FAC-99 (lexical sort alone would invert them).
+  sortBy: z.enum(["createdAt", "displayOrder", "question", "serialNumber", "updatedAt"]).default("serialNumber"),
+  sortOrder: z.enum(["asc", "desc"]).default("desc"),
   status: z.union([z.nativeEnum(SubjectSummaryCaseStatus), z.literal("all")]).default("all"),
   subjectId: recordIdSchema.optional(),
   moduleType: z.nativeEnum(SubjectSummaryModuleType).default(SubjectSummaryModuleType.FACULTY),
@@ -74,6 +79,10 @@ const studentSubjectsQuerySchema = z.object({
 });
 
 const studentEntriesQuerySchema = z.object({
+  // 90 questions per page matches the admin default so both views show the same
+  // volume of revision cards before the reader hits pagination controls.
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(1_000).default(90),
   filter: z.enum(["all", "bookmarked", "difficult", "easy", "read", "recentlyViewed", "unread"]).default("all"),
   query: z.string().trim().max(160).default(""),
   subjectId: recordIdSchema,
@@ -143,6 +152,11 @@ function buildEntryWhere(filters: EntryFilters): Prisma.SubjectSummaryEntryWhere
             },
             {
               examTip: containsText(filters.search)
+            },
+            {
+              // FACULTY / NLS entries are uniquely identified by their serial, so
+              // users can look them up directly using the printed serial number.
+              serialNumber: containsText(filters.search)
             },
             {
               subject: {
@@ -431,6 +445,8 @@ export function parseStudentSubjectSummarySubjectsQuery(query: Record<string, st
 
 export function parseStudentSubjectSummaryEntriesQuery(query: Record<string, string | string[] | undefined>) {
   return studentEntriesQuerySchema.parse({
+    page: Array.isArray(query.page) ? query.page[0] : query.page,
+    pageSize: Array.isArray(query.pageSize) ? query.pageSize[0] : query.pageSize,
     filter: Array.isArray(query.filter) ? query.filter[0] : query.filter,
     query: Array.isArray(query.query) ? query.query[0] : query.query,
     subjectId: Array.isArray(query.subjectId) ? query.subjectId[0] : query.subjectId,
@@ -457,11 +473,79 @@ export function parseStudentSubjectSummaryTopicsQuery(query: Record<string, stri
 export async function listSubjectSummaryEntries(filters: EntryFilters) {
   const where = buildEntryWhere(filters);
   const summaryWhere = buildEntrySummaryWhere(filters);
-  const [items, totalItems, subjects, summary] = await Promise.all([
-    prisma.subjectSummaryEntry.findMany({
+  const [totalItems, subjects, summary] = await Promise.all([
+    prisma.subjectSummaryEntry.count({ where }),
+    prisma.subjectSummarySubject.findMany({
+      where: {
+        deletedAt: null,
+        // If a subject only has NLS entries and the admin is viewing the FACULTY
+        // page (or vice-versa) showing it in the dropdown creates false "I selected
+        // a subject but can't see any uploaded content" confusion. Restrict the list
+        // to subjects that actually have at least one non-deleted entry in the
+        // currently-selected moduleType/status combo. Falls back gracefully to
+        // "deletedAt: null only" when filters.status = "all".
+        entries: {
+          some: {
+            deletedAt: null,
+            moduleType: filters.moduleType,
+            ...(filters.status === "all" ? {} : { status: filters.status })
+          }
+        }
+      },
+      orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+      select: {
+        id: true,
+        name: true
+      }
+    }),
+    countEntryStatuses(summaryWhere)
+  ]);
+
+  const paginationStart = (filters.page - 1) * filters.pageSize;
+  const paginationEnd = paginationStart + filters.pageSize;
+
+  // When sorting by serialNumber, DB-level lexical DESC is wrong for the new
+  // Helar-FAC-100 format because "Helar-FAC-99" sorts before "Helar-FAC-100"
+  // (string-wise 9 > 1). Pull the filtered candidates with only the fields
+  // needed for order+include then do an in-memory numeric-suffix sort so
+  // pagination boundaries are semantically correct (Helar-FAC-100 > Helar-FAC-99).
+  let items: Array<any>;
+  if (filters.sortBy === "serialNumber") {
+    const candidates = await prisma.subjectSummaryEntry.findMany({
       where,
-      orderBy: [{ [filters.sortBy]: filters.sortOrder }, { question: "asc" }],
-      skip: (filters.page - 1) * filters.pageSize,
+      orderBy: [{ serialNumber: filters.sortOrder === "asc" ? "asc" : "desc" }, { createdAt: "desc" }, { question: "asc" }],
+      include: {
+        subject: {
+          select: {
+            id: true,
+            name: true
+          }
+        },
+        caseLinks: {
+          include: {
+            case: {
+              include: {
+                topic: {
+                  select: {
+                    id: true,
+                    name: true
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+    candidates.sort((left, right) =>
+      compareSubjectSummarySerialForSort(left, right, filters.sortOrder)
+    );
+    items = candidates.slice(paginationStart, paginationEnd);
+  } else {
+    items = await prisma.subjectSummaryEntry.findMany({
+      where,
+      orderBy: [{ [filters.sortBy]: filters.sortOrder }, { serialNumber: "desc" }, { question: "asc" }],
+      skip: paginationStart,
       take: filters.pageSize,
       include: {
         subject: {
@@ -485,20 +569,8 @@ export async function listSubjectSummaryEntries(filters: EntryFilters) {
           }
         }
       }
-    }),
-    prisma.subjectSummaryEntry.count({ where }),
-    prisma.subjectSummarySubject.findMany({
-      where: {
-        deletedAt: null
-      },
-      orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
-      select: {
-        id: true,
-        name: true
-      }
-    }),
-    countEntryStatuses(summaryWhere)
-  ]);
+    });
+  }
 
   return {
     items: items.map((item) => mapEntry(item)),
@@ -641,6 +713,55 @@ export async function getSubjectSummaryEntryFormOptions(subjectId?: string) {
 function formatSubjectSummarySerialNumber(moduleType: SubjectSummaryModuleType, value: number) {
   const prefix = moduleType === "NLS" ? "Helar-NLS-" : "Helar-FAC-";
   return `${prefix}${value}`;
+}
+
+/**
+ * Extract the numeric portion of a subject summary serial, handling both the
+ * current canonical format ("Helar-FAC-100", "Helar-NLS-100") and the older
+ * short-form legacy values ("FAC-99", "NLS-42") so pre-existing rows still
+ * sort, render and search correctly alongside the new format.
+ *
+ * Returns null when no numeric suffix can be parsed so callers can fall back
+ * to createdAt / question text as the tiebreaker.
+ */
+function parseSubjectSummarySerialSuffix(value: string | null): number | null {
+  if (!value) {
+    return null;
+  }
+  const lastDash = value.lastIndexOf("-");
+  const candidate = lastDash === -1 ? value : value.slice(lastDash + 1);
+  if (!candidate) {
+    return null;
+  }
+  const parsed = Number(candidate);
+  return Number.isFinite(parsed) && Number.isInteger(parsed) ? parsed : null;
+}
+
+/**
+ * Primary sort for the Helar-FAC-100 / Helar-NLS-100 serial format.
+ * DB-level lexical `{ serialNumber: desc }` breaks once you have both 99 and 100
+ * because "9" > "1" string-wise. Comparing by the numeric suffix after the last
+ * dash restores the human-expected "higher number = newer = first in DESC" order.
+ */
+function compareSubjectSummarySerialForSort(
+  left: { serialNumber: string | null; createdAt: Date; question: string },
+  right: { serialNumber: string | null; createdAt: Date; question: string },
+  direction: "asc" | "desc"
+) {
+  const leftNum = parseSubjectSummarySerialSuffix(left.serialNumber);
+  const rightNum = parseSubjectSummarySerialSuffix(right.serialNumber);
+  if (leftNum != null && rightNum != null) {
+    return direction === "asc" ? leftNum - rightNum : rightNum - leftNum;
+  }
+  if (leftNum != null) {
+    return direction === "asc" ? -1 : 1;
+  }
+  if (rightNum != null) {
+    return direction === "asc" ? 1 : -1;
+  }
+  const timeDelta = left.createdAt.getTime() - right.createdAt.getTime();
+  const tie = timeDelta === 0 ? left.question.localeCompare(right.question) : timeDelta;
+  return direction === "asc" ? tie : -tie;
 }
 
 async function allocateSubjectSummarySerialRange(
@@ -1120,7 +1241,6 @@ export async function getStudentSubjectSummaryRevisionView(userId: string, query
       subjectId: query.subjectId,
       ...(query.topic ? { topic: query.topic } : {})
     },
-    orderBy: [{ displayOrder: "asc" }, { question: "asc" }],
     include: {
       subject: {
         select: {
@@ -1144,6 +1264,9 @@ export async function getStudentSubjectSummaryRevisionView(userId: string, query
       }
     }
   });
+  // DB-level orderBy was removed above so we can perform a single canonical
+  // numeric-suffix sort below (Helar-FAC-100 > Helar-FAC-99) instead of the
+  // wrong lexical ordering.
 
   const entryIds = allEntries.map((entry) => entry.id);
   const contentKeys = entryIds.map((entryId) => entryContentKey(entryId));
@@ -1218,6 +1341,7 @@ export async function getStudentSubjectSummaryRevisionView(userId: string, query
         mapped.keyPrinciple,
         mapped.examTip,
         mapped.answer,
+        mapped.serialNumber,
         mapped.tags.join(" "),
         mapped.relatedStatutes.join(" "),
         mapped.relatedCases.map((item) => `${item.title} ${item.citation} ${item.ratioDecidendi}`).join(" ")
@@ -1257,7 +1381,25 @@ export async function getStudentSubjectSummaryRevisionView(userId: string, query
     return entryNotes.length >= 0;
   });
 
-  const totalQuestions = allEntries.length;
+  // Primary sort for the canonical Helar-FAC-100 / Helar-NLS-100 serial format:
+  // DESC by numeric suffix so higher serials (newer uploads) render first. For the
+  // "recently viewed" filter, however, lastOpenedAt wins — the serial number is
+  // then used to break ties deterministically.
+  const sortedEntries = [...filteredEntries].sort((left, right) => {
+    if (query.filter === "recentlyViewed") {
+      const leftAt = progressByKey.get(entryContentKey(left.id))?.lastOpenedAt?.getTime() ?? 0;
+      const rightAt = progressByKey.get(entryContentKey(right.id))?.lastOpenedAt?.getTime() ?? 0;
+      if (leftAt !== rightAt) {
+        return rightAt - leftAt;
+      }
+    }
+    return compareSubjectSummarySerialForSort(left, right, "desc");
+  });
+
+  const totalQuestions = sortedEntries.length;
+  const paginationStart = (query.page - 1) * query.pageSize;
+  const paginationEnd = paginationStart + query.pageSize;
+  const paginatedEntries = sortedEntries.slice(paginationStart, paginationEnd);
   const completedCount = allEntries.reduce((sum, entry) => {
     const progress = progressByKey.get(entryContentKey(entry.id));
     return sum + (progress?.completed ? 1 : 0);
@@ -1280,7 +1422,7 @@ export async function getStudentSubjectSummaryRevisionView(userId: string, query
       ...contentAccess,
       activeSubscriptionEndsAt: contentAccess.activeSubscriptionEndsAt?.toISOString() ?? null
     },
-    entries: filteredEntries.map((entry, index) => {
+    entries: paginatedEntries.map((entry, index) => {
       const mapped = mapEntry(entry);
       const visibleEntry = contentAccess.hasFullAccess ? mapped : buildRestrictedEntryPreview(mapped);
       const contentKey = entryContentKey(entry.id);
@@ -1291,7 +1433,9 @@ export async function getStudentSubjectSummaryRevisionView(userId: string, query
         ...visibleEntry,
         noteCount: notes.length,
         notePreview: notes[0]?.contentPlainText ?? "",
-        orderLabel: index + 1,
+        // orderLabel = page-aware row number so the first card on page 2 does not
+        // repeat "1" when the user already read through page 1.
+        orderLabel: paginationStart + index + 1,
         progress: {
           completed: progress?.completed ?? false,
           lastOpenedAt: progress?.lastOpenedAt.toISOString() ?? null,
@@ -1301,6 +1445,12 @@ export async function getStudentSubjectSummaryRevisionView(userId: string, query
         bookmarked: bookmarkByKey.has(contentKey)
       };
     }),
+    pagination: {
+      page: query.page,
+      pageSize: query.pageSize,
+      totalItems: totalQuestions,
+      totalPages: Math.max(1, Math.ceil(totalQuestions / query.pageSize))
+    },
     stats: {
       averageReadingTime: totalQuestions ? Math.round(allEntries.reduce((sum, entry) => sum + entry.estimatedReadingTime, 0) / totalQuestions) : 0,
       bookmarks: totalBookmarks,

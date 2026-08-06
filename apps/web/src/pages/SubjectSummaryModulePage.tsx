@@ -3,6 +3,8 @@ import {
   AlignCenter,
   AlignLeft,
   AlignRight,
+  ArrowLeft,
+  ArrowRight,
   Bookmark,
   BookOpen,
   Bold,
@@ -61,6 +63,7 @@ import { cn } from "@/lib/utils";
 
 type AdminFilters = {
   moduleType: SubjectSummaryModuleType;
+  page: number;
   search: string;
   status: "all" | SubjectSummaryCaseStatus;
   subjectId: string;
@@ -1161,8 +1164,12 @@ export function AdminSubjectSummaryModulePage() {
   const incomingSubjectId = searchParams.get("subjectId") ?? "";
   const incomingTopic = searchParams.get("topic") ?? "";
   const incomingModuleType: SubjectSummaryModuleType = searchParams.get("moduleType") === "NLS" ? "NLS" : "FACULTY";
+  // 90 questions per page matches the Helar-FAC-100 / Helar-NLS-100 serial DESC default.
+  const incomingPage = Math.max(1, Number(searchParams.get("page") ?? 1) || 1);
+  const [adminPage, setAdminPage] = useState(incomingPage);
   const [filters, setFilters] = useState<AdminFilters>({
     moduleType: incomingModuleType,
+    page: incomingPage,
     search: incomingSearch,
     status: "all",
     subjectId: incomingSubjectId,
@@ -1197,7 +1204,10 @@ export function AdminSubjectSummaryModulePage() {
   const [entrySaveError, setEntrySaveError] = useState<string | null>(null);
 
   const entriesQuery = useQuery({
-    queryFn: () => fetchSubjectSummaryModuleAdminEntries({ ...filters, page: 1, pageSize: 50 }),
+    // 90 questions per page matches the serial DESC default; the backend allows up
+    // to 1000/page for rare bulk views. Use filters.page so Previous/Next controls
+    // actually advance instead of always re-fetching page 1.
+    queryFn: () => fetchSubjectSummaryModuleAdminEntries({ ...filters, pageSize: 90 }),
     queryKey: queryKeys.subjectSummaryModuleAdminEntries(filters)
   });
   const formOptionsQuery = useQuery({
@@ -1523,7 +1533,8 @@ export function AdminSubjectSummaryModulePage() {
         current.search === incomingSearch &&
         current.subjectId === incomingSubjectId &&
         current.moduleType === incomingModuleType &&
-        current.topic === incomingTopic
+        current.topic === incomingTopic &&
+        current.page === incomingPage
       ) {
         return current;
       }
@@ -1531,6 +1542,7 @@ export function AdminSubjectSummaryModulePage() {
       return {
         ...current,
         moduleType: incomingModuleType,
+        page: incomingPage,
         search: incomingSearch,
         subjectId: incomingSubjectId,
         topic: incomingTopic
@@ -1543,7 +1555,8 @@ export function AdminSubjectSummaryModulePage() {
 
     setDraft((current) => ({ ...current, moduleType: incomingModuleType }));
     setTopicDraft((current) => ({ ...current, moduleType: incomingModuleType }));
-  }, [incomingModuleType, incomingSearch, incomingSubjectId, incomingTopic, modalMode]);
+    setAdminPage(incomingPage);
+  }, [incomingModuleType, incomingPage, incomingSearch, incomingSubjectId, incomingTopic, modalMode]);
 
   useEffect(() => {
     const editEntryId = searchParams.get("editEntry");
@@ -1571,7 +1584,7 @@ export function AdminSubjectSummaryModulePage() {
           <div className="max-w-3xl">
             <p className={cn("text-xs uppercase tracking-[0.24em]", isDark ? "text-slate-500" : "text-slate-400")}>Subject summary</p>
             <h2 className={cn("mt-3 font-heading text-3xl leading-tight", isDark ? "text-white" : "text-slate-950")}>
-              Build premium Q&amp;A revision guides from your Subjects, Cases and Ratios.
+              Build premium Q&amp;A revision guides from your Subjects; Cases and Ratios.
             </h2>
             <p className={cn("mt-3 text-sm leading-7", isDark ? "text-slate-300" : "text-slate-600")}>
               Each summary belongs to one existing subject and can link directly to related cases, statutes, exam tips, and student study actions.
@@ -1588,7 +1601,7 @@ export function AdminSubjectSummaryModulePage() {
             <Search className={cn("h-4 w-4", isDark ? "text-slate-500" : "text-slate-400")} />
             <input
               className={cn("w-full bg-transparent text-sm outline-none", isDark ? "text-white placeholder:text-slate-500" : "text-slate-950 placeholder:text-slate-400")}
-              onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))}
+              onChange={(event) => setFilters((current) => ({ ...current, page: 1, search: event.target.value }))}
               placeholder="Search questions, answers, principles, or linked cases"
               value={filters.search}
             />
@@ -1598,7 +1611,7 @@ export function AdminSubjectSummaryModulePage() {
             className={cn("rounded-[24px] border px-4 py-3 text-sm outline-none", isDark ? "border-slate-700 bg-slate-900 text-white" : "border-slate-200 bg-slate-50 text-slate-950")}
             onChange={(event) => {
               const nextSubjectId = event.target.value;
-              setFilters((current) => ({ ...current, subjectId: nextSubjectId, topic: "" }));
+              setFilters((current) => ({ ...current, page: 1, subjectId: nextSubjectId, topic: "" }));
               setTopicDraft((current) => ({ ...current, subjectId: nextSubjectId, topic: "" }));
               setDraft((current) => ({ ...current, subjectId: nextSubjectId, topic: "" }));
 
@@ -1609,6 +1622,7 @@ export function AdminSubjectSummaryModulePage() {
                 nextParams.delete("subjectId");
               }
               nextParams.delete("topic");
+              nextParams.delete("page");
               setSearchParams(nextParams, { replace: true });
             }}
             value={filters.subjectId}
@@ -1626,7 +1640,7 @@ export function AdminSubjectSummaryModulePage() {
             disabled={!filters.subjectId}
             onChange={(event) => {
               const nextTopic = event.target.value;
-              setFilters((current) => ({ ...current, topic: nextTopic }));
+              setFilters((current) => ({ ...current, page: 1, topic: nextTopic }));
               setTopicDraft((current) => ({ ...current, topic: nextTopic }));
               setDraft((current) => ({ ...current, topic: nextTopic }));
 
@@ -1636,6 +1650,7 @@ export function AdminSubjectSummaryModulePage() {
               } else {
                 nextParams.delete("topic");
               }
+              nextParams.delete("page");
               setSearchParams(nextParams, { replace: true });
             }}
             value={filters.topic}
@@ -1650,7 +1665,7 @@ export function AdminSubjectSummaryModulePage() {
 
           <select
             className={cn("rounded-[24px] border px-4 py-3 text-sm outline-none", isDark ? "border-slate-700 bg-slate-900 text-white" : "border-slate-200 bg-slate-50 text-slate-950")}
-            onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value as AdminFilters["status"] }))}
+            onChange={(event) => setFilters((current) => ({ ...current, page: 1, status: event.target.value as AdminFilters["status"] }))}
             value={filters.status}
           >
             <option value="all">All statuses</option>
@@ -1768,12 +1783,89 @@ export function AdminSubjectSummaryModulePage() {
               </article>
             ))
           ) : (
-            <div className={cn("rounded-[24px] border px-6 py-12 text-center", isDark ? "border-slate-800 bg-slate-950 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600")}>
-              No subject summaries match the current filters yet.
-            </div>
-          )}
-        </div>
-      </section>
+              <div className={cn("rounded-[24px] border px-6 py-12 text-center", isDark ? "border-slate-800 bg-slate-950 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600")}>
+                No subject summaries match the current filters yet.
+              </div>
+            )}
+          </div>
+        </section>
+
+        {entriesQuery.data ? (
+          (() => {
+            const pagination = entriesQuery.data.pagination;
+            if (pagination.totalPages <= 1) {
+              return null;
+            }
+            const firstVisible = (pagination.page - 1) * pagination.pageSize + 1;
+            const lastVisible = Math.min(pagination.page * pagination.pageSize, pagination.totalItems);
+            const onPrevious = () => {
+              const next = Math.max(1, pagination.page - 1);
+              setAdminPage(next);
+              setFilters((current) => ({ ...current, page: next }));
+              const nextParams = new URLSearchParams(searchParams);
+              nextParams.set("page", String(next));
+              setSearchParams(nextParams, { replace: true });
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            };
+            const onNext = () => {
+              const next = Math.min(pagination.totalPages, pagination.page + 1);
+              setAdminPage(next);
+              setFilters((current) => ({ ...current, page: next }));
+              const nextParams = new URLSearchParams(searchParams);
+              nextParams.set("page", String(next));
+              setSearchParams(nextParams, { replace: true });
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            };
+            return (
+              <div className={cn("flex flex-wrap items-center justify-between gap-3 rounded-[24px] border px-4 py-4", isDark ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-white")}>
+                <p className={cn("text-sm", isDark ? "text-slate-300" : "text-slate-700")}>
+                  Showing questions {firstVisible}–{lastVisible} of {pagination.totalItems}
+                  <span className={cn("ml-2 rounded-full border px-2 py-0.5 text-xs uppercase tracking-[0.18em]", isDark ? "border-slate-700 text-slate-400" : "border-slate-200 text-slate-500")}>
+                    Page {pagination.page} / {pagination.totalPages}
+                  </span>
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    className={cn(
+                      "inline-flex h-11 items-center gap-2 rounded-full border px-4 text-sm font-medium transition",
+                      pagination.page <= 1
+                        ? isDark
+                          ? "cursor-not-allowed border-slate-800 bg-slate-950/50 text-slate-500"
+                          : "cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400"
+                        : isDark
+                          ? "border-slate-700 bg-slate-950 text-slate-100 hover:border-orange-400/40 hover:text-orange-300"
+                          : "border-slate-300 bg-white text-slate-900 hover:border-orange-300 hover:text-orange-700"
+                    )}
+                    disabled={pagination.page <= 1}
+                    onClick={onPrevious}
+                    type="button"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                    Previous
+                  </button>
+                  <button
+                    className={cn(
+                      "inline-flex h-11 items-center gap-2 rounded-full border px-4 text-sm font-medium transition",
+                      pagination.page >= pagination.totalPages
+                        ? isDark
+                          ? "cursor-not-allowed border-slate-800 bg-slate-950/50 text-slate-500"
+                          : "cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400"
+                        : isDark
+                          ? "border-orange-400/50 bg-orange-500/10 text-orange-200 hover:bg-orange-500/20"
+                          : "border-orange-300 bg-orange-50 text-orange-800 hover:bg-orange-100"
+                    )}
+                    disabled={pagination.page >= pagination.totalPages}
+                    onClick={onNext}
+                    type="button"
+                  >
+                    Next
+                    <ArrowRight className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            );
+          })()
+        ) : null}
 
       {modalMode === "entry" ? (
         <AdminEntryModal
@@ -1855,6 +1947,10 @@ export function StudentSubjectSummaryModulePage() {
   const [optimisticReadIds, setOptimisticReadIds] = useState<string[]>([]);
   const [continueReadingTargetId, setContinueReadingTargetId] = useState<string | null>(null);
   const [noteStatus, setNoteStatus] = useState<null | { entryId: string; message: string; tone: "green" | "red" }>(null);
+  // FACULTY / NLS serial DESC pages default to the URL page param (if present) so
+  // deep-links land the reader on the exact 90-question slice they bookmarked.
+  const initialPage = Math.max(1, Number(searchParams.get("page") ?? 1) || 1);
+  const [page, setPage] = useState(initialPage);
   const deferredSubjectSearch = useDeferredValue(subjectSearch);
   const deferredEntrySearch = useDeferredValue(entrySearch);
 
@@ -1876,6 +1972,7 @@ export function StudentSubjectSummaryModulePage() {
       fetchStudentSubjectSummaryModuleEntries({
         filter,
         moduleType,
+        page,
         query: deferredEntrySearch,
         subjectId: selectedSubjectId,
         topic: selectedTopic
@@ -1883,6 +1980,7 @@ export function StudentSubjectSummaryModulePage() {
     queryKey: queryKeys.subjectSummaryModuleStudentEntries({
       filter,
       moduleType,
+      page,
       query: deferredEntrySearch,
       subjectId: selectedSubjectId,
       topic: selectedTopic
@@ -1906,6 +2004,7 @@ export function StudentSubjectSummaryModulePage() {
   useEffect(() => {
     setSelectedSubjectId("");
     setOpenEntryIds([]);
+    setPage(1);
   }, [moduleType]);
 
   useEffect(() => {
@@ -1930,6 +2029,7 @@ export function StudentSubjectSummaryModulePage() {
 
   useEffect(() => {
     setSelectedTopic("");
+    setPage(1);
   }, [selectedSubjectId]);
 
   useEffect(() => {
@@ -2159,6 +2259,7 @@ export function StudentSubjectSummaryModulePage() {
 
     setFilter("all");
     setEntrySearch("");
+    setPage(1);
     setContinueReadingTargetId(entryId);
   }
 
@@ -2233,6 +2334,7 @@ export function StudentSubjectSummaryModulePage() {
                       setOpenEntryIds([]);
                       setEntrySearch("");
                       setFilter("all");
+                      setPage(1);
                     }}
                     type="button"
                   >
@@ -2309,7 +2411,10 @@ export function StudentSubjectSummaryModulePage() {
                   <Search className={cn("h-4 w-4", isDark ? "text-slate-500" : "text-slate-400")} />
                   <input
                     className={cn("w-full bg-transparent text-sm outline-none", isDark ? "text-white placeholder:text-slate-500" : "text-slate-950 placeholder:text-slate-400")}
-                    onChange={(event) => setEntrySearch(event.target.value)}
+                    onChange={(event) => {
+                      setEntrySearch(event.target.value);
+                      setPage(1);
+                    }}
                     placeholder="Search questions, keywords, principles, cases, or ratios"
                     value={entrySearch}
                   />
@@ -2318,7 +2423,10 @@ export function StudentSubjectSummaryModulePage() {
                   <Filter className={cn("h-4 w-4", isDark ? "text-slate-500" : "text-slate-400")} />
                   <select
                     className={cn("w-full bg-transparent text-sm outline-none", isDark ? "text-white" : "text-slate-950")}
-                    onChange={(event) => setFilter(event.target.value as StudentFilter)}
+                    onChange={(event) => {
+                      setFilter(event.target.value as StudentFilter);
+                      setPage(1);
+                    }}
                     value={filter}
                   >
                     {studentFilterOptions.map((option) => (
@@ -2397,6 +2505,73 @@ export function StudentSubjectSummaryModulePage() {
                 );
               })}
             </section>
+
+            {(() => {
+              const pagination = entriesQuery.data.pagination;
+              if (pagination.totalPages <= 1) {
+                return null;
+              }
+              const firstVisible = (pagination.page - 1) * pagination.pageSize + 1;
+              const lastVisible = Math.min(pagination.page * pagination.pageSize, pagination.totalItems);
+              const onPrevious = () => {
+                const next = Math.max(1, pagination.page - 1);
+                setPage(next);
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              };
+              const onNext = () => {
+                const next = Math.min(pagination.totalPages, pagination.page + 1);
+                setPage(next);
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              };
+              return (
+                <div className={cn("flex flex-wrap items-center justify-between gap-3 rounded-[24px] border px-4 py-4", isDark ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-white")}>
+                  <p className={cn("text-sm", isDark ? "text-slate-300" : "text-slate-700")}>
+                    Showing questions {firstVisible}–{lastVisible} of {pagination.totalItems}
+                    <span className={cn("ml-2 rounded-full border px-2 py-0.5 text-xs uppercase tracking-[0.18em]", isDark ? "border-slate-700 text-slate-400" : "border-slate-200 text-slate-500")}>
+                      Page {pagination.page} / {pagination.totalPages}
+                    </span>
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      className={cn(
+                        "inline-flex h-11 items-center gap-2 rounded-full border px-4 text-sm font-medium transition",
+                        pagination.page <= 1
+                          ? isDark
+                            ? "cursor-not-allowed border-slate-800 bg-slate-950/50 text-slate-500"
+                            : "cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400"
+                          : isDark
+                            ? "border-slate-700 bg-slate-950 text-slate-100 hover:border-orange-400/40 hover:text-orange-300"
+                            : "border-slate-300 bg-white text-slate-900 hover:border-orange-300 hover:text-orange-700"
+                      )}
+                      disabled={pagination.page <= 1}
+                      onClick={onPrevious}
+                      type="button"
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                      Previous
+                    </button>
+                    <button
+                      className={cn(
+                        "inline-flex h-11 items-center gap-2 rounded-full border px-4 text-sm font-medium transition",
+                        pagination.page >= pagination.totalPages
+                          ? isDark
+                            ? "cursor-not-allowed border-slate-800 bg-slate-950/50 text-slate-500"
+                            : "cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400"
+                          : isDark
+                            ? "border-orange-400/50 bg-orange-500/10 text-orange-200 hover:bg-orange-500/20"
+                            : "border-orange-300 bg-orange-50 text-orange-800 hover:bg-orange-100"
+                      )}
+                      disabled={pagination.page >= pagination.totalPages}
+                      onClick={onNext}
+                      type="button"
+                    >
+                      Next
+                      <ArrowRight className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
           </>
         ) : selectedSubjectId ? (
           <section className={cn("rounded-[30px] border px-6 py-10", isDark ? "border-slate-800 bg-slate-900 text-slate-300" : "border-slate-200 bg-white text-slate-600")}>
