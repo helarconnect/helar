@@ -807,6 +807,43 @@ export async function createSubjectSummaryTopicEntries(input: TopicBulkInput, ac
   return result;
 }
 
+export async function getAdminSubjectSummaryEntry(entryId: string) {
+  const entry = await prisma.subjectSummaryEntry.findFirst({
+    where: {
+      deletedAt: null,
+      id: entryId
+    },
+    include: {
+      subject: {
+        select: {
+          id: true,
+          name: true
+        }
+      },
+      caseLinks: {
+        include: {
+          case: {
+            include: {
+              topic: {
+                select: {
+                  id: true,
+                  name: true
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+
+  if (!entry) {
+    return null;
+  }
+
+  return mapEntry(entry);
+}
+
 export async function updateSubjectSummaryEntry(
   entryId: string,
   input: EntryInput,

@@ -20,6 +20,7 @@ import {
 } from '@/pages/AdminLibraryPage'
 import {
   AdminContentPage,
+  AdminContentReviewDetailPage,
   AdminPaymentsPage,
   AdminSettingsPage,
   AdminUsersPage,
@@ -176,6 +177,7 @@ export const router = createBrowserRouter([
                 element: <AdminBarFinalExamsMcqPage />,
               },
               { path: 'content', element: <AdminContentPage /> },
+              { path: 'content/review/:itemType/:resourceId', element: <AdminContentReviewDetailPage /> },
               {
                 path: 'payments',
                 element: (

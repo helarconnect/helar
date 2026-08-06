@@ -92,6 +92,8 @@ export function AppLayout() {
           ? 'Law Report Reader'
           : location.pathname.startsWith('/app/admin/library/subject-summaries/cases/')
             ? 'Case Detail'
+            : location.pathname.startsWith('/app/admin/content/review/')
+              ? 'Content Review'
             : 'Workspace')
   const moduleType = new URLSearchParams(location.search).get('moduleType') === 'NLS' ? 'NLS' : 'FACULTY'
   const modulePageTitle =

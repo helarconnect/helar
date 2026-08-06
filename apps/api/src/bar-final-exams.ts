@@ -341,6 +341,29 @@ export async function createAdminBarFinalExamQuestion(
   return mapQuestion(created);
 }
 
+export async function getAdminBarFinalExamQuestion(questionId: string) {
+  const question = await prisma.barFinalExamQuestion.findFirst({
+    where: {
+      deletedAt: null,
+      id: questionId
+    },
+    include: {
+      subject: {
+        select: {
+          id: true,
+          name: true
+        }
+      }
+    }
+  });
+
+  if (!question) {
+    return null;
+  }
+
+  return mapQuestion(question);
+}
+
 export async function updateAdminBarFinalExamQuestion(
   questionId: string,
   input: BarFinalExamQuestionInput,
@@ -526,6 +549,29 @@ export async function createAdminBarFinalExamMcqQuestion(
   });
 
   return mapMcqQuestion(created);
+}
+
+export async function getAdminBarFinalExamMcqQuestion(questionId: string) {
+  const question = await prisma.barFinalExamMcqQuestion.findFirst({
+    where: {
+      deletedAt: null,
+      id: questionId
+    },
+    include: {
+      subject: {
+        select: {
+          id: true,
+          name: true
+        }
+      }
+    }
+  });
+
+  if (!question) {
+    return null;
+  }
+
+  return mapMcqQuestion(question);
 }
 
 export async function updateAdminBarFinalExamMcqQuestion(

@@ -9,6 +9,7 @@ export type AdminNotificationItemType =
   | "subject_summary_case"
   | "subject_summary_entry"
   | "bar_final_exam_question"
+  | "bar_final_exam_mcq_question"
   | "user_notification";
 
 export type AdminNotificationCenterItem = {
@@ -586,7 +587,7 @@ export async function getSuperAdminApprovalQueue(): Promise<AdminApprovalQueueSn
       submittedRoleLabel: "Content Admin",
       subtitle: `${item.subject.name} bar final exams MCQ`,
       title: item.question,
-      type: "bar_final_exam_question"
+      type: "bar_final_exam_mcq_question"
     };
   });
 
@@ -1227,6 +1228,45 @@ export async function declineBarFinalExamQuestion(questionId: string, approverUs
     notificationActions: ["admin.bar-final-exams.question.created", "admin.bar-final-exams.question.updated"],
     updatePendingItem: async (tx, item) => {
       await tx.barFinalExamQuestion.update({
+        where: {
+          id: item.id
+        },
+        data: {
+          approvedAt: null,
+          approvedBy: null,
+          reviewFeedback: reason,
+          status: BarFinalExamQuestionStatus.DRAFT
+        }
+      });
+    }
+  });
+}
+
+export async function declineBarFinalExamMcqQuestion(questionId: string, approverUserId: string, reason: string) {
+  return runApprovalMutation<{ id: string; question: string }>({
+    buildNotification: (item) => ({
+      body: `Your bar final exam MCQ "${item.question}" was returned for revision by the super admin. Reason: ${reason}`,
+      title: "Bar final exam MCQ declined"
+    }),
+    createResult: (item) => ({
+      id: item.id,
+      success: true as const
+    }),
+    loadPendingItem: (tx) =>
+      tx.barFinalExamMcqQuestion.findFirst({
+        where: {
+          deletedAt: null,
+          id: questionId,
+          status: BarFinalExamQuestionStatus.PENDING_APPROVAL
+        },
+        select: {
+          id: true,
+          question: true
+        }
+      }),
+    notificationActions: ["admin.bar-final-exams.mcq-question.created", "admin.bar-final-exams.mcq-question.updated"],
+    updatePendingItem: async (tx, item) => {
+      await tx.barFinalExamMcqQuestion.update({
         where: {
           id: item.id
         },

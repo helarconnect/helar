@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  ArrowLeft,
   ArrowRight,
   BriefcaseBusiness,
   CheckCheck,
@@ -8,35 +9,64 @@ import {
   FileClock,
   GraduationCap,
   LibraryBig,
+  Pencil,
   RefreshCw,
   Search,
   ShieldCheck,
   Sparkles,
 } from 'lucide-react'
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 
 import { AdminUsersWorkspace } from '@/components/admin/AdminUsersWorkspace'
 import { useTheme } from '@/hooks/useTheme'
 import {
   activateAdminSubscriptionManually,
+  approveAdminBarFinalExamMcqQuestion,
+  approveAdminBarFinalExamQuestion,
   approveAdminLibraryMaterial,
   approveAllPendingAdminContent,
-  approveAdminBarFinalExamQuestion,
   approveAdminSubjectSummaryCase,
   approveAdminSubjectSummaryEntry,
-  declineAdminLibraryMaterial,
+  declineAdminBarFinalExamMcqQuestion,
   declineAdminBarFinalExamQuestion,
+  declineAdminLibraryMaterial,
   declineAdminSubjectSummaryCase,
   declineAdminSubjectSummaryEntry,
+  fetchAdminBarFinalExamMcqQuestionDetail,
+  fetchAdminBarFinalExamQuestionDetail,
   fetchAdminBillingSnapshot,
   fetchAdminContentReviewQueue,
+  fetchAdminLibraryMaterial,
+  fetchAdminSubjectSummaryEntryDetail,
+  fetchSubjectSummaryCaseDetail,
 } from '@/lib/admin-api'
 import { fetchAdminDashboardSnapshot } from '@/lib/mock-api'
 import { queryKeys } from '@/lib/query-keys'
 import { cn, isSuperAdmin } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth-store'
 import type { AdminAccessRequest, AdminContentReviewItem, AdminPaymentIssue } from '@/types/domain'
+
+type AdminContentReviewQueueItemType =
+  | 'library_material'
+  | 'subject_summary_case'
+  | 'subject_summary_entry'
+  | 'bar_final_exam_question'
+  | 'bar_final_exam_mcq_question'
+type AdminContentReviewQueueItem = {
+  actionPath: string
+  contentTypeLabel: string
+  createdAt: string
+  editPath: string
+  id: string
+  resourceId: string
+  reviewPath: string
+  submittedBy: string
+  submittedRoleLabel: string
+  subtitle: string
+  title: string
+  type: AdminContentReviewQueueItemType
+}
 
 function statusClasses(isDark: boolean, tone: 'amber' | 'blue' | 'green' | 'red' | 'slate') {
   const palette = {
@@ -269,12 +299,7 @@ export function AdminContentPage() {
   const roleCodes = useAuthStore((state) => state.session?.user.roleCodes ?? [])
   const isSuperAdminWorkspace = isSuperAdmin(roleCodes)
   const pendingQueueRef = useRef<HTMLDivElement | null>(null)
-  const [declineTarget, setDeclineTarget] = useState<null | {
-    id: string
-    resourceId: string
-    title: string
-    type: 'library_material' | 'subject_summary_case' | 'subject_summary_entry' | 'bar_final_exam_question'
-  }>(null)
+  const [declineTarget, setDeclineTarget] = useState<null | AdminContentReviewQueueItem>(null)
   const [declineReason, setDeclineReason] = useState('')
   const contentReviewQuery = useQuery({
     queryKey: queryKeys.adminContentReview,
@@ -314,7 +339,7 @@ export function AdminContentPage() {
   })
 
   const approveMutation = useMutation({
-    mutationFn: async (item: { id: string; resourceId: string; type: 'library_material' | 'subject_summary_case' | 'subject_summary_entry' | 'bar_final_exam_question' }) => {
+    mutationFn: async (item: AdminContentReviewQueueItem) => {
       if (item.type === 'library_material') {
         return approveAdminLibraryMaterial(item.resourceId)
       }
@@ -327,6 +352,10 @@ export function AdminContentPage() {
         return approveAdminBarFinalExamQuestion(item.resourceId)
       }
 
+      if (item.type === 'bar_final_exam_mcq_question') {
+        return approveAdminBarFinalExamMcqQuestion(item.resourceId)
+      }
+
       return approveAdminSubjectSummaryEntry(item.resourceId)
     },
     onSuccess: async () => {
@@ -337,12 +366,13 @@ export function AdminContentPage() {
         queryClient.invalidateQueries({ queryKey: ['subject-summary-cases'] }),
         queryClient.invalidateQueries({ queryKey: ['subject-summary-module-admin-entries'] }),
         queryClient.invalidateQueries({ queryKey: ['admin-bar-final-exam-questions'] }),
+        queryClient.invalidateQueries({ queryKey: ['admin-bar-final-exam-mcq-questions'] }),
       ])
     },
   })
 
   const declineMutation = useMutation({
-    mutationFn: async (item: { id: string; reason: string; resourceId: string; type: 'library_material' | 'subject_summary_case' | 'subject_summary_entry' | 'bar_final_exam_question' }) => {
+    mutationFn: async (item: AdminContentReviewQueueItem & { reason: string }) => {
       if (item.type === 'library_material') {
         return declineAdminLibraryMaterial(item.resourceId, item.reason)
       }
@@ -353,6 +383,10 @@ export function AdminContentPage() {
 
       if (item.type === 'bar_final_exam_question') {
         return declineAdminBarFinalExamQuestion(item.resourceId, item.reason)
+      }
+
+      if (item.type === 'bar_final_exam_mcq_question') {
+        return declineAdminBarFinalExamMcqQuestion(item.resourceId, item.reason)
       }
 
       return declineAdminSubjectSummaryEntry(item.resourceId, item.reason)
@@ -367,6 +401,7 @@ export function AdminContentPage() {
         queryClient.invalidateQueries({ queryKey: ['subject-summary-cases'] }),
         queryClient.invalidateQueries({ queryKey: ['subject-summary-module-admin-entries'] }),
         queryClient.invalidateQueries({ queryKey: ['admin-bar-final-exam-questions'] }),
+        queryClient.invalidateQueries({ queryKey: ['admin-bar-final-exam-mcq-questions'] }),
       ])
     },
   })
@@ -375,12 +410,7 @@ export function AdminContentPage() {
     return <LoadingState />
   }
 
-  function openDeclineDialog(item: {
-    id: string
-    resourceId: string
-    title: string
-    type: 'library_material' | 'subject_summary_case' | 'subject_summary_entry' | 'bar_final_exam_question'
-  }) {
+  function openDeclineDialog(item: AdminContentReviewQueueItem) {
     setDeclineTarget(item)
     setDeclineReason('')
   }
@@ -398,6 +428,7 @@ export function AdminContentPage() {
 
   const reviewQueue = contentReviewQuery.data
   const iconByType = {
+    bar_final_exam_mcq_question: ClipboardList,
     library_material: LibraryBig,
     subject_summary_case: GraduationCap,
     subject_summary_entry: FileClock,
@@ -621,7 +652,11 @@ export function AdminContentPage() {
                             <span>•</span>
                             <span>{new Date(item.createdAt).toLocaleString()}</span>
                           </div>
-                          <Link className={cn('mt-3 inline-flex items-center gap-2 text-sm font-medium', isDark ? 'text-slate-200' : 'text-slate-700')} to={item.reviewPath}>
+                          <Link
+                            className={cn('mt-3 inline-flex items-center gap-2 text-sm font-medium', isDark ? 'text-slate-200' : 'text-slate-700')}
+                            state={item}
+                            to={`/app/admin/content/review/${item.type}/${item.resourceId}`}
+                          >
                             Review content
                             <ArrowRight className="h-4 w-4" />
                           </Link>
@@ -630,12 +665,6 @@ export function AdminContentPage() {
                     </div>
 
                     <div className="mt-5 flex flex-wrap gap-2">
-                      <Link className="button-secondary !px-4 !py-3" to={item.editPath}>
-                        <span className="inline-flex items-center gap-2">
-                          Edit
-                          <ArrowRight className="h-4 w-4" />
-                        </span>
-                      </Link>
                       <button
                         className={cn(
                           'inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium transition',
@@ -767,7 +796,12 @@ export function AdminContentPage() {
 
             <div className="mt-6 flex flex-wrap justify-end gap-3">
               <button
-                className="button-secondary !px-4 !py-3"
+                className={cn(
+                  '!px-4 !py-3 inline-flex items-center gap-2 rounded-2xl border text-sm font-medium transition hover:-translate-y-0.5',
+                  isDark
+                    ? 'border-slate-600 bg-slate-800 text-white hover:border-slate-500 hover:bg-slate-700'
+                    : 'border-slate-300 bg-white text-slate-800 hover:border-slate-400 hover:bg-slate-50',
+                )}
                 onClick={() => {
                   setDeclineTarget(null)
                   setDeclineReason('')
@@ -792,6 +826,731 @@ export function AdminContentPage() {
             </div>
           </div>
         </div>
+      ) : null}
+    </div>
+  )
+}
+
+// Builds the href used to navigate from the content review queue into the dedicated
+// full-page review reader. Kept with the queue item shape so callers stay consistent.
+export function buildContentReviewDetailHref(item: Pick<AdminContentReviewQueueItem, 'resourceId' | 'type'>) {
+  return `/app/admin/content/review/${item.type}/${item.resourceId}`
+}
+
+// Builds a synthetic queue item from route params + location state. The queue item
+// carries the header metadata (submitter, createdAt, type label) that the dedicated
+// GET detail endpoints don't return because they only serve the underlying resource.
+// If state is missing (e.g. user bookmarked the URL) we still produce a valid item
+// with placeholders; the renderer falls back to the resource record for its title.
+function resolveQueueTargetFromLocation(
+  params: Record<string, string | undefined>,
+  state: unknown,
+): AdminContentReviewQueueItem | null {
+  const itemType = params.itemType as AdminContentReviewQueueItemType | undefined
+  const resourceId = params.resourceId
+  if (!itemType || !resourceId) {
+    return null
+  }
+
+  // If the user navigated from the queue via <Link state={item}>, we have all metadata.
+  const fromState = state as Partial<AdminContentReviewQueueItem> | null
+  const createdAt = fromState?.createdAt ?? new Date().toISOString()
+  const contentTypeLabel =
+    fromState?.contentTypeLabel ??
+    (itemType === 'library_material'
+      ? 'Library material'
+      : itemType === 'subject_summary_case'
+        ? 'Subject summary case'
+        : itemType === 'subject_summary_entry'
+          ? 'Subject summary Q&A entry'
+          : itemType === 'bar_final_exam_question'
+            ? 'Bar final exam • NLS theory question'
+            : 'Bar final exam • MCQ')
+
+  return {
+    id: fromState?.id ?? `${itemType}-${resourceId}`,
+    type: itemType,
+    resourceId,
+    reviewPath: fromState?.reviewPath ?? '',
+    actionPath: fromState?.actionPath ?? '',
+    editPath: fromState?.editPath ?? '',
+    title: fromState?.title ?? 'Loading…',
+    subtitle: fromState?.subtitle ?? 'Reviewing this content for approval',
+    submittedBy: fromState?.submittedBy ?? 'Content admin',
+    submittedRoleLabel: fromState?.submittedRoleLabel ?? 'Admin',
+    contentTypeLabel,
+    createdAt,
+  }
+}
+
+export function AdminContentReviewDetailPage() {
+  const { isDark } = useTheme()
+  const queryClient = useQueryClient()
+  const params = useParams()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const [declineMode, setDeclineMode] = useState(false)
+  const [declineReason, setDeclineReason] = useState('')
+  const [notice, setNotice] = useState<null | { tone: 'green' | 'red'; message: string }>(null)
+
+  const target = resolveQueueTargetFromLocation(params, location.state)
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['content-review-detail', target?.type, target?.resourceId, target?.actionPath],
+    queryFn: async () => {
+      if (!target) {
+        throw new Error('Invalid review target')
+      }
+      if (target.type === 'library_material') {
+        const sectionMatch = target.actionPath.match(/^\/app\/admin\/library\/([^/?#]+)/)
+        const section = (sectionMatch?.[1] ?? 'law-reports') as 'law-reports' | 'subject-summaries' | 'cases-and-ratios'
+        return fetchAdminLibraryMaterial(section, target.resourceId)
+      }
+      if (target.type === 'subject_summary_case') {
+        return fetchSubjectSummaryCaseDetail(target.resourceId)
+      }
+      if (target.type === 'subject_summary_entry') {
+        return fetchAdminSubjectSummaryEntryDetail(target.resourceId)
+      }
+      if (target.type === 'bar_final_exam_question') {
+        return fetchAdminBarFinalExamQuestionDetail(target.resourceId)
+      }
+      return fetchAdminBarFinalExamMcqQuestionDetail(target.resourceId)
+    },
+    staleTime: 1000 * 60,
+    enabled: !!target,
+  })
+
+  // If location state missed a title, derive the display title from the fetched record
+  // so the header isn't stuck on "Loading…" when the user opened a bookmarked URL.
+  const resolvedTitle = useMemo(() => {
+    if (!target) {
+      return ''
+    }
+    if (target.title && target.title !== 'Loading…') {
+      return target.title
+    }
+    if (!data) {
+      return target.title
+    }
+    if (target.type === 'library_material') {
+      return (data as Awaited<ReturnType<typeof fetchAdminLibraryMaterial>>).material.title
+    }
+    if (target.type === 'subject_summary_case') {
+      return (data as Awaited<ReturnType<typeof fetchSubjectSummaryCaseDetail>>).title
+    }
+    if (target.type === 'subject_summary_entry') {
+      return (data as Awaited<ReturnType<typeof fetchAdminSubjectSummaryEntryDetail>>).question
+    }
+    if (target.type === 'bar_final_exam_question') {
+      return (data as Awaited<ReturnType<typeof fetchAdminBarFinalExamQuestionDetail>>).question
+    }
+    return (data as Awaited<ReturnType<typeof fetchAdminBarFinalExamMcqQuestionDetail>>).question
+  }, [data, target])
+
+  const approveMutation = useMutation({
+    mutationFn: async (item: AdminContentReviewQueueItem) => {
+      if (item.type === 'library_material') {
+        return approveAdminLibraryMaterial(item.resourceId)
+      }
+      if (item.type === 'subject_summary_case') {
+        return approveAdminSubjectSummaryCase(item.resourceId)
+      }
+      if (item.type === 'bar_final_exam_question') {
+        return approveAdminBarFinalExamQuestion(item.resourceId)
+      }
+      if (item.type === 'bar_final_exam_mcq_question') {
+        return approveAdminBarFinalExamMcqQuestion(item.resourceId)
+      }
+      return approveAdminSubjectSummaryEntry(item.resourceId)
+    },
+    onSuccess: async () => {
+      setNotice({ tone: 'green', message: 'Approved. Returning to the content review queue…' })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.adminContentReview }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.adminNotifications }),
+        queryClient.invalidateQueries({ queryKey: ['admin-library'] }),
+        queryClient.invalidateQueries({ queryKey: ['subject-summary-cases'] }),
+        queryClient.invalidateQueries({ queryKey: ['subject-summary-module-admin-entries'] }),
+        queryClient.invalidateQueries({ queryKey: ['admin-bar-final-exam-questions'] }),
+        queryClient.invalidateQueries({ queryKey: ['admin-bar-final-exam-mcq-questions'] }),
+      ])
+      setTimeout(() => navigate('/app/admin/content'), 700)
+    },
+    onError: (err: any) => {
+      const message = err?.response?.data?.error?.message ?? err?.message ?? 'Could not approve this content right now.'
+      setNotice({ tone: 'red', message })
+    },
+  })
+
+  const declineMutation = useMutation({
+    mutationFn: async (item: AdminContentReviewQueueItem & { reason: string }) => {
+      if (item.type === 'library_material') {
+        return declineAdminLibraryMaterial(item.resourceId, item.reason)
+      }
+      if (item.type === 'subject_summary_case') {
+        return declineAdminSubjectSummaryCase(item.resourceId, item.reason)
+      }
+      if (item.type === 'bar_final_exam_question') {
+        return declineAdminBarFinalExamQuestion(item.resourceId, item.reason)
+      }
+      if (item.type === 'bar_final_exam_mcq_question') {
+        return declineAdminBarFinalExamMcqQuestion(item.resourceId, item.reason)
+      }
+      return declineAdminSubjectSummaryEntry(item.resourceId, item.reason)
+    },
+    onSuccess: async () => {
+      setNotice({ tone: 'green', message: 'Decline reason submitted. Returning to the content review queue…' })
+      setDeclineMode(false)
+      setDeclineReason('')
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.adminContentReview }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.adminNotifications }),
+        queryClient.invalidateQueries({ queryKey: ['admin-library'] }),
+        queryClient.invalidateQueries({ queryKey: ['subject-summary-cases'] }),
+        queryClient.invalidateQueries({ queryKey: ['subject-summary-module-admin-entries'] }),
+        queryClient.invalidateQueries({ queryKey: ['admin-bar-final-exam-questions'] }),
+        queryClient.invalidateQueries({ queryKey: ['admin-bar-final-exam-mcq-questions'] }),
+      ])
+      setTimeout(() => navigate('/app/admin/content'), 700)
+    },
+    onError: (err: any) => {
+      const message = err?.response?.data?.error?.message ?? err?.message ?? 'Could not decline this content right now.'
+      setNotice({ tone: 'red', message })
+    },
+  })
+
+  if (!target) {
+    return (
+      <div className="space-y-6">
+        <AdminPageHero
+          badge="Content review"
+          description="Return to the queue and try another item."
+          title="This review link is not valid."
+        />
+        <AdminPanel isDark={isDark}>
+          <Link
+            className={cn(
+              '!px-4 !py-3 inline-flex items-center gap-2 rounded-2xl border text-sm font-medium transition hover:-translate-y-0.5',
+              isDark
+                ? 'border-slate-600 bg-slate-800 text-white hover:border-slate-500 hover:bg-slate-700'
+                : 'border-slate-300 bg-white text-slate-800 hover:border-slate-400 hover:bg-slate-50',
+            )}
+            to="/app/admin/content"
+          >
+            <span className="inline-flex items-center gap-2">
+              <ArrowLeft className="h-4 w-4" />
+              Back to content review
+            </span>
+          </Link>
+        </AdminPanel>
+      </div>
+    )
+  }
+
+  const subtitle = target.subtitle
+  const approveIsPending = approveMutation.isPending
+  const declineIsPending = declineMutation.isPending
+  const mutationPending = approveIsPending || declineIsPending
+  const dataReady = !isLoading && !error && !!data
+
+  return (
+    <div className="space-y-6">
+      <div className={cn('flex flex-wrap items-center justify-between gap-3', isDark ? 'text-slate-200' : 'text-slate-700')}>
+        <div className="flex flex-wrap items-center gap-3">
+          <Link
+            className={cn(
+              'inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition',
+              isDark
+                ? 'border-slate-700 bg-slate-900 text-slate-200 hover:border-slate-600 hover:bg-slate-800'
+                : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50',
+            )}
+            to="/app/admin/content"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to content review
+          </Link>
+          {target.editPath ? (
+            <Link
+              className={cn(
+                'inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition',
+                isDark
+                  ? 'border-amber-500/30 bg-amber-500/10 text-amber-200 hover:border-amber-400/40 hover:bg-amber-500/15'
+                  : 'border-amber-300 bg-amber-50 text-amber-800 hover:border-amber-400 hover:bg-amber-100',
+              )}
+              to={target.editPath}
+            >
+              <Pencil className="h-4 w-4" />
+              Edit
+            </Link>
+          ) : null}
+        </div>
+        {notice ? (
+          <p className={cn('text-sm font-medium', notice.tone === 'green' ? (isDark ? 'text-emerald-300' : 'text-emerald-700') : (isDark ? 'text-rose-300' : 'text-rose-700'))}>
+            {notice.message}
+          </p>
+        ) : null}
+      </div>
+
+      <AdminPanel className="overflow-hidden" isDark={isDark}>
+        <div className={cn('flex items-start justify-between gap-4 border-b px-6 py-5', isDark ? 'border-slate-800' : 'border-slate-200')}>
+          <div className="min-w-0">
+            <p className={cn('text-xs uppercase tracking-[0.22em]', isDark ? 'text-slate-500' : 'text-slate-400')}>
+              {target.contentTypeLabel} — pending approval
+            </p>
+            <h1 className={cn('mt-2 font-heading text-3xl', isDark ? 'text-white' : 'text-slate-950')} title={resolvedTitle}>
+              {resolvedTitle}
+            </h1>
+            <p className={cn('mt-2 text-sm', isDark ? 'text-slate-300' : 'text-slate-600')}>
+              <span>{subtitle}</span>
+              <span className="mx-2">•</span>
+              <span>Submitted by {target.submittedBy}</span>
+              <span className="mx-2">•</span>
+              <span>{new Date(target.createdAt).toLocaleString()}</span>
+            </p>
+          </div>
+          {target.editPath ? (
+            <Link
+              className={cn(
+                'inline-flex shrink-0 items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium transition hover:-translate-y-0.5',
+                isDark
+                  ? 'border-slate-600 bg-slate-800 text-white hover:border-slate-500 hover:bg-slate-700'
+                  : 'border-slate-300 bg-white text-slate-800 hover:border-slate-400 hover:bg-slate-50',
+              )}
+              to={target.editPath}
+            >
+              <Pencil className="h-4 w-4" />
+              Edit content
+            </Link>
+          ) : null}
+        </div>
+
+        <div className={cn('max-h-[56vh] overflow-y-auto px-6 py-6', isDark ? 'text-slate-200' : 'text-slate-800')}>
+          {isLoading ? (
+            <div className={cn('rounded-[20px] border px-5 py-10 text-center', isDark ? 'border-slate-800 bg-slate-900 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-500')}>
+              Loading the full content for review…
+            </div>
+          ) : error || !data ? (
+            <div className={cn('rounded-[20px] border px-5 py-10 text-center', isDark ? 'border-slate-800 bg-slate-900 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-500')}>
+              We couldn’t load this content right now. Return to the queue and try again, or approve / decline from the list.
+            </div>
+          ) : target.type === 'library_material' ? (
+            <LibraryMaterialReview node={data as Awaited<ReturnType<typeof fetchAdminLibraryMaterial>>} isDark={isDark} />
+          ) : target.type === 'subject_summary_case' ? (
+            <SubjectSummaryCaseReview node={data as Awaited<ReturnType<typeof fetchSubjectSummaryCaseDetail>>} isDark={isDark} />
+          ) : target.type === 'subject_summary_entry' ? (
+            <SubjectSummaryEntryReview node={data as Awaited<ReturnType<typeof fetchAdminSubjectSummaryEntryDetail>>} isDark={isDark} />
+          ) : target.type === 'bar_final_exam_question' ? (
+            <BarTheoryReview node={data as Awaited<ReturnType<typeof fetchAdminBarFinalExamQuestionDetail>>} isDark={isDark} />
+          ) : (
+            <BarMcqReview node={data as Awaited<ReturnType<typeof fetchAdminBarFinalExamMcqQuestionDetail>>} isDark={isDark} />
+          )}
+        </div>
+
+        {declineMode ? (
+          <div className={cn('border-t px-6 py-5', isDark ? 'border-slate-800' : 'border-slate-200')}>
+            <label className={cn('text-sm font-medium', isDark ? 'text-slate-200' : 'text-slate-700')}>
+              Decline reason
+            </label>
+            <textarea
+              className={cn(
+                'mt-3 min-h-[140px] w-full rounded-[22px] border px-4 py-4 text-sm outline-none transition',
+                isDark
+                  ? 'border-slate-700 bg-slate-950 text-white placeholder:text-slate-500 focus:border-slate-500'
+                  : 'border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-slate-400',
+              )}
+              maxLength={500}
+              onChange={(event) => setDeclineReason(event.target.value)}
+              placeholder="Explain what needs to be corrected before this content can be approved."
+              value={declineReason}
+            />
+            <div className={cn('mt-2 flex justify-end text-xs', isDark ? 'text-slate-500' : 'text-slate-400')}>
+              <span>{declineReason.length}/500</span>
+            </div>
+            <div className="mt-5 flex flex-wrap justify-end gap-3">
+              <button
+                className={cn(
+                  '!px-4 !py-3 inline-flex items-center gap-2 rounded-2xl border text-sm font-medium transition hover:-translate-y-0.5 disabled:opacity-60 disabled:hover:translate-y-0',
+                  isDark
+                    ? 'border-slate-600 bg-slate-800 text-white hover:border-slate-500 hover:bg-slate-700 disabled:border-slate-700 disabled:bg-slate-900 disabled:text-slate-500'
+                    : 'border-slate-300 bg-white text-slate-800 hover:border-slate-400 hover:bg-slate-50 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-500',
+                )}
+                disabled={declineIsPending}
+                onClick={() => {
+                  setDeclineMode(false)
+                  setDeclineReason('')
+                }}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className={cn(
+                  'inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium transition',
+                  isDark
+                    ? 'border-rose-500/20 bg-rose-500/10 text-rose-100 hover:border-rose-400/30 disabled:border-slate-700 disabled:bg-slate-800 disabled:text-slate-500'
+                    : 'border-rose-200 bg-rose-50 text-rose-700 hover:border-rose-300 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400',
+                )}
+                disabled={declineIsPending || declineReason.trim().length < 3}
+                onClick={() => void declineMutation.mutateAsync({ ...target, reason: declineReason.trim() })}
+                type="button"
+              >
+                {declineIsPending ? 'Sending decline…' : 'Decline with reason'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className={cn('flex flex-wrap items-center justify-between gap-3 border-t px-6 py-5', isDark ? 'border-slate-800' : 'border-slate-200')}>
+            <p className={cn('max-w-xl text-sm leading-6', isDark ? 'text-slate-400' : 'text-slate-500')}>
+              Once you approve, the content becomes available to learners and the content admin receives a confirmation notification. Decline sends revision feedback.
+            </p>
+            <div className="flex flex-wrap justify-end gap-3">
+              <button
+                className={cn(
+                  '!px-4 !py-3 inline-flex items-center gap-2 rounded-2xl border text-sm font-medium transition hover:-translate-y-0.5 disabled:opacity-60 disabled:hover:translate-y-0',
+                  isDark
+                    ? 'border-slate-600 bg-slate-800 text-white hover:border-slate-500 hover:bg-slate-700 disabled:border-slate-700 disabled:bg-slate-900 disabled:text-slate-500'
+                    : 'border-slate-300 bg-white text-slate-800 hover:border-slate-400 hover:bg-slate-50 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-500',
+                )}
+                disabled={mutationPending || !dataReady}
+                onClick={() => setDeclineMode(true)}
+                type="button"
+              >
+                Decline
+              </button>
+              <button
+                className="button-primary !px-4 !py-3"
+                disabled={!dataReady || mutationPending}
+                onClick={() => void approveMutation.mutateAsync(target)}
+                type="button"
+              >
+                <span className="inline-flex items-center gap-2">
+                  <CheckCheck className="h-4 w-4" />
+                  {approveIsPending ? 'Approving…' : 'Approve content'}
+                </span>
+              </button>
+            </div>
+          </div>
+        )}
+      </AdminPanel>
+    </div>
+  )
+}
+
+function SectionHeading({ children, isDark }: { children: ReactNode; isDark: boolean }) {
+  return (
+    <p
+      className={cn(
+        'text-xs uppercase tracking-[0.22em]',
+        isDark ? 'text-slate-500' : 'text-slate-400'
+      )}
+    >
+      {children}
+    </p>
+  )
+}
+
+function ReviewBlock({ children, className, isDark }: { children: ReactNode; className?: string; isDark: boolean }) {
+  return (
+    <section
+      className={cn(
+        'rounded-[20px] border px-5 py-5',
+        isDark ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-slate-50',
+        className ?? ''
+      )}
+    >
+      {children}
+    </section>
+  )
+}
+
+function RichTextContent({ html, isDark }: { html: string; isDark: boolean }) {
+  return (
+    <div
+      className={cn(
+        'rich-text-content text-sm leading-7',
+        isDark ? 'text-slate-200' : 'text-slate-800'
+      )}
+      // Safety: content is authored by trusted content admins; rich text formatting
+      // requires HTML output to preserve italics, lists, headings, colors, and links.
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  )
+}
+
+function LibraryMaterialReview({ node, isDark }: { node: Awaited<ReturnType<typeof fetchAdminLibraryMaterial>>; isDark: boolean }) {
+  const mat = node.material
+  return (
+    <div className="space-y-5">
+      <ReviewBlock isDark={isDark}>
+        <div className="flex flex-wrap items-center gap-2">
+          <SectionHeading isDark={isDark}>Section</SectionHeading>
+          <span className={cn('rounded-full border px-3 py-1 text-xs', isDark ? 'border-slate-700 text-slate-300' : 'border-slate-200 text-slate-700')}>
+            {node.category.name}
+          </span>
+          {mat.reportNumber ? (
+            <>
+              <span className={isDark ? 'text-slate-500' : 'text-slate-400'}>•</span>
+              <span className={cn('text-xs', isDark ? 'text-slate-400' : 'text-slate-500')}>{mat.reportNumber}</span>
+            </>
+          ) : null}
+        </div>
+        <h4 className={cn('mt-3 font-heading text-xl', isDark ? 'text-white' : 'text-slate-950')}>{mat.title}</h4>
+      </ReviewBlock>
+
+      {mat.summary?.trim() ? (
+        <ReviewBlock isDark={isDark}>
+          <SectionHeading isDark={isDark}>Summary</SectionHeading>
+          <div className="mt-3">
+            <RichTextContent html={mat.summary} isDark={isDark} />
+          </div>
+        </ReviewBlock>
+      ) : null}
+
+      {mat.body?.trim() ? (
+        <ReviewBlock isDark={isDark}>
+          <SectionHeading isDark={isDark}>Full body</SectionHeading>
+          <div className="mt-3">
+            <RichTextContent html={mat.body} isDark={isDark} />
+          </div>
+        </ReviewBlock>
+      ) : null}
+    </div>
+  )
+}
+
+function SubjectSummaryCaseReview({ node, isDark }: { node: Awaited<ReturnType<typeof fetchSubjectSummaryCaseDetail>>; isDark: boolean }) {
+  const badges = [node.court, node.citation, node.year ? String(node.year) : null].filter(Boolean) as string[]
+  return (
+    <div className="space-y-5">
+      <ReviewBlock isDark={isDark}>
+        <p className={cn('text-sm', isDark ? 'text-slate-400' : 'text-slate-500')}>
+          {node.subject.name} / {node.topic.name}
+        </p>
+        <h4 className={cn('mt-2 font-heading text-xl', isDark ? 'text-white' : 'text-slate-950')}>{node.title}</h4>
+        {badges.length ? (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {badges.map((b) => (
+              <span
+                className={cn('rounded-full border px-3 py-1 text-xs', isDark ? 'border-slate-700 text-slate-300' : 'border-slate-200 text-slate-700')}
+                key={b}
+              >
+                {b}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </ReviewBlock>
+
+      {node.caseSummary?.trim() ? (
+        <ReviewBlock isDark={isDark}>
+          <SectionHeading isDark={isDark}>Ratio summary</SectionHeading>
+          <div className="mt-3"><RichTextContent html={node.caseSummary} isDark={isDark} /></div>
+        </ReviewBlock>
+      ) : null}
+
+      {node.facts?.trim() ? (
+        <ReviewBlock isDark={isDark}>
+          <SectionHeading isDark={isDark}>Material facts</SectionHeading>
+          <div className="mt-3"><RichTextContent html={node.facts} isDark={isDark} /></div>
+        </ReviewBlock>
+      ) : null}
+
+      {node.issues?.trim() ? (
+        <ReviewBlock isDark={isDark}>
+          <SectionHeading isDark={isDark}>Issues</SectionHeading>
+          <div className="mt-3"><RichTextContent html={node.issues} isDark={isDark} /></div>
+        </ReviewBlock>
+      ) : null}
+
+      {node.ratioDecidendi?.trim() ? (
+        <ReviewBlock isDark={isDark}>
+          <SectionHeading isDark={isDark}>Ratio decidendi</SectionHeading>
+          <div className="mt-3"><RichTextContent html={node.ratioDecidendi} isDark={isDark} /></div>
+        </ReviewBlock>
+      ) : null}
+
+      {node.decisionHolding?.trim() ? (
+        <ReviewBlock isDark={isDark}>
+          <SectionHeading isDark={isDark}>Decision / holding</SectionHeading>
+          <div className="mt-3"><RichTextContent html={node.decisionHolding} isDark={isDark} /></div>
+        </ReviewBlock>
+      ) : null}
+
+      {node.obiterDicta?.trim() ? (
+        <ReviewBlock isDark={isDark}>
+          <SectionHeading isDark={isDark}>Obiter dicta</SectionHeading>
+          <div className="mt-3"><RichTextContent html={node.obiterDicta} isDark={isDark} /></div>
+        </ReviewBlock>
+      ) : null}
+
+      {node.legalPrinciples?.length ? (
+        <ReviewBlock isDark={isDark}>
+          <SectionHeading isDark={isDark}>Legal principles</SectionHeading>
+          <ul className={cn('mt-3 list-disc space-y-1 pl-6 text-sm', isDark ? 'text-slate-200' : 'text-slate-800')}>
+            {node.legalPrinciples.map((p, i) => <li key={i}>{p}</li>)}
+          </ul>
+        </ReviewBlock>
+      ) : null}
+    </div>
+  )
+}
+
+function SubjectSummaryEntryReview({ node, isDark }: { node: Awaited<ReturnType<typeof fetchAdminSubjectSummaryEntryDetail>>; isDark: boolean }) {
+  return (
+    <div className="space-y-5">
+      <ReviewBlock isDark={isDark}>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={cn('rounded-full border px-3 py-1 text-xs', isDark ? 'border-slate-700 text-slate-300' : 'border-slate-200 text-slate-700')}>
+            {node.moduleType}
+          </span>
+          {node.topic ? (
+            <span className={cn('rounded-full border px-3 py-1 text-xs', isDark ? 'border-slate-700 text-slate-300' : 'border-slate-200 text-slate-700')}>
+              Topic: {node.topic}
+            </span>
+          ) : null}
+          <span className={cn('rounded-full border px-3 py-1 text-xs capitalize', isDark ? 'border-slate-700 text-slate-300' : 'border-slate-200 text-slate-700')}>
+            Difficulty: {node.difficulty.toLowerCase()}
+          </span>
+          {node.serialNumber ? (
+            <span className={cn('rounded-full border px-3 py-1 text-xs', isDark ? 'border-slate-700 text-slate-300' : 'border-slate-200 text-slate-700')}>
+              {node.serialNumber}
+            </span>
+          ) : null}
+        </div>
+        <p className={cn('mt-3 text-sm', isDark ? 'text-slate-400' : 'text-slate-500')}>{node.subject.name}</p>
+        <h4 className={cn('mt-2 font-heading text-xl', isDark ? 'text-white' : 'text-slate-950')}>{node.question}</h4>
+      </ReviewBlock>
+
+      {node.keyPrinciple?.trim() ? (
+        <ReviewBlock isDark={isDark}>
+          <SectionHeading isDark={isDark}>Key principle</SectionHeading>
+          <div className="mt-3"><RichTextContent html={node.keyPrinciple} isDark={isDark} /></div>
+        </ReviewBlock>
+      ) : null}
+
+      {node.answer?.trim() ? (
+        <ReviewBlock isDark={isDark}>
+          <SectionHeading isDark={isDark}>Full answer</SectionHeading>
+          <div className="mt-3"><RichTextContent html={node.answer} isDark={isDark} /></div>
+        </ReviewBlock>
+      ) : null}
+
+      {node.examTip?.trim() ? (
+        <ReviewBlock isDark={isDark}>
+          <SectionHeading isDark={isDark}>Exam tip</SectionHeading>
+          <div className="mt-3"><RichTextContent html={node.examTip} isDark={isDark} /></div>
+        </ReviewBlock>
+      ) : null}
+
+      {node.relatedCases?.length ? (
+        <ReviewBlock isDark={isDark}>
+          <SectionHeading isDark={isDark}>Related cases</SectionHeading>
+          <ul className={cn('mt-3 space-y-2 text-sm', isDark ? 'text-slate-200' : 'text-slate-800')}>
+            {node.relatedCases.map((c) => (
+              <li className={cn('rounded-2xl border px-4 py-3', isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white')} key={c.id}>
+                <p className={cn('font-semibold', isDark ? 'text-white' : 'text-slate-950')}>{c.title}</p>
+                {c.citation ? <p className={cn('mt-1 text-xs', isDark ? 'text-slate-400' : 'text-slate-500')}>{c.citation}</p> : null}
+                {c.ratioDecidendi?.trim() ? <div className="mt-2"><RichTextContent html={c.ratioDecidendi} isDark={isDark} /></div> : null}
+              </li>
+            ))}
+          </ul>
+        </ReviewBlock>
+      ) : null}
+
+      {node.relatedStatutes?.length ? (
+        <ReviewBlock isDark={isDark}>
+          <SectionHeading isDark={isDark}>Related statutes</SectionHeading>
+          <ul className={cn('mt-3 list-disc space-y-1 pl-6 text-sm', isDark ? 'text-slate-200' : 'text-slate-800')}>
+            {node.relatedStatutes.map((s, i) => <li key={i}>{s}</li>)}
+          </ul>
+        </ReviewBlock>
+      ) : null}
+
+      {node.tags?.length ? (
+        <ReviewBlock isDark={isDark}>
+          <SectionHeading isDark={isDark}>Tags</SectionHeading>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {node.tags.map((t) => (
+              <span
+                className={cn('rounded-full border px-3 py-1 text-xs', isDark ? 'border-slate-700 text-slate-300' : 'border-slate-200 text-slate-700')}
+                key={t}
+              >
+                #{t}
+              </span>
+            ))}
+          </div>
+        </ReviewBlock>
+      ) : null}
+    </div>
+  )
+}
+
+function BarTheoryReview({ node, isDark }: { node: Awaited<ReturnType<typeof fetchAdminBarFinalExamQuestionDetail>>; isDark: boolean }) {
+  return (
+    <div className="space-y-5">
+      <ReviewBlock isDark={isDark}>
+        <p className={cn('text-sm', isDark ? 'text-slate-400' : 'text-slate-500')}>{node.subject.name}</p>
+        {node.examDate ? (
+          <p className={cn('mt-1 text-xs', isDark ? 'text-slate-400' : 'text-slate-500')}>
+            Exam date: {new Date(node.examDate).toLocaleDateString()}
+          </p>
+        ) : null}
+        <h4 className={cn('mt-3 font-heading text-xl', isDark ? 'text-white' : 'text-slate-950')}>{node.question}</h4>
+      </ReviewBlock>
+
+      {node.answer?.trim() ? (
+        <ReviewBlock isDark={isDark}>
+          <SectionHeading isDark={isDark}>Model answer</SectionHeading>
+          <div className="mt-3"><RichTextContent html={node.answer} isDark={isDark} /></div>
+        </ReviewBlock>
+      ) : null}
+    </div>
+  )
+}
+
+function BarMcqReview({ node, isDark }: { node: Awaited<ReturnType<typeof fetchAdminBarFinalExamMcqQuestionDetail>>; isDark: boolean }) {
+  const options = node.options ?? []
+  const correctLabel = options[node.correctOptionIndex]
+  return (
+    <div className="space-y-5">
+      <ReviewBlock isDark={isDark}>
+        <p className={cn('text-sm', isDark ? 'text-slate-400' : 'text-slate-500')}>{node.subject.name}</p>
+        {node.examDate ? (
+          <p className={cn('mt-1 text-xs', isDark ? 'text-slate-400' : 'text-slate-500')}>
+            Exam date: {new Date(node.examDate).toLocaleDateString()}
+          </p>
+        ) : null}
+        <h4 className={cn('mt-3 font-heading text-xl', isDark ? 'text-white' : 'text-slate-950')}>{node.question}</h4>
+      </ReviewBlock>
+
+      {options.length ? (
+        <ReviewBlock isDark={isDark}>
+          <SectionHeading isDark={isDark}>Answer options</SectionHeading>
+          <ol className="mt-3 list-decimal space-y-2 pl-6 text-sm">
+            {options.map((opt, idx) => {
+              const isCorrect = idx === node.correctOptionIndex
+              return (
+                <li
+                  className={cn(
+                    'rounded-2xl border px-4 py-3',
+                    isCorrect
+                      ? (isDark ? 'border-emerald-400/40 bg-emerald-500/10 text-emerald-100' : 'border-emerald-300 bg-emerald-50 text-emerald-900')
+                      : (isDark ? 'border-slate-800 bg-slate-950 text-slate-200' : 'border-slate-200 bg-white text-slate-800')
+                  )}
+                  key={idx}
+                >
+                  <span className="mr-2 font-medium">{isCorrect ? '✓ ' : ''}</span>{opt}
+                </li>
+              )
+            })}
+          </ol>
+          {correctLabel ? (
+            <p className={cn('mt-5 text-xs uppercase tracking-[0.22em]', isDark ? 'text-emerald-400' : 'text-emerald-700')}>
+              Correct answer: {correctLabel}
+            </p>
+          ) : null}
+        </ReviewBlock>
       ) : null}
     </div>
   )

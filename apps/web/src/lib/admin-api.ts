@@ -203,6 +203,7 @@ export type AdminNotificationItemType =
   | "subject_summary_case"
   | "subject_summary_entry"
   | "bar_final_exam_question"
+  | "bar_final_exam_mcq_question"
   | "user_notification";
 
 export type AdminNotificationItem = {
@@ -1915,6 +1916,30 @@ export async function fetchAdminBarFinalExamMcqQuestions(filters: {
   return response.data.data;
 }
 
+export async function fetchAdminSubjectSummaryEntryDetail(entryId: string) {
+  const response = await authenticatedHttp.get<{ success: true; data: SubjectSummaryModuleAdminEntry }>(
+    `/api/v1/admin/subject-summary-module/entries/${entryId}`
+  );
+
+  return response.data.data;
+}
+
+export async function fetchAdminBarFinalExamQuestionDetail(questionId: string) {
+  const response = await authenticatedHttp.get<{ success: true; data: BarFinalExamQuestion }>(
+    `/api/v1/admin/bar-final-exams-nls-mcq/questions/${questionId}`
+  );
+
+  return response.data.data;
+}
+
+export async function fetchAdminBarFinalExamMcqQuestionDetail(questionId: string) {
+  const response = await authenticatedHttp.get<{ success: true; data: BarFinalExamMcqQuestion }>(
+    `/api/v1/admin/bar-final-exams-mcq/questions/${questionId}`
+  );
+
+  return response.data.data;
+}
+
 export async function fetchBarFinalExamMcqFormOptions() {
   const response = await authenticatedHttp.get<{ success: true; data: BarFinalExamFormOptions }>(
     "/api/v1/admin/bar-final-exams-mcq/form-options"
@@ -2418,6 +2443,14 @@ export async function approveAdminBarFinalExamQuestion(questionId: string) {
   return response.data.data;
 }
 
+export async function approveAdminBarFinalExamMcqQuestion(questionId: string) {
+  const response = await authenticatedHttp.post<{ success: true; data: { id: string; success: true } }>(
+    `/api/v1/admin/approvals/bar-final-exam-mcq-questions/${questionId}/approve`
+  );
+
+  return response.data.data;
+}
+
 export type AdminBulkApprovalResponse = {
   approvedCount: number;
   counts: {
@@ -2471,6 +2504,15 @@ export async function declineAdminSubjectSummaryEntry(entryId: string, reason: s
 export async function declineAdminBarFinalExamQuestion(questionId: string, reason: string) {
   const response = await authenticatedHttp.post<{ success: true; data: { id: string; success: true } }>(
     `/api/v1/admin/approvals/bar-final-exam-questions/${questionId}/decline`,
+    { reason }
+  );
+
+  return response.data.data;
+}
+
+export async function declineAdminBarFinalExamMcqQuestion(questionId: string, reason: string) {
+  const response = await authenticatedHttp.post<{ success: true; data: { id: string; success: true } }>(
+    `/api/v1/admin/approvals/bar-final-exam-mcq-questions/${questionId}/decline`,
     { reason }
   );
 

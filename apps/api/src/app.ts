@@ -83,6 +83,7 @@ import {
   parseSubjectSummaryEntryInput,
   parseSubjectSummaryTopicBulkInput,
   parseSubjectSummaryModuleTopicsQuery,
+  getAdminSubjectSummaryEntry,
   updateSubjectSummaryEntry
 } from "./subject-summary-module.js";
 import {
@@ -91,6 +92,8 @@ import {
   deleteAdminBarFinalExamQuestion,
   deleteAdminBarFinalExamMcqQuestion,
   fetchBarFinalExamFormOptions,
+  getAdminBarFinalExamMcqQuestion,
+  getAdminBarFinalExamQuestion,
   listAdminBarFinalExamQuestions,
   listAdminBarFinalExamMcqQuestions,
   listStudentBarFinalExamQuestions,
@@ -225,10 +228,12 @@ import {
 } from "./subscriptions.js";
 import {
   approveAllPendingContent,
+  approveBarFinalExamMcqQuestion,
   approveBarFinalExamQuestion,
   approveLibraryMaterial,
   approveSubjectSummaryCase,
   approveSubjectSummaryEntry,
+  declineBarFinalExamMcqQuestion,
   declineBarFinalExamQuestion,
   declineLibraryMaterial,
   declineSubjectSummaryCase,
@@ -1827,6 +1832,41 @@ export function createApp(options: AppOptions = {}) {
   );
 
   app.post(
+    "/api/v1/admin/approvals/bar-final-exam-mcq-questions/:questionId/approve",
+    authenticateRequest,
+    requireSuperAdminRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      try {
+        const data = await approveBarFinalExamMcqQuestion(readRouteParam(request.params.questionId), request.auth!.userId);
+
+        if (!data) {
+          return response.status(404).json({
+            success: false,
+            error: {
+              code: "APPROVAL_TARGET_NOT_FOUND",
+              message: "The bar final exam MCQ question was not found or is no longer pending approval."
+            }
+          });
+        }
+
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "ADMIN_APPROVAL_FAILED",
+            message: "Could not approve the bar final exam MCQ question."
+          }
+        });
+      }
+    }
+  );
+
+  app.post(
     "/api/v1/admin/approvals/library-materials/:materialId/decline",
     authenticateRequest,
     requireSuperAdminRequest,
@@ -2016,6 +2056,58 @@ export function createApp(options: AppOptions = {}) {
           error: {
             code: "ADMIN_DECLINE_FAILED",
             message: "Could not decline the bar final exam question."
+          }
+        });
+      }
+    }
+  );
+
+  app.post(
+    "/api/v1/admin/approvals/bar-final-exam-mcq-questions/:questionId/decline",
+    authenticateRequest,
+    requireSuperAdminRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      try {
+        const parsed = declineApprovalSchema.safeParse(request.body);
+
+        if (!parsed.success) {
+          return response.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "A decline reason is required.",
+              details: parsed.error.flatten()
+            }
+          });
+        }
+
+        const data = await declineBarFinalExamMcqQuestion(
+          readRouteParam(request.params.questionId),
+          request.auth!.userId,
+          parsed.data.reason
+        );
+
+        if (!data) {
+          return response.status(404).json({
+            success: false,
+            error: {
+              code: "APPROVAL_TARGET_NOT_FOUND",
+              message: "The bar final exam MCQ question was not found or is no longer pending approval."
+            }
+          });
+        }
+
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "ADMIN_DECLINE_FAILED",
+            message: "Could not decline the bar final exam MCQ question."
           }
         });
       }
@@ -3347,6 +3439,51 @@ export function createApp(options: AppOptions = {}) {
     }
   );
 
+  app.get(
+    "/api/v1/admin/subject-summary-module/entries/:entryId",
+    authenticateRequest,
+    requireAdminRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required to load subject summary details."
+          }
+        });
+      }
+
+      try {
+        const data = await getAdminSubjectSummaryEntry(String(request.params.entryId));
+
+        if (!data) {
+          return response.status(404).json({
+            success: false,
+            error: {
+              code: "SUBJECT_SUMMARY_ENTRY_NOT_FOUND",
+              message: "The requested subject summary could not be found."
+            }
+          });
+        }
+
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "SUBJECT_SUMMARY_ENTRY_FETCH_FAILED",
+            message: "Could not load the subject summary."
+          }
+        });
+      }
+    }
+  );
+
   app.patch(
     "/api/v1/admin/subject-summary-module/entries/:entryId",
     authenticateRequest,
@@ -3577,6 +3714,54 @@ export function createApp(options: AppOptions = {}) {
           error: {
             code: "BAR_FINAL_EXAMS_CREATE_FAILED",
             message: "Could not create the bar final exam question."
+          }
+        });
+      }
+    }
+  );
+
+  app.get(
+    [
+      "/api/v1/admin/bar-final-exams-nls-mcq/questions/:questionId",
+      "/api/v1/admin/bar-final-exams-mls-mcq/questions/:questionId"
+    ],
+    authenticateRequest,
+    requireAdminRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required to load bar final exam questions."
+          }
+        });
+      }
+
+      try {
+        const data = await getAdminBarFinalExamQuestion(String(request.params.questionId));
+
+        if (!data) {
+          return response.status(404).json({
+            success: false,
+            error: {
+              code: "BAR_FINAL_EXAMS_NOT_FOUND",
+              message: "The requested bar final exam question could not be found."
+            }
+          });
+        }
+
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "BAR_FINAL_EXAMS_FETCH_FAILED",
+            message: "Could not load the bar final exam question."
           }
         });
       }
@@ -3819,6 +4004,51 @@ export function createApp(options: AppOptions = {}) {
           error: {
             code: "BAR_FINAL_EXAMS_MCQ_CREATE_FAILED",
             message: "Could not create the bar final exam MCQ question."
+          }
+        });
+      }
+    }
+  );
+
+  app.get(
+    "/api/v1/admin/bar-final-exams-mcq/questions/:questionId",
+    authenticateRequest,
+    requireAdminRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required to load bar final exam MCQ questions."
+          }
+        });
+      }
+
+      try {
+        const data = await getAdminBarFinalExamMcqQuestion(String(request.params.questionId));
+
+        if (!data) {
+          return response.status(404).json({
+            success: false,
+            error: {
+              code: "BAR_FINAL_EXAMS_MCQ_NOT_FOUND",
+              message: "The requested bar final exam MCQ question could not be found."
+            }
+          });
+        }
+
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "BAR_FINAL_EXAMS_MCQ_FETCH_FAILED",
+            message: "Could not load the bar final exam MCQ question."
           }
         });
       }
