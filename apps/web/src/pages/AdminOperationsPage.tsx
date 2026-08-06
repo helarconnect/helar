@@ -1,19 +1,28 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
   ArrowLeft,
   ArrowRight,
+  Bold,
   BriefcaseBusiness,
   CheckCheck,
   ClipboardList,
   Download,
   FileClock,
   GraduationCap,
+  Italic,
   LibraryBig,
+  List,
+  ListOrdered,
   Pencil,
   RefreshCw,
   Search,
   ShieldCheck,
   Sparkles,
+  Underline,
+  X,
 } from 'lucide-react'
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
@@ -40,6 +49,11 @@ import {
   fetchAdminLibraryMaterial,
   fetchAdminSubjectSummaryEntryDetail,
   fetchSubjectSummaryCaseDetail,
+  updateAdminBarFinalExamMcqQuestion,
+  updateAdminBarFinalExamQuestion,
+  updateAdminLibraryMaterial,
+  updateSubjectSummaryCase,
+  updateSubjectSummaryModuleEntry,
 } from '@/lib/admin-api'
 import { fetchAdminDashboardSnapshot } from '@/lib/mock-api'
 import { queryKeys } from '@/lib/query-keys'
@@ -883,6 +897,77 @@ function resolveQueueTargetFromLocation(
   }
 }
 
+// Builds the editable draft for inline edit mode. We copy all of the fields
+// that the inline editors expose (text / RTE / arrays), preserving the rest
+// of the record in `data` so the update mutation can fill in required fields
+// that we don't expose inline (e.g. materialType, storageUrl, examDate).
+function buildEditableDraft(
+  type: AdminContentReviewQueueItemType,
+  data: unknown,
+  librarySection: string | null,
+) {
+  if (type === 'library_material') {
+    const snapshot = data as Awaited<ReturnType<typeof fetchAdminLibraryMaterial>>
+    const mat = snapshot.material
+    return {
+      title: mat.title ?? '',
+      summary: mat.summary ?? '',
+      body: mat.body ?? '',
+      librarySection,
+    }
+  }
+  if (type === 'subject_summary_case') {
+    const snapshot = data as Awaited<ReturnType<typeof fetchSubjectSummaryCaseDetail>>
+    return {
+      caseSummary: snapshot.caseSummary ?? '',
+      citation: snapshot.citation ?? '',
+      court: snapshot.court ?? '',
+      decisionHolding: snapshot.decisionHolding ?? '',
+      facts: snapshot.facts ?? '',
+      issues: snapshot.issues ?? '',
+      keywords: [...(snapshot.keywords ?? [])],
+      legalPrinciples: [...(snapshot.legalPrinciples ?? [])],
+      obiterDicta: snapshot.obiterDicta ?? '',
+      ratioDecidendi: snapshot.ratioDecidendi ?? '',
+      relatedStatutes: [...(snapshot.relatedStatutes ?? [])],
+      subjectId: snapshot.subject?.id ?? '',
+      title: snapshot.title ?? '',
+      topicId: snapshot.topic?.id ?? '',
+    }
+  }
+  if (type === 'subject_summary_entry') {
+    const snapshot = data as Awaited<ReturnType<typeof fetchAdminSubjectSummaryEntryDetail>>
+    return {
+      answer: snapshot.answer ?? '',
+      difficulty: snapshot.difficulty ?? 'EASY',
+      estimatedReadingTime: Number(snapshot.estimatedReadingTime ?? 2),
+      examTip: snapshot.examTip ?? '',
+      keyPrinciple: snapshot.keyPrinciple ?? '',
+      topic: snapshot.topic ?? '',
+      question: snapshot.question ?? '',
+      relatedStatutes: [...(snapshot.relatedStatutes ?? [])],
+      subjectId: snapshot.subject?.id ?? '',
+      tags: [...(snapshot.tags ?? [])],
+    }
+  }
+  if (type === 'bar_final_exam_question') {
+    const snapshot = data as Awaited<ReturnType<typeof fetchAdminBarFinalExamQuestionDetail>>
+    return {
+      answer: snapshot.answer ?? '',
+      question: snapshot.question ?? '',
+      subjectId: snapshot.subject?.id ?? '',
+    }
+  }
+  // bar_final_exam_mcq_question
+  const snapshot = data as Awaited<ReturnType<typeof fetchAdminBarFinalExamMcqQuestionDetail>>
+  return {
+    correctOptionIndex: Number(snapshot.correctOptionIndex ?? 0),
+    options: [...(snapshot.options ?? [])],
+    question: snapshot.question ?? '',
+    subjectId: snapshot.subject?.id ?? '',
+  }
+}
+
 export function AdminContentReviewDetailPage() {
   const { isDark } = useTheme()
   const queryClient = useQueryClient()
@@ -892,8 +977,17 @@ export function AdminContentReviewDetailPage() {
   const [declineMode, setDeclineMode] = useState(false)
   const [declineReason, setDeclineReason] = useState('')
   const [notice, setNotice] = useState<null | { tone: 'green' | 'red'; message: string }>(null)
+  const [editMode, setEditMode] = useState(false)
+  const [draft, setDraft] = useState<any>(null)
+  const [editNotice, setEditNotice] = useState<null | { tone: 'green' | 'red'; message: string }>(null)
 
   const target = resolveQueueTargetFromLocation(params, location.state)
+
+  const section = useMemo(() => {
+    if (!target || target.type !== 'library_material') return null
+    const sectionMatch = target.actionPath.match(/^\/app\/admin\/library\/([^/?#]+)/)
+    return (sectionMatch?.[1] ?? 'law-reports') as 'law-reports' | 'subject-summaries' | 'cases-and-ratios'
+  }, [target])
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['content-review-detail', target?.type, target?.resourceId, target?.actionPath],
@@ -901,9 +995,7 @@ export function AdminContentReviewDetailPage() {
       if (!target) {
         throw new Error('Invalid review target')
       }
-      if (target.type === 'library_material') {
-        const sectionMatch = target.actionPath.match(/^\/app\/admin\/library\/([^/?#]+)/)
-        const section = (sectionMatch?.[1] ?? 'law-reports') as 'law-reports' | 'subject-summaries' | 'cases-and-ratios'
+      if (target.type === 'library_material' && section) {
         return fetchAdminLibraryMaterial(section, target.resourceId)
       }
       if (target.type === 'subject_summary_case') {
@@ -921,6 +1013,156 @@ export function AdminContentReviewDetailPage() {
     enabled: !!target,
   })
 
+  // Sync a copy of `data` into the draft when the user first enters edit mode
+  // or when the underlying fetched data changes.
+  useEffect(() => {
+    if (!editMode || !data) return
+    if (!draft) {
+      setDraft(buildEditableDraft(target!.type, data, section))
+    }
+  }, [data, draft, editMode, section, target])
+
+  function toggleEditMode(next: boolean) {
+    if (next) {
+      if (data && target) {
+        setDraft(buildEditableDraft(target.type, data, section))
+      }
+      setEditNotice(null)
+      setEditMode(true)
+    } else {
+      setDraft(null)
+      setEditNotice(null)
+      setEditMode(false)
+    }
+  }
+
+  // Inline update mutation — dispatches to the correct admin update endpoint
+  // based on queue item type, then re-queries the detail so the review view
+  // reflects the saved edits.
+  const updateMutation = useMutation({
+    mutationFn: async ({ targetItem, dataSnapshot, draftSnapshot, librarySection }: {
+      targetItem: Exclude<typeof target, null>
+      dataSnapshot: NonNullable<typeof data>
+      draftSnapshot: any
+      librarySection: typeof section
+    }) => {
+      if (targetItem.type === 'library_material' && librarySection) {
+        const original = dataSnapshot as Awaited<ReturnType<typeof fetchAdminLibraryMaterial>>
+        const mat = original.material
+        return updateAdminLibraryMaterial(librarySection, targetItem.resourceId, {
+          body: draftSnapshot.body ?? mat.body ?? '',
+          downloadable: Boolean(mat.downloadable),
+          estimatedMins: Number(mat.estimatedMins ?? 5),
+          materialType: mat.materialType ?? 'PDF',
+          reportDate: mat.reportDate ?? undefined,
+          reportNumber: mat.reportNumber ?? undefined,
+          sharingEnabled: Boolean(mat.sharingEnabled),
+          storageUrl: mat.storageUrl ?? '',
+          summary: draftSnapshot.summary ?? mat.summary ?? '',
+          title: draftSnapshot.title ?? mat.title ?? '',
+        })
+      }
+      if (targetItem.type === 'subject_summary_case') {
+        const original = dataSnapshot as Awaited<ReturnType<typeof fetchSubjectSummaryCaseDetail>>
+        return updateSubjectSummaryCase(targetItem.resourceId, {
+          attachments: original.attachments ?? [],
+          caseSummary: draftSnapshot.caseSummary ?? original.caseSummary ?? '',
+          citation: draftSnapshot.citation ?? original.citation ?? '',
+          court: draftSnapshot.court ?? original.court ?? '',
+          decisionHolding: draftSnapshot.decisionHolding ?? original.decisionHolding ?? '',
+          externalReferences: original.externalReferences ?? [],
+          facts: draftSnapshot.facts ?? original.facts ?? '',
+          issues: draftSnapshot.issues ?? original.issues ?? '',
+          judges: original.judges ?? [],
+          jurisdiction: original.jurisdiction ?? '',
+          keywords: draftSnapshot.keywords ?? original.keywords ?? [],
+          legalPrinciples: draftSnapshot.legalPrinciples ?? original.legalPrinciples ?? [],
+          obiterDicta: draftSnapshot.obiterDicta ?? original.obiterDicta ?? '',
+          ratioDecidendi: draftSnapshot.ratioDecidendi ?? original.ratioDecidendi ?? '',
+          relatedCases: (original.relatedCases ?? []).map((c: any) => c.id ?? c),
+          relatedStatutes: draftSnapshot.relatedStatutes ?? original.relatedStatutes ?? [],
+          status: (original.status ?? 'DRAFT') as any,
+          subjectId: draftSnapshot.subjectId ?? original.subject?.id ?? '',
+          title: draftSnapshot.title ?? original.title ?? '',
+          topicId: draftSnapshot.topicId ?? original.topic?.id ?? '',
+          year: original.year ?? null,
+        })
+      }
+      if (targetItem.type === 'subject_summary_entry') {
+        const original = dataSnapshot as Awaited<ReturnType<typeof fetchAdminSubjectSummaryEntryDetail>>
+        return updateSubjectSummaryModuleEntry(targetItem.resourceId, {
+          answer: draftSnapshot.answer ?? original.answer ?? '',
+          difficulty: (draftSnapshot.difficulty ?? original.difficulty ?? 'EASY') as any,
+          displayOrder: Number(original.displayOrder ?? 0),
+          estimatedReadingTime: Number(draftSnapshot.estimatedReadingTime ?? original.estimatedReadingTime ?? 2),
+          examTip: draftSnapshot.examTip ?? original.examTip ?? '',
+          keyPrinciple: draftSnapshot.keyPrinciple ?? original.keyPrinciple ?? '',
+          moduleType: original.moduleType,
+          topic: draftSnapshot.topic ?? original.topic ?? '',
+          question: draftSnapshot.question ?? original.question ?? '',
+          relatedCaseIds: (original.relatedCases ?? []).map((c: any) => c.id ?? c),
+          relatedStatutes: draftSnapshot.relatedStatutes ?? original.relatedStatutes ?? [],
+          status: (original.status ?? 'DRAFT') as any,
+          subjectId: draftSnapshot.subjectId ?? original.subject?.id ?? '',
+          tags: draftSnapshot.tags ?? original.tags ?? [],
+        })
+      }
+      if (targetItem.type === 'bar_final_exam_question') {
+        const original = dataSnapshot as Awaited<ReturnType<typeof fetchAdminBarFinalExamQuestionDetail>>
+        return updateAdminBarFinalExamQuestion(targetItem.resourceId, {
+          answer: draftSnapshot.answer ?? original.answer ?? '',
+          examDate: original.examDate ?? new Date().toISOString().slice(0, 10),
+          question: draftSnapshot.question ?? original.question ?? '',
+          status: (original.status ?? 'DRAFT') as any,
+          subjectId: draftSnapshot.subjectId ?? original.subject?.id ?? '',
+        })
+      }
+      // bar_final_exam_mcq_question
+      const original = dataSnapshot as Awaited<ReturnType<typeof fetchAdminBarFinalExamMcqQuestionDetail>>
+      return updateAdminBarFinalExamMcqQuestion(targetItem.resourceId, {
+        correctOptionIndex: Number(draftSnapshot.correctOptionIndex ?? original.correctOptionIndex ?? 0),
+        examDate: original.examDate ?? new Date().toISOString().slice(0, 10),
+        options: draftSnapshot.options ?? original.options ?? [],
+        question: draftSnapshot.question ?? original.question ?? '',
+        status: (original.status ?? 'DRAFT') as any,
+        subjectId: draftSnapshot.subjectId ?? original.subject?.id ?? '',
+      })
+    },
+    onMutate: () => {
+      setEditNotice(null)
+    },
+    onSuccess: async () => {
+      setEditNotice({ tone: 'green', message: 'Edits saved. Refresh in progress…' })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['content-review-detail', target?.type, target?.resourceId, target?.actionPath] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.adminContentReview }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.adminNotifications }),
+        queryClient.invalidateQueries({ queryKey: ['admin-library'] }),
+        queryClient.invalidateQueries({ queryKey: ['subject-summary-cases'] }),
+        queryClient.invalidateQueries({ queryKey: ['subject-summary-module-admin-entries'] }),
+        queryClient.invalidateQueries({ queryKey: ['admin-bar-final-exam-questions'] }),
+        queryClient.invalidateQueries({ queryKey: ['admin-bar-final-exam-mcq-questions'] }),
+      ])
+      // Stop showing editor now that the authoritative view is updated.
+      setDraft(null)
+      setEditMode(false)
+      setEditNotice({ tone: 'green', message: 'Edits saved and content refreshed.' })
+      setTimeout(() => setEditNotice(null), 4000)
+    },
+    onError: (err: any) => {
+      const validation = err?.response?.data?.error?.details?.fieldErrors
+      const validationHints = validation
+        ? Object.entries(validation)
+            .map(([field, messages]) => {
+              const messageList = Array.isArray(messages) ? (messages as string[]) : [String(messages)]
+              return `${field}: ${messageList.join('; ')}`
+            })
+            .join(' | ')
+        : null
+      setEditNotice({ tone: 'red', message: validationHints ?? err?.response?.data?.error?.message ?? err?.message ?? 'Could not save your edits right now.' })
+    },
+  })
+
   // If location state missed a title, derive the display title from the fetched record
   // so the header isn't stuck on "Loading…" when the user opened a bookmarked URL.
   const resolvedTitle = useMemo(() => {
@@ -934,19 +1176,24 @@ export function AdminContentReviewDetailPage() {
       return target.title
     }
     if (target.type === 'library_material') {
-      return (data as Awaited<ReturnType<typeof fetchAdminLibraryMaterial>>).material.title
+      const original = data as Awaited<ReturnType<typeof fetchAdminLibraryMaterial>>
+      return editMode && draft ? (draft.title ?? original.material.title) : original.material.title
     }
     if (target.type === 'subject_summary_case') {
-      return (data as Awaited<ReturnType<typeof fetchSubjectSummaryCaseDetail>>).title
+      const original = data as Awaited<ReturnType<typeof fetchSubjectSummaryCaseDetail>>
+      return editMode && draft ? (draft.title ?? original.title) : original.title
     }
     if (target.type === 'subject_summary_entry') {
-      return (data as Awaited<ReturnType<typeof fetchAdminSubjectSummaryEntryDetail>>).question
+      const original = data as Awaited<ReturnType<typeof fetchAdminSubjectSummaryEntryDetail>>
+      return editMode && draft ? (draft.question ?? original.question) : original.question
     }
     if (target.type === 'bar_final_exam_question') {
-      return (data as Awaited<ReturnType<typeof fetchAdminBarFinalExamQuestionDetail>>).question
+      const original = data as Awaited<ReturnType<typeof fetchAdminBarFinalExamQuestionDetail>>
+      return editMode && draft ? (draft.question ?? original.question) : original.question
     }
-    return (data as Awaited<ReturnType<typeof fetchAdminBarFinalExamMcqQuestionDetail>>).question
-  }, [data, target])
+    const original = data as Awaited<ReturnType<typeof fetchAdminBarFinalExamMcqQuestionDetail>>
+    return editMode && draft ? (draft.question ?? original.question) : original.question
+  }, [data, draft, editMode, target])
 
   const approveMutation = useMutation({
     mutationFn: async (item: AdminContentReviewQueueItem) => {
@@ -1051,8 +1298,15 @@ export function AdminContentReviewDetailPage() {
   const subtitle = target.subtitle
   const approveIsPending = approveMutation.isPending
   const declineIsPending = declineMutation.isPending
-  const mutationPending = approveIsPending || declineIsPending
+  const mutationPending = approveIsPending || declineIsPending || updateMutation.isPending
   const dataReady = !isLoading && !error && !!data
+  const canEditInPage = target.editPath && dataReady
+  const editingIsEnabled = editMode && canEditInPage
+
+  // Convenience mutator to patch a single key on the draft.
+  function patchDraft<K extends keyof any>(key: K, value: any) {
+    setDraft((current: any) => (current ? { ...current, [key]: value } : current))
+  }
 
   return (
     <div className="space-y-6">
@@ -1070,33 +1324,67 @@ export function AdminContentReviewDetailPage() {
             <ArrowLeft className="h-4 w-4" />
             Back to content review
           </Link>
-          {target.editPath ? (
-            <Link
+          {canEditInPage ? (
+            <button
               className={cn(
                 'inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition',
-                isDark
-                  ? 'border-amber-500/30 bg-amber-500/10 text-amber-200 hover:border-amber-400/40 hover:bg-amber-500/15'
-                  : 'border-amber-300 bg-amber-50 text-amber-800 hover:border-amber-400 hover:bg-amber-100',
+                editingIsEnabled
+                  ? isDark
+                    ? 'border-amber-400/40 bg-amber-500/15 text-amber-200'
+                    : 'border-amber-400 bg-amber-100 text-amber-900'
+                  : isDark
+                    ? 'border-amber-500/30 bg-amber-500/10 text-amber-200 hover:border-amber-400/40 hover:bg-amber-500/15'
+                    : 'border-amber-300 bg-amber-50 text-amber-800 hover:border-amber-400 hover:bg-amber-100',
               )}
-              to={target.editPath}
+              disabled={updateMutation.isPending}
+              onClick={() => toggleEditMode(!editingIsEnabled)}
+              type="button"
             >
-              <Pencil className="h-4 w-4" />
-              Edit
-            </Link>
+              {editingIsEnabled ? (
+                <>
+                  <X className="h-4 w-4" />
+                  Stop editing
+                </>
+              ) : (
+                <>
+                  <Pencil className="h-4 w-4" />
+                  Edit
+                </>
+              )}
+            </button>
           ) : null}
         </div>
-        {notice ? (
-          <p className={cn('text-sm font-medium', notice.tone === 'green' ? (isDark ? 'text-emerald-300' : 'text-emerald-700') : (isDark ? 'text-rose-300' : 'text-rose-700'))}>
-            {notice.message}
-          </p>
-        ) : null}
+        <div className="flex flex-wrap items-center gap-3">
+          {editNotice ? (
+            <p
+              className={cn(
+                'text-sm font-medium',
+                editNotice.tone === 'green' ? (isDark ? 'text-emerald-300' : 'text-emerald-700') : (isDark ? 'text-rose-300' : 'text-rose-700'),
+              )}
+            >
+              {editNotice.message}
+            </p>
+          ) : null}
+          {notice ? (
+            <p
+              className={cn(
+                'text-sm font-medium',
+                notice.tone === 'green' ? (isDark ? 'text-emerald-300' : 'text-emerald-700') : (isDark ? 'text-rose-300' : 'text-rose-700'),
+              )}
+            >
+              {notice.message}
+            </p>
+          ) : null}
+        </div>
       </div>
 
       <AdminPanel className="overflow-hidden" isDark={isDark}>
         <div className={cn('flex items-start justify-between gap-4 border-b px-6 py-5', isDark ? 'border-slate-800' : 'border-slate-200')}>
           <div className="min-w-0">
             <p className={cn('text-xs uppercase tracking-[0.22em]', isDark ? 'text-slate-500' : 'text-slate-400')}>
-              {target.contentTypeLabel} — pending approval
+              {target.contentTypeLabel}
+              {' — '}
+              {editingIsEnabled ? 'editing inline' : 'pending approval'}
             </p>
             <h1 className={cn('mt-2 font-heading text-3xl', isDark ? 'text-white' : 'text-slate-950')} title={resolvedTitle}>
               {resolvedTitle}
@@ -1109,19 +1397,25 @@ export function AdminContentReviewDetailPage() {
               <span>{new Date(target.createdAt).toLocaleString()}</span>
             </p>
           </div>
-          {target.editPath ? (
-            <Link
+          {canEditInPage ? (
+            <button
               className={cn(
-                'inline-flex shrink-0 items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium transition hover:-translate-y-0.5',
-                isDark
-                  ? 'border-slate-600 bg-slate-800 text-white hover:border-slate-500 hover:bg-slate-700'
-                  : 'border-slate-300 bg-white text-slate-800 hover:border-slate-400 hover:bg-slate-50',
+                'inline-flex shrink-0 items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium transition hover:-translate-y-0.5 disabled:opacity-60 disabled:hover:translate-y-0',
+                editingIsEnabled
+                  ? isDark
+                    ? 'border-amber-500/30 bg-amber-500/10 text-amber-200 hover:border-amber-400/40 hover:bg-amber-500/15'
+                    : 'border-amber-300 bg-amber-50 text-amber-800 hover:border-amber-400 hover:bg-amber-100'
+                  : isDark
+                    ? 'border-slate-600 bg-slate-800 text-white hover:border-slate-500 hover:bg-slate-700'
+                    : 'border-slate-300 bg-white text-slate-800 hover:border-slate-400 hover:bg-slate-50',
               )}
-              to={target.editPath}
+              disabled={updateMutation.isPending}
+              onClick={() => toggleEditMode(!editingIsEnabled)}
+              type="button"
             >
               <Pencil className="h-4 w-4" />
-              Edit content
-            </Link>
+              {editingIsEnabled ? 'Editing' : 'Edit content'}
+            </button>
           ) : null}
         </div>
 
@@ -1135,19 +1429,106 @@ export function AdminContentReviewDetailPage() {
               We couldn’t load this content right now. Return to the queue and try again, or approve / decline from the list.
             </div>
           ) : target.type === 'library_material' ? (
-            <LibraryMaterialReview node={data as Awaited<ReturnType<typeof fetchAdminLibraryMaterial>>} isDark={isDark} />
+            editingIsEnabled ? (
+              <LibraryMaterialEditor
+                draft={draft}
+                isDark={isDark}
+                onChange={patchDraft}
+                node={data as Awaited<ReturnType<typeof fetchAdminLibraryMaterial>>}
+              />
+            ) : (
+              <LibraryMaterialReview node={data as Awaited<ReturnType<typeof fetchAdminLibraryMaterial>>} isDark={isDark} />
+            )
           ) : target.type === 'subject_summary_case' ? (
-            <SubjectSummaryCaseReview node={data as Awaited<ReturnType<typeof fetchSubjectSummaryCaseDetail>>} isDark={isDark} />
+            editingIsEnabled ? (
+              <SubjectSummaryCaseEditor
+                draft={draft}
+                isDark={isDark}
+                onChange={patchDraft}
+                node={data as Awaited<ReturnType<typeof fetchSubjectSummaryCaseDetail>>}
+              />
+            ) : (
+              <SubjectSummaryCaseReview node={data as Awaited<ReturnType<typeof fetchSubjectSummaryCaseDetail>>} isDark={isDark} />
+            )
           ) : target.type === 'subject_summary_entry' ? (
-            <SubjectSummaryEntryReview node={data as Awaited<ReturnType<typeof fetchAdminSubjectSummaryEntryDetail>>} isDark={isDark} />
+            editingIsEnabled ? (
+              <SubjectSummaryEntryEditor
+                draft={draft}
+                isDark={isDark}
+                onChange={patchDraft}
+                node={data as Awaited<ReturnType<typeof fetchAdminSubjectSummaryEntryDetail>>}
+              />
+            ) : (
+              <SubjectSummaryEntryReview node={data as Awaited<ReturnType<typeof fetchAdminSubjectSummaryEntryDetail>>} isDark={isDark} />
+            )
           ) : target.type === 'bar_final_exam_question' ? (
-            <BarTheoryReview node={data as Awaited<ReturnType<typeof fetchAdminBarFinalExamQuestionDetail>>} isDark={isDark} />
+            editingIsEnabled ? (
+              <BarTheoryEditor
+                draft={draft}
+                isDark={isDark}
+                onChange={patchDraft}
+                node={data as Awaited<ReturnType<typeof fetchAdminBarFinalExamQuestionDetail>>}
+              />
+            ) : (
+              <BarTheoryReview node={data as Awaited<ReturnType<typeof fetchAdminBarFinalExamQuestionDetail>>} isDark={isDark} />
+            )
+          ) : editingIsEnabled ? (
+            <BarMcqEditor
+              draft={draft}
+              isDark={isDark}
+              onChange={patchDraft}
+              node={data as Awaited<ReturnType<typeof fetchAdminBarFinalExamMcqQuestionDetail>>}
+            />
           ) : (
             <BarMcqReview node={data as Awaited<ReturnType<typeof fetchAdminBarFinalExamMcqQuestionDetail>>} isDark={isDark} />
           )}
         </div>
 
-        {declineMode ? (
+        {editingIsEnabled ? (
+          <div className={cn('border-t px-6 py-5', isDark ? 'border-slate-800' : 'border-slate-200')}>
+            {editNotice?.tone === 'red' ? (
+              <div
+                className={cn(
+                  'mb-4 rounded-[20px] border px-4 py-3 text-sm',
+                  isDark ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-rose-200 bg-rose-50 text-rose-700',
+                )}
+              >
+                {editNotice.message}
+              </div>
+            ) : null}
+            <div className={cn('flex flex-wrap items-center justify-between gap-3')}>
+              <p className={cn('max-w-xl text-sm leading-6', isDark ? 'text-slate-400' : 'text-slate-500')}>
+                Edits are saved in place. After saving you’ll stay on this page so you can continue reviewing, approving or declining.
+              </p>
+              <div className="flex flex-wrap justify-end gap-3">
+                <button
+                  className={cn(
+                    '!px-4 !py-3 inline-flex items-center gap-2 rounded-2xl border text-sm font-medium transition hover:-translate-y-0.5 disabled:opacity-60 disabled:hover:translate-y-0',
+                    isDark
+                      ? 'border-slate-600 bg-slate-800 text-white hover:border-slate-500 hover:bg-slate-700 disabled:border-slate-700 disabled:bg-slate-900 disabled:text-slate-500'
+                      : 'border-slate-300 bg-white text-slate-800 hover:border-slate-400 hover:bg-slate-50 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-500',
+                  )}
+                  disabled={updateMutation.isPending}
+                  onClick={() => toggleEditMode(false)}
+                  type="button"
+                >
+                  Cancel
+                </button>
+                <button
+                  className="button-primary !px-4 !py-3"
+                  disabled={updateMutation.isPending}
+                  onClick={() => void updateMutation.mutateAsync({ targetItem: target, dataSnapshot: data!, draftSnapshot: draft, librarySection: section })}
+                  type="button"
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <CheckCheck className="h-4 w-4" />
+                    {updateMutation.isPending ? 'Saving edits…' : 'Save edits'}
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : declineMode ? (
           <div className={cn('border-t px-6 py-5', isDark ? 'border-slate-800' : 'border-slate-200')}>
             <label className={cn('text-sm font-medium', isDark ? 'text-slate-200' : 'text-slate-700')}>
               Decline reason
@@ -1275,6 +1656,155 @@ function RichTextContent({ html, isDark }: { html: string; isDark: boolean }) {
       // requires HTML output to preserve italics, lists, headings, colors, and links.
       dangerouslySetInnerHTML={{ __html: html }}
     />
+  )
+}
+
+// Strips HTML markup so we can measure actual text length in RTE fields.
+function stripHtml(value: string) {
+  return value
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// Minimal contentEditable rich text editor used when inline-editing review
+// content (avoids opening a separate admin editor page).
+function RichTextField({
+  isDark,
+  label,
+  minHeight,
+  onChange,
+  placeholder,
+  value,
+}: {
+  isDark: boolean
+  label: string
+  minHeight: number
+  onChange: (value: string) => void
+  placeholder: string
+  value: string
+}) {
+  const editorRef = useRef<HTMLDivElement | null>(null)
+  const colorInputRef = useRef<HTMLInputElement | null>(null)
+  const selectionRef = useRef<Range | null>(null)
+
+  useEffect(() => {
+    if (!editorRef.current || editorRef.current.innerHTML === value) {
+      return
+    }
+    editorRef.current.innerHTML = value
+  }, [value])
+
+  function saveSelection() {
+    if (typeof window === 'undefined') return
+    const selection = window.getSelection()
+    if (!selection || selection.rangeCount === 0) return
+    const range = selection.getRangeAt(0)
+    if (!editorRef.current?.contains(range.commonAncestorContainer)) return
+    selectionRef.current = range.cloneRange()
+  }
+
+  function restoreSelection() {
+    if (typeof window === 'undefined') return
+    const range = selectionRef.current
+    if (!range) return
+    const selection = window.getSelection()
+    if (!selection) return
+    selection.removeAllRanges()
+    selection.addRange(range)
+  }
+
+  function applyCommand(command: string, commandValue?: string) {
+    if (!editorRef.current) return
+    editorRef.current.focus()
+    restoreSelection()
+    document.execCommand(command, false, commandValue)
+    onChange(editorRef.current.innerHTML)
+  }
+
+  const toolbarButtons = [
+    { command: 'bold', icon: Bold, label: 'Bold' },
+    { command: 'italic', icon: Italic, label: 'Italic' },
+    { command: 'underline', icon: Underline, label: 'Underline' },
+    { command: 'justifyLeft', icon: AlignLeft, label: 'Align left' },
+    { command: 'justifyCenter', icon: AlignCenter, label: 'Align center' },
+    { command: 'justifyRight', icon: AlignRight, label: 'Align right' },
+    { command: 'insertUnorderedList', icon: List, label: 'Bullet list' },
+    { command: 'insertOrderedList', icon: ListOrdered, label: 'Numbered list' },
+  ] as const
+
+  return (
+    <div className="space-y-2">
+      <span className={cn('text-xs font-medium uppercase tracking-[0.18em]', isDark ? 'text-slate-500' : 'text-slate-500')}>
+        {label}
+      </span>
+      <div className={cn('rounded-[24px] border', isDark ? 'border-slate-700 bg-slate-900' : 'border-slate-200 bg-slate-50')}>
+        <div className={cn('flex flex-wrap gap-2 border-b px-3 py-2.5', isDark ? 'border-slate-700' : 'border-slate-200')}>
+          {toolbarButtons.map((item) => {
+            const Icon = item.icon
+            return (
+              <button
+                className={cn(
+                  'inline-flex h-9 w-9 items-center justify-center rounded-2xl border transition',
+                  isDark
+                    ? 'border-slate-700 bg-slate-950 text-slate-200 hover:border-slate-600 hover:text-white'
+                    : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
+                )}
+                key={item.command}
+                onMouseDown={(event) => {
+                  event.preventDefault()
+                  applyCommand(item.command)
+                }}
+                title={item.label}
+                type="button"
+              >
+                <Icon className="h-4 w-4" />
+              </button>
+            )
+          })}
+          <button
+            className={cn(
+              'inline-flex h-9 w-9 items-center justify-center rounded-2xl border text-xs font-semibold transition',
+              isDark
+                ? 'border-slate-700 bg-slate-950 text-slate-200 hover:border-slate-600 hover:text-white'
+                : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
+            )}
+            onMouseDown={(event) => {
+              event.preventDefault()
+              saveSelection()
+              colorInputRef.current?.click()
+            }}
+            title="Text color"
+            type="button"
+          >
+            A
+          </button>
+          <input className="sr-only" onChange={(event) => applyCommand('foreColor', event.target.value)} ref={colorInputRef} type="color" />
+        </div>
+        <div className="relative cursor-text" onClick={() => editorRef.current?.focus()} style={{ minHeight }}>
+          {!stripHtml(value) ? (
+            <div className={cn('pointer-events-none absolute left-4 top-4 text-sm', isDark ? 'text-slate-500' : 'text-slate-400')}>
+              {placeholder}
+            </div>
+          ) : null}
+          <div
+            aria-label={label}
+            className={cn('rich-text-content px-4 py-3 text-sm leading-7 outline-none', isDark ? 'text-white' : 'text-slate-950')}
+            contentEditable
+            role="textbox"
+            onInput={(event) => onChange(event.currentTarget.innerHTML)}
+            onKeyUp={saveSelection}
+            onMouseUp={saveSelection}
+            ref={editorRef}
+            suppressContentEditableWarning
+            tabIndex={0}
+          />
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -1552,6 +2082,515 @@ function BarMcqReview({ node, isDark }: { node: Awaited<ReturnType<typeof fetchA
           ) : null}
         </ReviewBlock>
       ) : null}
+    </div>
+  )
+}
+
+type EditorChange = <K extends keyof any>(key: K, value: any) => void
+
+// Small helper used by inline editors for short text inputs.
+function TextField({
+  isDark,
+  label,
+  onChange,
+  placeholder,
+  value,
+}: {
+  isDark: boolean
+  label: string
+  onChange: (next: string) => void
+  placeholder?: string
+  value: string
+}) {
+  return (
+    <label className="space-y-2 block">
+      <span className={cn('text-xs font-medium uppercase tracking-[0.18em]', isDark ? 'text-slate-500' : 'text-slate-500')}>
+        {label}
+      </span>
+      <input
+        className={cn('w-full rounded-2xl border px-3.5 py-3 text-sm outline-none transition', isDark ? 'border-slate-700 bg-slate-900 text-white focus:border-slate-500' : 'border-slate-200 bg-slate-50 text-slate-950 focus:border-slate-400')}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        value={value}
+      />
+    </label>
+  )
+}
+
+function LongTextField({
+  isDark,
+  label,
+  minHeight,
+  onChange,
+  placeholder,
+  value,
+}: {
+  isDark: boolean
+  label: string
+  minHeight?: number
+  onChange: (next: string) => void
+  placeholder?: string
+  value: string
+}) {
+  return (
+    <label className="space-y-2 block">
+      <span className={cn('text-xs font-medium uppercase tracking-[0.18em]', isDark ? 'text-slate-500' : 'text-slate-500')}>
+        {label}
+      </span>
+      <textarea
+        className={cn('w-full rounded-[22px] border px-4 py-3 text-sm outline-none transition leading-7', isDark ? 'border-slate-700 bg-slate-900 text-white placeholder:text-slate-500 focus:border-slate-500' : 'border-slate-200 bg-slate-50 text-slate-950 placeholder:text-slate-400 focus:border-slate-400')}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        style={{ minHeight: minHeight ?? 140 }}
+        value={value}
+      />
+    </label>
+  )
+}
+
+// Comma/semicolon/newline-separated string list editor (keywords / tags / statutes / principles).
+function StringListField({
+  isDark,
+  label,
+  onChange,
+  value,
+}: {
+  isDark: boolean
+  label: string
+  onChange: (next: string[]) => void
+  value: string[]
+}) {
+  const combined = value.join('; ')
+  return (
+    <div className="space-y-2">
+      <span className={cn('block text-xs font-medium uppercase tracking-[0.18em]', isDark ? 'text-slate-500' : 'text-slate-500')}>
+        {label}
+      </span>
+      <textarea
+        className={cn('w-full rounded-[22px] border px-4 py-3 text-sm outline-none transition leading-7', isDark ? 'border-slate-700 bg-slate-900 text-white placeholder:text-slate-500 focus:border-slate-500' : 'border-slate-200 bg-slate-50 text-slate-950 placeholder:text-slate-400 focus:border-slate-400')}
+        onChange={(event) => {
+          const next = event.target.value
+            .split(/[\n;,]+/)
+            .map((s) => s.trim())
+            .filter(Boolean)
+          onChange(next)
+        }}
+        placeholder="Separate with ; or newlines"
+        style={{ minHeight: 110 }}
+        value={combined}
+      />
+      <div className="flex flex-wrap gap-2">
+        {value.map((s, i) => (
+          <span
+            className={cn('rounded-full border px-3 py-1 text-xs', isDark ? 'border-slate-700 text-slate-300' : 'border-slate-200 text-slate-700')}
+            key={`${s}-${i}`}
+          >
+            {s}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function LibraryMaterialEditor({
+  draft,
+  isDark,
+  onChange,
+  node,
+}: {
+  draft: any
+  isDark: boolean
+  onChange: EditorChange
+  node: Awaited<ReturnType<typeof fetchAdminLibraryMaterial>>
+}) {
+  const mat = node.material
+  const title = (draft?.title as string | undefined) ?? mat.title ?? ''
+  const summary = (draft?.summary as string | undefined) ?? mat.summary ?? ''
+  const body = (draft?.body as string | undefined) ?? mat.body ?? ''
+
+  return (
+    <div className="space-y-5">
+      <ReviewBlock isDark={isDark}>
+        <div className="flex flex-wrap items-center gap-2">
+          <SectionHeading isDark={isDark}>Section</SectionHeading>
+          <span className={cn('rounded-full border px-3 py-1 text-xs', isDark ? 'border-slate-700 text-slate-300' : 'border-slate-200 text-slate-700')}>
+            {node.category.name}
+          </span>
+          {mat.reportNumber ? (
+            <>
+              <span className={isDark ? 'text-slate-500' : 'text-slate-400'}>•</span>
+              <span className={cn('text-xs', isDark ? 'text-slate-400' : 'text-slate-500')}>{mat.reportNumber}</span>
+            </>
+          ) : null}
+        </div>
+        <div className="mt-4">
+          <TextField isDark={isDark} label="Title" onChange={(v) => onChange('title', v)} value={title} placeholder="e.g. Smith v Jones (1920)" />
+        </div>
+      </ReviewBlock>
+
+      <ReviewBlock isDark={isDark}>
+        <RichTextField
+          isDark={isDark}
+          label="Summary"
+          minHeight={200}
+          onChange={(v) => onChange('summary', v)}
+          placeholder="Short summary of the material"
+          value={summary}
+        />
+      </ReviewBlock>
+
+      <ReviewBlock isDark={isDark}>
+        <RichTextField
+          isDark={isDark}
+          label="Full body"
+          minHeight={360}
+          onChange={(v) => onChange('body', v)}
+          placeholder="Full content (format with bold, lists, headings…)"
+          value={body}
+        />
+      </ReviewBlock>
+    </div>
+  )
+}
+
+function SubjectSummaryCaseEditor({
+  draft,
+  isDark,
+  onChange,
+  node,
+}: {
+  draft: any
+  isDark: boolean
+  onChange: EditorChange
+  node: Awaited<ReturnType<typeof fetchSubjectSummaryCaseDetail>>
+}) {
+  const title = (draft?.title as string | undefined) ?? node.title ?? ''
+  const court = (draft?.court as string | undefined) ?? node.court ?? ''
+  const citation = (draft?.citation as string | undefined) ?? node.citation ?? ''
+  const caseSummary = (draft?.caseSummary as string | undefined) ?? node.caseSummary ?? ''
+  const facts = (draft?.facts as string | undefined) ?? node.facts ?? ''
+  const issues = (draft?.issues as string | undefined) ?? node.issues ?? ''
+  const ratioDecidendi = (draft?.ratioDecidendi as string | undefined) ?? node.ratioDecidendi ?? ''
+  const decisionHolding = (draft?.decisionHolding as string | undefined) ?? node.decisionHolding ?? ''
+  const obiterDicta = (draft?.obiterDicta as string | undefined) ?? node.obiterDicta ?? ''
+  const legalPrinciples = (draft?.legalPrinciples as string[] | undefined) ?? node.legalPrinciples ?? []
+  const relatedStatutes = (draft?.relatedStatutes as string[] | undefined) ?? node.relatedStatutes ?? []
+  const keywords = (draft?.keywords as string[] | undefined) ?? node.keywords ?? []
+  const badges = [court, citation, node.year ? String(node.year) : null].filter(Boolean) as string[]
+
+  return (
+    <div className="space-y-5">
+      <ReviewBlock isDark={isDark}>
+        <div className="space-y-2">
+          <p className={cn('text-sm', isDark ? 'text-slate-400' : 'text-slate-500')}>
+            {node.subject.name} / {node.topic.name}
+          </p>
+          {badges.length ? (
+            <div className="flex flex-wrap gap-2">
+              {badges.map((b) => (
+                <span
+                  className={cn('rounded-full border px-3 py-1 text-xs', isDark ? 'border-slate-700 text-slate-300' : 'border-slate-200 text-slate-700')}
+                  key={b}
+                >
+                  {b}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <TextField isDark={isDark} label="Title / Case name" onChange={(v) => onChange('title', v)} value={title} placeholder="e.g. Smith v Jones" />
+          <TextField isDark={isDark} label="Court" onChange={(v) => onChange('court', v)} value={court} placeholder="e.g. Supreme Court" />
+        </div>
+        <div className="mt-4">
+          <TextField isDark={isDark} label="Citation" onChange={(v) => onChange('citation', v)} value={citation} placeholder="e.g. [1920] AC 123" />
+        </div>
+      </ReviewBlock>
+
+      <ReviewBlock isDark={isDark}>
+        <RichTextField isDark={isDark} label="Ratio summary" minHeight={200} onChange={(v) => onChange('caseSummary', v)} placeholder="Short ratio summary" value={caseSummary} />
+      </ReviewBlock>
+      <ReviewBlock isDark={isDark}>
+        <RichTextField isDark={isDark} label="Material facts" minHeight={240} onChange={(v) => onChange('facts', v)} placeholder="Material facts" value={facts} />
+      </ReviewBlock>
+      <ReviewBlock isDark={isDark}>
+        <RichTextField isDark={isDark} label="Issues" minHeight={180} onChange={(v) => onChange('issues', v)} placeholder="Legal issues" value={issues} />
+      </ReviewBlock>
+      <ReviewBlock isDark={isDark}>
+        <RichTextField isDark={isDark} label="Ratio decidendi" minHeight={260} onChange={(v) => onChange('ratioDecidendi', v)} placeholder="Ratio decidendi" value={ratioDecidendi} />
+      </ReviewBlock>
+      <ReviewBlock isDark={isDark}>
+        <RichTextField isDark={isDark} label="Decision / holding" minHeight={200} onChange={(v) => onChange('decisionHolding', v)} placeholder="Decision / holding" value={decisionHolding} />
+      </ReviewBlock>
+      <ReviewBlock isDark={isDark}>
+        <RichTextField isDark={isDark} label="Obiter dicta" minHeight={200} onChange={(v) => onChange('obiterDicta', v)} placeholder="Obiter dicta" value={obiterDicta} />
+      </ReviewBlock>
+      <ReviewBlock isDark={isDark}>
+        <StringListField isDark={isDark} label="Legal principles" onChange={(v) => onChange('legalPrinciples', v)} value={legalPrinciples} />
+      </ReviewBlock>
+      <ReviewBlock isDark={isDark}>
+        <StringListField isDark={isDark} label="Related statutes" onChange={(v) => onChange('relatedStatutes', v)} value={relatedStatutes} />
+      </ReviewBlock>
+      <ReviewBlock isDark={isDark}>
+        <StringListField isDark={isDark} label="Keywords" onChange={(v) => onChange('keywords', v)} value={keywords} />
+      </ReviewBlock>
+    </div>
+  )
+}
+
+function SubjectSummaryEntryEditor({
+  draft,
+  isDark,
+  onChange,
+  node,
+}: {
+  draft: any
+  isDark: boolean
+  onChange: EditorChange
+  node: Awaited<ReturnType<typeof fetchAdminSubjectSummaryEntryDetail>>
+}) {
+  const question = (draft?.question as string | undefined) ?? node.question ?? ''
+  const answer = (draft?.answer as string | undefined) ?? node.answer ?? ''
+  const keyPrinciple = (draft?.keyPrinciple as string | undefined) ?? node.keyPrinciple ?? ''
+  const examTip = (draft?.examTip as string | undefined) ?? node.examTip ?? ''
+  const topic = (draft?.topic as string | undefined) ?? node.topic ?? ''
+  const difficulty = (draft?.difficulty as string | undefined) ?? node.difficulty ?? 'EASY'
+  const estimatedReadingTime = Number((draft?.estimatedReadingTime as number | undefined) ?? node.estimatedReadingTime ?? 2)
+  const relatedStatutes = (draft?.relatedStatutes as string[] | undefined) ?? node.relatedStatutes ?? []
+  const tags = (draft?.tags as string[] | undefined) ?? node.tags ?? []
+
+  return (
+    <div className="space-y-5">
+      <ReviewBlock isDark={isDark}>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={cn('rounded-full border px-3 py-1 text-xs', isDark ? 'border-slate-700 text-slate-300' : 'border-slate-200 text-slate-700')}>
+            {node.moduleType}
+          </span>
+          {node.serialNumber ? (
+            <span className={cn('rounded-full border px-3 py-1 text-xs', isDark ? 'border-slate-700 text-slate-300' : 'border-slate-200 text-slate-700')}>
+              {node.serialNumber}
+            </span>
+          ) : null}
+          <p className={cn('text-sm', isDark ? 'text-slate-400' : 'text-slate-500')}>{node.subject.name}</p>
+        </div>
+        <div className="mt-4 grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
+          <TextField isDark={isDark} label="Topic" onChange={(v) => onChange('topic', v)} value={topic} placeholder="e.g. Offer and Acceptance" />
+          <label className="space-y-2 block">
+            <span className={cn('text-xs font-medium uppercase tracking-[0.18em]', isDark ? 'text-slate-500' : 'text-slate-500')}>Difficulty</span>
+            <select
+              className={cn('w-full rounded-2xl border px-3.5 py-3 text-sm outline-none transition', isDark ? 'border-slate-700 bg-slate-900 text-white focus:border-slate-500' : 'border-slate-200 bg-slate-50 text-slate-950 focus:border-slate-400')}
+              onChange={(event) => onChange('difficulty', event.target.value)}
+              value={difficulty}
+            >
+              <option value="EASY">Easy</option>
+              <option value="MEDIUM">Medium</option>
+              <option value="HARD">Hard</option>
+            </select>
+          </label>
+          <TextField isDark={isDark} label="Read mins" onChange={(v) => onChange('estimatedReadingTime', Number(v))} placeholder="2" value={String(estimatedReadingTime)} />
+        </div>
+        <div className="mt-4">
+          <LongTextField isDark={isDark} label="Question" minHeight={140} onChange={(v) => onChange('question', v)} placeholder="Question text" value={question} />
+        </div>
+      </ReviewBlock>
+
+      <ReviewBlock isDark={isDark}>
+        <RichTextField isDark={isDark} label="Key principle" minHeight={180} onChange={(v) => onChange('keyPrinciple', v)} placeholder="Key principle (optional)" value={keyPrinciple} />
+      </ReviewBlock>
+
+      <ReviewBlock isDark={isDark}>
+        <RichTextField isDark={isDark} label="Full answer" minHeight={340} onChange={(v) => onChange('answer', v)} placeholder="Full answer with formatting" value={answer} />
+      </ReviewBlock>
+
+      <ReviewBlock isDark={isDark}>
+        <RichTextField isDark={isDark} label="Exam tip" minHeight={160} onChange={(v) => onChange('examTip', v)} placeholder="Exam tip (optional)" value={examTip} />
+      </ReviewBlock>
+
+      <ReviewBlock isDark={isDark}>
+        <StringListField isDark={isDark} label="Related statutes" onChange={(v) => onChange('relatedStatutes', v)} value={relatedStatutes} />
+      </ReviewBlock>
+
+      <ReviewBlock isDark={isDark}>
+        <StringListField isDark={isDark} label="Tags" onChange={(v) => onChange('tags', v)} value={tags} />
+      </ReviewBlock>
+    </div>
+  )
+}
+
+function BarTheoryEditor({
+  draft,
+  isDark,
+  onChange,
+  node,
+}: {
+  draft: any
+  isDark: boolean
+  onChange: EditorChange
+  node: Awaited<ReturnType<typeof fetchAdminBarFinalExamQuestionDetail>>
+}) {
+  const question = (draft?.question as string | undefined) ?? node.question ?? ''
+  const answer = (draft?.answer as string | undefined) ?? node.answer ?? ''
+
+  return (
+    <div className="space-y-5">
+      <ReviewBlock isDark={isDark}>
+        <p className={cn('text-sm', isDark ? 'text-slate-400' : 'text-slate-500')}>{node.subject.name}</p>
+        {node.examDate ? (
+          <p className={cn('mt-1 text-xs', isDark ? 'text-slate-400' : 'text-slate-500')}>
+            Exam date: {new Date(node.examDate).toLocaleDateString()}
+          </p>
+        ) : null}
+        <div className="mt-4">
+          <LongTextField isDark={isDark} label="Question" minHeight={180} onChange={(v) => onChange('question', v)} placeholder="Theory question" value={question} />
+        </div>
+      </ReviewBlock>
+
+      <ReviewBlock isDark={isDark}>
+        <RichTextField isDark={isDark} label="Model answer" minHeight={360} onChange={(v) => onChange('answer', v)} placeholder="Model answer with formatting" value={answer} />
+      </ReviewBlock>
+    </div>
+  )
+}
+
+function BarMcqEditor({
+  draft,
+  isDark,
+  onChange,
+  node,
+}: {
+  draft: any
+  isDark: boolean
+  onChange: EditorChange
+  node: Awaited<ReturnType<typeof fetchAdminBarFinalExamMcqQuestionDetail>>
+}) {
+  const question = (draft?.question as string | undefined) ?? node.question ?? ''
+  const options = (draft?.options as string[] | undefined) ?? node.options ?? []
+  const correctOptionIndex = Number((draft?.correctOptionIndex as number | undefined) ?? node.correctOptionIndex ?? 0)
+
+  function updateOptionAt(index: number, next: string) {
+    const nextOptions = [...options]
+    nextOptions[index] = next
+    onChange('options', nextOptions)
+  }
+
+  function addOption() {
+    onChange('options', [...options, ''])
+  }
+
+  function removeOptionAt(index: number) {
+    const nextOptions = options.filter((_, i) => i !== index)
+    let nextCorrect = correctOptionIndex
+    if (correctOptionIndex >= index && correctOptionIndex > 0) {
+      nextCorrect = correctOptionIndex - 1
+    } else if (nextOptions.length === 0) {
+      nextCorrect = 0
+    } else if (correctOptionIndex >= nextOptions.length) {
+      nextCorrect = Math.max(0, nextOptions.length - 1)
+    }
+    onChange('options', nextOptions)
+    onChange('correctOptionIndex', nextCorrect)
+  }
+
+  return (
+    <div className="space-y-5">
+      <ReviewBlock isDark={isDark}>
+        <p className={cn('text-sm', isDark ? 'text-slate-400' : 'text-slate-500')}>{node.subject.name}</p>
+        {node.examDate ? (
+          <p className={cn('mt-1 text-xs', isDark ? 'text-slate-400' : 'text-slate-500')}>
+            Exam date: {new Date(node.examDate).toLocaleDateString()}
+          </p>
+        ) : null}
+        <div className="mt-4">
+          <LongTextField isDark={isDark} label="Question" minHeight={180} onChange={(v) => onChange('question', v)} placeholder="MCQ question stem" value={question} />
+        </div>
+      </ReviewBlock>
+
+      <ReviewBlock isDark={isDark}>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <SectionHeading isDark={isDark}>Answer options</SectionHeading>
+          <button
+            className={cn(
+              'inline-flex items-center gap-2 rounded-full border px-3.5 py-2 text-xs font-medium transition',
+              isDark
+                ? 'border-slate-600 bg-slate-800 text-white hover:border-slate-500 hover:bg-slate-700'
+                : 'border-slate-300 bg-white text-slate-800 hover:border-slate-400 hover:bg-slate-50',
+            )}
+            onClick={addOption}
+            type="button"
+          >
+            + Add option
+          </button>
+        </div>
+        <ol className="mt-4 space-y-3">
+          {options.map((opt, idx) => {
+            const isCorrect = idx === correctOptionIndex
+            return (
+              <li
+                className={cn(
+                  'rounded-2xl border p-3',
+                  isCorrect
+                    ? isDark
+                      ? 'border-emerald-400/40 bg-emerald-500/10'
+                      : 'border-emerald-300 bg-emerald-50'
+                    : isDark
+                      ? 'border-slate-800 bg-slate-950'
+                      : 'border-slate-200 bg-white',
+                )}
+                key={idx}
+              >
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    aria-label={`Mark option ${idx + 1} as correct`}
+                    className={cn(
+                      'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition',
+                      isCorrect
+                        ? isDark
+                          ? 'border-emerald-400/60 bg-emerald-500/20 text-emerald-200'
+                          : 'border-emerald-400 bg-emerald-100 text-emerald-800'
+                        : isDark
+                          ? 'border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-600'
+                          : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300',
+                    )}
+                    onClick={() => onChange('correctOptionIndex', idx)}
+                    type="button"
+                  >
+                    {isCorrect ? '✓' : idx + 1}
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <LongTextField
+                      isDark={isDark}
+                      label={`Option ${idx + 1}${isCorrect ? ' — correct answer' : ''}`}
+                      minHeight={90}
+                      onChange={(v) => updateOptionAt(idx, v)}
+                      placeholder={`Answer option ${idx + 1}`}
+                      value={opt}
+                    />
+                  </div>
+                  <button
+                    aria-label={`Remove option ${idx + 1}`}
+                    className={cn(
+                      'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition',
+                      isDark
+                        ? 'border-slate-700 bg-slate-900 text-slate-300 hover:border-rose-500/30 hover:text-rose-300'
+                        : 'border-slate-200 bg-white text-slate-600 hover:border-rose-200 hover:text-rose-600',
+                    )}
+                    onClick={() => removeOptionAt(idx)}
+                    type="button"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </li>
+            )
+          })}
+        </ol>
+        {correctOptionIndex >= 0 && options[correctOptionIndex] ? (
+          <p className={cn('mt-5 text-xs uppercase tracking-[0.22em]', isDark ? 'text-emerald-400' : 'text-emerald-700')}>
+            Correct answer: {options[correctOptionIndex]}
+          </p>
+        ) : null}
+      </ReviewBlock>
     </div>
   )
 }

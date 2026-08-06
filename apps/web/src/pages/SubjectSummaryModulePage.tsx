@@ -391,6 +391,7 @@ function AdminEntryModal({
   onSubmit,
   onSubmitAndAddQuestions,
   relatedCases,
+  saveError,
   subjects,
   title
 }: {
@@ -411,12 +412,27 @@ function AdminEntryModal({
       name: string;
     };
   }>;
+  saveError: string | null;
   subjects: Array<{
     id: string;
     name: string;
   }>;
   title: string;
 }) {
+  const hasSubject = Boolean(draft.subjectId);
+  const hasQuestion = stripHtml(draft.question).trim().length >= 2;
+  const hasAnswer = stripHtml(draft.answer).trim().length >= 2;
+  const hasTopicForContinue = draft.topic.trim().length >= 2;
+
+  const canSubmit = hasSubject && hasQuestion && hasAnswer;
+  const canSubmitAndAdd = canSubmit && hasTopicForContinue;
+
+  let submitExplanation = "";
+  if (!hasSubject) submitExplanation = "Select a subject first.";
+  else if (!hasQuestion) submitExplanation = "Add a question.";
+  else if (!hasAnswer) submitExplanation = "The answer must be at least 2 characters.";
+  else if (!hasTopicForContinue) submitExplanation = "Set a topic (2+ chars) to continue adding questions.";
+
   return (
     <ModalFrame isDark={isDark} onClose={onClose} title={title}>
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
@@ -614,34 +630,62 @@ function AdminEntryModal({
             </div>
           </div>
 
-          <div className="flex items-center justify-end gap-3">
-            <button
-              className={cn("rounded-2xl border px-4 py-3 text-sm font-medium", isDark ? "border-slate-700 bg-slate-900 text-slate-200" : "border-slate-200 bg-slate-50 text-slate-700")}
-              onClick={onClose}
-              type="button"
-            >
-              Cancel
-            </button>
-            <button
-              className={cn(
-                "rounded-2xl border px-4 py-3 text-sm font-medium",
-                isSaving || draft.topic.trim().length < 2
-                  ? isDark
-                    ? "cursor-not-allowed border-slate-800 bg-slate-950 text-slate-600"
-                    : "cursor-not-allowed border-slate-200 bg-white text-slate-400"
-                  : isDark
-                    ? "border-slate-700 bg-slate-950 text-slate-200 hover:border-slate-600 hover:text-white"
-                    : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950"
-              )}
-              disabled={isSaving || draft.topic.trim().length < 2}
-              onClick={onSubmitAndAddQuestions}
-              type="button"
-            >
-              Save + add questions
-            </button>
-            <button className="button-primary !px-5 !py-3" disabled={isSaving} onClick={onSubmit} type="button">
-              {isSaving ? "Saving..." : "Save subject summary"}
-            </button>
+          <div className="space-y-3">
+            {saveError ? (
+              <div className={cn(
+                "rounded-[20px] border px-4 py-3 text-sm",
+                isDark ? "border-rose-500/20 bg-rose-500/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-700",
+              )}>
+                {saveError}
+              </div>
+            ) : submitExplanation ? (
+              <div className={cn(
+                "rounded-[20px] border px-4 py-3 text-sm",
+                isDark ? "border-amber-500/20 bg-amber-500/10 text-amber-200" : "border-amber-200 bg-amber-50 text-amber-800",
+              )}>
+                {submitExplanation}
+              </div>
+            ) : null}
+
+            <div className="flex items-center justify-end gap-3">
+              <button
+                className={cn(
+                  "rounded-2xl border px-4 py-3 text-sm font-medium transition",
+                  isDark
+                    ? "border-slate-700 bg-slate-900 text-slate-200 hover:border-slate-600 hover:bg-slate-800"
+                    : "border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50",
+                )}
+                onClick={onClose}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className={cn(
+                  "rounded-2xl border px-4 py-3 text-sm font-medium transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0",
+                  isSaving || !canSubmitAndAdd
+                    ? isDark
+                      ? "border-slate-800 bg-slate-950 text-slate-600"
+                      : "border-slate-200 bg-white text-slate-400"
+                    : isDark
+                      ? "border-slate-700 bg-slate-950 text-slate-200 hover:border-slate-600 hover:text-white"
+                      : "border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:text-slate-950"
+                )}
+                disabled={isSaving || !canSubmitAndAdd}
+                onClick={onSubmitAndAddQuestions}
+                type="button"
+              >
+                Save + add questions
+              </button>
+              <button
+                className="button-primary !px-5 !py-3"
+                disabled={isSaving || !canSubmit}
+                onClick={onSubmit}
+                type="button"
+              >
+                {isSaving ? "Saving..." : "Save subject summary"}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -905,7 +949,8 @@ function AdminTopicModal({
   onSubmit,
   onUpdate,
   subjects,
-  title
+  title,
+  topicSaveError
 }: {
   draft: TopicDraftState;
   isDark: boolean;
@@ -916,12 +961,21 @@ function AdminTopicModal({
   onUpdate: (nextDraft: TopicDraftState) => void;
   subjects: Array<{ id: string; name: string }>;
   title: string;
+  topicSaveError: string | null;
 }) {
   const entries = draft.entries.length ? draft.entries : [];
   const hasValidTopic = draft.topic.trim().length >= 2;
   const hasValidSubject = Boolean(draft.subjectId);
-  const hasInvalidEntry = entries.some((entry) => entry.question.trim().length < 2 || entry.answer.trim().length < 2);
+  const hasInvalidEntry = entries.some(
+    (entry) => stripHtml(entry.question).trim().length < 2 || stripHtml(entry.answer).trim().length < 2,
+  );
   const canSubmit = hasValidSubject && hasValidTopic && entries.length > 0 && !hasInvalidEntry;
+
+  let topicExplanation = "";
+  if (!hasValidSubject) topicExplanation = "Select a subject first.";
+  else if (!hasValidTopic) topicExplanation = "Enter a topic with at least 2 characters.";
+  else if (entries.length === 0) topicExplanation = "Add at least one question.";
+  else if (hasInvalidEntry) topicExplanation = "Every question and answer needs at least 2 characters.";
 
   return (
     <ModalFrame isDark={isDark} onClose={onClose} title={title}>
@@ -1054,17 +1108,45 @@ function AdminTopicModal({
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-3 border-t pt-4">
-          <button
-            className={cn("rounded-2xl border px-5 py-3 text-sm font-medium", isDark ? "border-slate-700 bg-slate-950 text-slate-200" : "border-slate-200 bg-white text-slate-700")}
-            onClick={onClose}
-            type="button"
-          >
-            Cancel
-          </button>
-          <button className="button-primary !px-5 !py-3" disabled={isSaving || !canSubmit} onClick={onSubmit} type="button">
-            {isSaving ? "Saving..." : "Save topic"}
-          </button>
+        <div className="space-y-3 border-t pt-4">
+          {topicSaveError ? (
+            <div className={cn(
+              "rounded-[20px] border px-4 py-3 text-sm",
+              isDark ? "border-rose-500/20 bg-rose-500/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-700",
+            )}>
+              {topicSaveError}
+            </div>
+          ) : topicExplanation ? (
+            <div className={cn(
+              "rounded-[20px] border px-4 py-3 text-sm",
+              isDark ? "border-amber-500/20 bg-amber-500/10 text-amber-200" : "border-amber-200 bg-amber-50 text-amber-800",
+            )}>
+              {topicExplanation}
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            <button
+              className={cn(
+                "rounded-2xl border px-5 py-3 text-sm font-medium transition",
+                isDark
+                  ? "border-slate-700 bg-slate-950 text-slate-200 hover:border-slate-600 hover:bg-slate-900"
+                  : "border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50",
+              )}
+              onClick={onClose}
+              type="button"
+            >
+              Cancel
+            </button>
+            <button
+              className="button-primary !px-5 !py-3"
+              disabled={isSaving || !canSubmit}
+              onClick={onSubmit}
+              type="button"
+            >
+              {isSaving ? "Saving..." : "Save topic"}
+            </button>
+          </div>
         </div>
       </div>
     </ModalFrame>
@@ -1112,6 +1194,7 @@ export function AdminSubjectSummaryModulePage() {
   const [savedTopicEntryClientIds, setSavedTopicEntryClientIds] = useState(() => new Set<string>());
   const [modalMode, setModalMode] = useState<"entry" | "topic" | null>(null);
   const [topicSaveError, setTopicSaveError] = useState<string | null>(null);
+  const [entrySaveError, setEntrySaveError] = useState<string | null>(null);
 
   const entriesQuery = useQuery({
     queryFn: () => fetchSubjectSummaryModuleAdminEntries({ ...filters, page: 1, pageSize: 50 }),
@@ -1136,6 +1219,27 @@ export function AdminSubjectSummaryModulePage() {
       }
 
       return createSubjectSummaryModuleEntry(draft);
+    },
+    onMutate: () => {
+      setEntrySaveError(null);
+      setTopicSaveError(null);
+    },
+    onError: (error: any) => {
+      const validation = error?.response?.data?.error?.details?.fieldErrors;
+      const validationHints = validation
+        ? Object.entries(validation)
+            .map(([field, messages]) => {
+              const messageList = Array.isArray(messages) ? (messages as string[]) : [String(messages)];
+              return `${field}: ${messageList.join("; ")}`;
+            })
+            .join(" | ")
+        : null;
+      setEntrySaveError(
+        validationHints ??
+          error?.response?.data?.error?.message ??
+          error?.message ??
+          "We couldn't save this subject summary right now."
+      );
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.subjectSummaryModuleAdminEntries(filters) });
@@ -1163,6 +1267,27 @@ export function AdminSubjectSummaryModulePage() {
       }
 
       return { createdCount: sanitizedEntries.length };
+    },
+    onMutate: () => {
+      setTopicSaveError(null);
+      setEntrySaveError(null);
+    },
+    onError: (error: any) => {
+      const validation = error?.response?.data?.error?.details?.fieldErrors;
+      const validationHints = validation
+        ? Object.entries(validation)
+            .map(([field, messages]) => {
+              const messageList = Array.isArray(messages) ? (messages as string[]) : [String(messages)];
+              return `${field}: ${messageList.join("; ")}`;
+            })
+            .join(" | ")
+        : null;
+      setTopicSaveError(
+        validationHints ??
+          error?.response?.data?.error?.message ??
+          error?.message ??
+          "We couldn't save this topic right now."
+      );
     },
     onSuccess: async () => {
       setTopicSaveError(null);
@@ -1196,9 +1321,6 @@ export function AdminSubjectSummaryModulePage() {
         subjectId: filters.subjectId,
         topic: filters.topic
       });
-    },
-    onError: (error: any) => {
-      setTopicSaveError(error?.response?.data?.error?.message || error?.message || "Could not save this topic right now.");
     }
   });
   const deleteMutation = useMutation({
@@ -1662,11 +1784,14 @@ export function AdminSubjectSummaryModulePage() {
           onClose={() => {
             setModalMode(null);
             setEditingEntry(null);
+            setEntrySaveError(null);
+            setTopicSaveError(null);
             setDraft(createDraft("", filters.moduleType));
           }}
           onSubmit={() => saveMutation.mutate()}
           onSubmitAndAddQuestions={handleSaveAndAddQuestions}
           relatedCases={formOptionsQuery.data?.relatedCases ?? []}
+          saveError={entrySaveError}
           subjects={formOptionsQuery.data?.subjects ?? []}
           title="Edit subject summary"
         />
@@ -1681,12 +1806,14 @@ export function AdminSubjectSummaryModulePage() {
           onClose={() => {
             setModalMode(null);
             setTopicSaveError(null);
+            setEntrySaveError(null);
             setSavedTopicEntryClientIds(new Set());
           }}
           onSubmit={() => bulkCreateMutation.mutate()}
           onUpdate={(nextDraft) => setTopicDraft(nextDraft)}
           subjects={formOptionsQuery.data?.subjects ?? []}
           title={filters.topic ? "Add questions" : "Create topic summary"}
+          topicSaveError={topicSaveError}
         />
       ) : null}
 
