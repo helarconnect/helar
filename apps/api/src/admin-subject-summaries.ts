@@ -13,7 +13,9 @@ import { runBatchTransaction } from "./lib/transactions.js";
 
 const subjectFiltersSchema = z.object({
   page: z.coerce.number().int().min(1).max(10_000).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(10),
+  // Max 500 per page supports reference dropdowns and bulk selection workflows
+  // in the admin workspace (e.g., Study Notes FAB and subject pickers).
+  pageSize: z.coerce.number().int().min(1).max(500).default(10),
   search: z.string().trim().max(120).default(""),
   sortBy: z.enum(["createdAt", "displayOrder", "name", "updatedAt"]).default("displayOrder"),
   sortOrder: z.enum(["asc", "desc"]).default("asc"),
@@ -22,7 +24,7 @@ const subjectFiltersSchema = z.object({
 
 const topicFiltersSchema = z.object({
   page: z.coerce.number().int().min(1).max(10_000).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(10),
+  pageSize: z.coerce.number().int().min(1).max(500).default(10),
   search: z.string().trim().max(120).default(""),
   sortBy: z.enum(["createdAt", "displayOrder", "name", "updatedAt"]).default("displayOrder"),
   sortOrder: z.enum(["asc", "desc"]).default("asc"),
@@ -32,7 +34,7 @@ const topicFiltersSchema = z.object({
 
 const caseFiltersSchema = z.object({
   page: z.coerce.number().int().min(1).max(10_000).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(10),
+  pageSize: z.coerce.number().int().min(1).max(500).default(10),
   search: z.string().trim().max(120).default(""),
   sortBy: z.enum(["createdAt", "title", "updatedAt", "year"]).default("updatedAt"),
   sortOrder: z.enum(["asc", "desc"]).default("desc"),

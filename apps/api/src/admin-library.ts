@@ -12,7 +12,8 @@ const adminLibrarySectionSchema = z.enum(["law-reports", "subject-summaries", "c
 const adminLibraryFiltersSchema = z.object({
   materialType: z.union([z.nativeEnum(MaterialType), z.literal("all")]).default("all"),
   page: z.coerce.number().int().min(1).max(10_000).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(12),
+  // Raised to 500 for consistency with other admin list endpoints.
+  pageSize: z.coerce.number().int().min(1).max(500).default(12),
   search: z.string().trim().max(120).optional().default(""),
   sortBy: z.enum(["createdAt", "estimatedMins", "title", "updatedAt"]).default("updatedAt"),
   sortOrder: z.enum(["asc", "desc"]).default("desc")
@@ -456,6 +457,17 @@ export function parseAdminLibraryMaterialInput(body: unknown) {
   return adminLibraryMaterialInputSchema.parse(body);
 }
 
+// Safe wrapper for auxiliary summary queries. Returns fallback value on failure
+// so the primary list request still succeeds even when optional metrics error.
+async function safely<T>(promise: Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await promise;
+  } catch (error) {
+    console.error("[admin-library] summary query failed, using fallback", error instanceof Error ? error.message : error);
+    return fallback;
+  }
+}
+
 export async function listAdminLibraryMaterials(
   section: AdminLibrarySection,
   filters: AdminLibraryFilters,
@@ -468,7 +480,10 @@ export async function listAdminLibraryMaterials(
   }
 
   const where = createLibraryMaterialWhere(category.id, filters, audience);
-  const [totalItems, materials, totalInSection, downloadableCount, recentUploadsCount, nextReportNumber, engagementMaterials] = await Promise.all([
+  const lawReports = isLawReportsSection(section);
+
+  // Primary pagination queries - failures here are surfaced to the caller.
+  const [totalItems, materials, totalInSection, downloadableCount, recentUploadsCount] = await Promise.all([
     prisma.studyMaterial.count({ where }),
     prisma.studyMaterial.findMany({
       where,
@@ -510,76 +525,114 @@ export async function listAdminLibraryMaterials(
         deletedAt: null,
         ...(audience === "student" ? { publicationStatus: ContentPublicationStatus.PUBLISHED } : {})
       }
-    }),
-    isLawReportsSection(section) ? buildNextLawReportNumber(prisma, category.id) : Promise.resolve(null),
-    isLawReportsSection(section)
-      ? prisma.studyMaterial.findMany({
-          where: {
-            categoryId: category.id,
-            deletedAt: null,
-            ...(audience === "student" ? { publicationStatus: ContentPublicationStatus.PUBLISHED } : {})
-          },
-          select: {
-            estimatedMins: true,
-            id: true,
-            reportNumber: true,
-            title: true,
-            readingHistory: {
-              where: {
-                deletedAt: null
-              },
-              select: {
-                progressPct: true,
-                timeSpentSeconds: true
-              }
-            }
-          }
-        })
-      : Promise.resolve([])
+    })
   ]);
 
-  const averageReadTimeAggregate = await prisma.studyMaterial.aggregate({
-    where: {
-      categoryId: category.id,
-      deletedAt: null,
-      ...(audience === "student" ? { publicationStatus: ContentPublicationStatus.PUBLISHED } : {})
-    },
-    _avg: {
-      estimatedMins: true
-    }
-  });
-
-  const lawReportEngagement = isLawReportsSection(section)
-    ? (() => {
-        const reportMetrics = engagementMaterials.map((material) => {
-          const visits = material.readingHistory.length;
-          const totalTimeSpentSeconds = material.readingHistory.reduce((sum, history) => {
-            if (history.timeSpentSeconds > 0) {
-              return sum + history.timeSpentSeconds;
+  // Auxiliary/summary queries - isolated with safe fallbacks to avoid 500s on
+  // metrics-only regressions (e.g., readingHistory include issues, aggregate errors).
+  const [nextReportNumber, engagementMaterials, averageReadTimeAggregate] = await Promise.all([
+    lawReports ? safely(buildNextLawReportNumber(prisma, category.id), null as string | null) : Promise.resolve(null),
+    lawReports
+      ? safely(
+          prisma.studyMaterial.findMany({
+            where: {
+              categoryId: category.id,
+              deletedAt: null,
+              ...(audience === "student" ? { publicationStatus: ContentPublicationStatus.PUBLISHED } : {})
+            },
+            select: {
+              estimatedMins: true,
+              id: true,
+              reportNumber: true,
+              title: true,
+              readingHistory: {
+                where: {
+                  deletedAt: null
+                },
+                select: {
+                  progressPct: true,
+                  timeSpentSeconds: true
+                }
+              }
             }
+          }),
+          [] as Array<{
+            estimatedMins: number;
+            id: string;
+            reportNumber: string | null;
+            title: string;
+            readingHistory: Array<{ progressPct: number; timeSpentSeconds: number }>;
+          }>
+        )
+      : Promise.resolve([]),
+    safely(
+      prisma.studyMaterial.aggregate({
+        where: {
+          categoryId: category.id,
+          deletedAt: null,
+          ...(audience === "student" ? { publicationStatus: ContentPublicationStatus.PUBLISHED } : {})
+        },
+        _avg: {
+          estimatedMins: true
+        }
+      }),
+      { _avg: { estimatedMins: null } }
+    )
+  ]);
 
-            return sum + estimateMinutesFromReadingProgress(material.estimatedMins, history.progressPct) * 60;
-          }, 0);
+  // Law-report engagement reduction is computed in-process but still wrapped
+  // defensively in case of unexpected data shape inconsistencies.
+  let lawReportEngagement: {
+    topReports: Array<{
+      id: string;
+      reportNumber: string | null;
+      title: string;
+      totalHoursSpent: number;
+      visits: number;
+    }>;
+    totalHoursSpent: number;
+    totalVisits: number;
+  } | null = null;
 
-          return {
-            id: material.id,
-            reportNumber: material.reportNumber,
-            title: material.title,
-            totalHoursSpent: toRoundedHoursFromSeconds(totalTimeSpentSeconds),
-            visits
-          };
-        });
+  if (lawReports) {
+    try {
+      const reportMetrics = engagementMaterials.map((material) => {
+        const readingHistoryEntries = material.readingHistory ?? [];
+        const visits = readingHistoryEntries.length;
+        const totalTimeSpentSeconds = readingHistoryEntries.reduce((sum, history) => {
+          if (history.timeSpentSeconds > 0) {
+            return sum + history.timeSpentSeconds;
+          }
 
-        const totalVisits = reportMetrics.reduce((sum, report) => sum + report.visits, 0);
-        const totalHoursSpent = Number((reportMetrics.reduce((sum, report) => sum + report.totalHoursSpent, 0)).toFixed(1));
+          return sum + estimateMinutesFromReadingProgress(material.estimatedMins ?? 0, history.progressPct ?? 0) * 60;
+        }, 0);
 
         return {
-          topReports: reportMetrics.sort((left, right) => right.visits - left.visits || right.totalHoursSpent - left.totalHoursSpent).slice(0, 5),
-          totalHoursSpent,
-          totalVisits
+          id: material.id,
+          reportNumber: material.reportNumber,
+          title: material.title,
+          totalHoursSpent: toRoundedHoursFromSeconds(totalTimeSpentSeconds),
+          visits
         };
-      })()
-    : null;
+      });
+
+      const totalVisits = reportMetrics.reduce((sum, report) => sum + report.visits, 0);
+      const totalHoursSpent = Number(reportMetrics.reduce((sum, report) => sum + report.totalHoursSpent, 0).toFixed(1));
+
+      lawReportEngagement = {
+        topReports: reportMetrics.sort((left, right) => right.visits - left.visits || right.totalHoursSpent - left.totalHoursSpent).slice(0, 5),
+        totalHoursSpent,
+        totalVisits
+      };
+    } catch (error) {
+      console.error("[admin-library] law report engagement reduction failed", error instanceof Error ? error.message : error);
+      lawReportEngagement = {
+        topReports: [],
+        totalHoursSpent: 0,
+        totalVisits: 0
+      };
+    }
+  }
 
   return {
     availableMaterialTypes: getAllowedMaterialTypes(section),

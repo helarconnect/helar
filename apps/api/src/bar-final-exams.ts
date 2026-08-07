@@ -7,7 +7,7 @@ import { containsText } from "./lib/text-search.js";
 
 const adminQuestionFiltersSchema = z.object({
   page: z.coerce.number().int().min(1).max(10_000).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  pageSize: z.coerce.number().int().min(1).max(500).default(20),
   search: z.string().trim().max(160).default(""),
   status: z.union([z.nativeEnum(BarFinalExamQuestionStatus), z.literal("all")]).default("all"),
   subjectId: recordIdSchema.optional()
@@ -33,7 +33,7 @@ const studentQuestionsQuerySchema = z.object({
 
 const adminMcqQuestionFiltersSchema = z.object({
   page: z.coerce.number().int().min(1).max(10_000).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  pageSize: z.coerce.number().int().min(1).max(500).default(20),
   search: z.string().trim().max(160).default(""),
   status: z.union([z.nativeEnum(BarFinalExamQuestionStatus), z.literal("all")]).default("all"),
   subjectId: recordIdSchema.optional()
