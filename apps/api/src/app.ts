@@ -651,6 +651,40 @@ function createDatabaseFallbackErrorMessage() {
   return "The MongoDB database is not ready yet. Helar is using the temporary auth fallback so you can keep working."
 }
 
+type DatabaseErrorClassification =
+  | "NO_USERS"
+  | "DATABASE_UNREACHABLE"
+  | "AUTH_SCHEMA_MISMATCH"
+  | "UNKNOWN";
+
+// Best-effort classifier for exceptions thrown during sign-in flow. Used to
+// tailor the user-facing error instead of blanket "seed the users" messages.
+function classifyDatabaseError(error: unknown): DatabaseErrorClassification {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+
+  // Prisma connection / network errors.
+  if (/P\d{4}/.test(message) && /(client version|connection|could not connect|reach|timed out|ETIMEDOUT|ECONNREFUSED|MongoNetworkError)/i.test(message)) {
+    return "DATABASE_UNREACHABLE";
+  }
+  if (/(MongoNetworkError|failed to connect|server selection|connection error|no valid endpoints|DATABASE_URL)/i.test(message)) {
+    return "DATABASE_UNREACHABLE";
+  }
+
+  // Prisma validation errors (schema/relation mismatches between code and DB).
+  if (/P20(09|10|11|12|13|14|24|25|30|32)/.test(message) || /Unknown.*field|Invalid.*include|selection set/i.test(message)) {
+    return "AUTH_SCHEMA_MISMATCH";
+  }
+
+  // "No users" heuristic — only reliable when the error explicitly mentions an
+  // empty collection or missing data, since `findUnique` returning null never
+  // throws (it's handled in persistSignIn and returns 401 instead).
+  if (/(no users|no records|0 users|seed the users|User collection)/i.test(message)) {
+    return "NO_USERS";
+  }
+
+  return "UNKNOWN";
+}
+
 async function registerUserDevice(
   tx: Prisma.TransactionClient,
   userId: string,
@@ -2493,7 +2527,15 @@ export function createApp(options: AppOptions = {}) {
         });
       }
 
-      console.error(error);
+      // Classify the failure so clients and admins can act on it.
+      const classification = classifyDatabaseError(error);
+      console.error("[auth:demo-sign-in] sign-in failure", {
+        email: parsed.data.email,
+        classification,
+        name: error instanceof Error ? error.constructor.name : typeof error,
+        message: error instanceof Error ? error.message : String(error)
+      });
+
       if (allowAuthFallback) {
         const fallbackUser = buildFallbackUser(parsed.data.email);
         return response.json({
@@ -2506,11 +2548,35 @@ export function createApp(options: AppOptions = {}) {
         });
       }
 
-      return response.status(503).json({
+      if (classification === "NO_USERS") {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message:
+              "The MongoDB database is not ready yet. No users were found in the database; seed the users table before signing in."
+          }
+        });
+      }
+
+      if (classification === "DATABASE_UNREACHABLE") {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message:
+              "The MongoDB database is temporarily unreachable. Check the DATABASE_URL and network connectivity, then retry."
+          }
+        });
+      }
+
+      // Unexpected system error — surface a stable, actionable 500 without
+      // leaking internals, but keep the actual exception in server logs (above).
+      return response.status(500).json({
         success: false,
         error: {
-          code: "DATABASE_UNAVAILABLE",
-          message: "The MongoDB database is not ready yet. Seed the users before signing in."
+          code: "AUTH_SIGN_IN_FAILED",
+          message: "Sign-in failed unexpectedly. Check the server logs for details."
         }
       });
     }
