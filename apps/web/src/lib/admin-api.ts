@@ -1469,6 +1469,41 @@ export type AdminDashboardOverview = {
   }>;
 };
 
+// Extracts the server's user-facing error message from an Axios/AuthError.
+// When undefined the caller should fall back to its own generic toast text.
+export function extractServerErrorMessage(error: unknown): string | undefined {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "response" in error &&
+    typeof (error as { response?: unknown }).response === "object" &&
+    (error as { response?: { data?: unknown } }).response !== null
+  ) {
+    const data = (error as { response: { data: unknown } }).response.data;
+
+    if (
+      typeof data === "object" &&
+      data !== null &&
+      "error" in data &&
+      typeof (data as { error?: unknown }).error === "object" &&
+      (data as { error: unknown }).error !== null
+    ) {
+      const serverError = (data as { error: { message?: unknown } }).error;
+      const message = (serverError as { message?: unknown }).message;
+
+      if (typeof message === "string" && message.trim().length > 0) {
+        return message;
+      }
+    }
+  }
+
+  if (error instanceof Error && typeof error.message === "string" && error.message.trim().length > 0) {
+    return error.message;
+  }
+
+  return undefined;
+}
+
 function createQueryParams(filters: Record<string, string | number | boolean | undefined | null>) {
   const params = new URLSearchParams();
 

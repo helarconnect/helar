@@ -382,10 +382,13 @@ async function buildNextLawReportNumber(
   const currentYear = new Date().getFullYear();
   const prefix = `Helar-${currentYear}-`;
 
+  // Scan ALL material records in the category regardless of deletedAt.
+  // The `reportNumber` field has a database-level UNIQUE constraint that
+  // applies across soft-deleted rows too, so reusing a deleted report's
+  // number would throw P2002 and block saves.
   const reports = await db.studyMaterial.findMany({
     where: {
       categoryId,
-      deletedAt: null,
       reportNumber: {
         startsWith: prefix
       }
@@ -404,13 +407,63 @@ async function buildNextLawReportNumber(
     }
 
     return Math.max(currentHighest, parsedValue);
-  }, 500);
+  }, 0);
 
-  return `${prefix}${highestSequence + 1}`;
+  // Guarantee uniqueness by probing the DB for the next N candidates.
+  // Covers race conditions even when the calling transaction reads an older
+  // snapshot under MongoDB's multi-document transaction isolation.
+  const probeLimit = 50;
+  for (let offset = 1; offset <= probeLimit; offset += 1) {
+    const candidate = `${prefix}${highestSequence + offset}`;
+    const existing = await db.studyMaterial.findFirst({
+      where: { reportNumber: candidate },
+      select: { id: true }
+    });
+
+    if (!existing) {
+      return candidate;
+    }
+  }
+
+  throw new Error("LAW_REPORT_SEQUENCE_EXHAUSTED");
+}
+
+// Fire-and-forget style audit logger. Audit writes MUST never block or fail
+// the business operation they're observing — the material was already saved,
+// so losing an audit log is acceptable; surfacing a save error to the admin
+// when the material actually persisted is not.
+async function tryCreateLibraryAuditLog(
+  actorUserId: string,
+  action: string,
+  resourceId: string,
+  payload?: Prisma.InputJsonValue
+) {
+  try {
+    await prisma.auditLog.create({
+      data: {
+        action,
+        payload,
+        resource: resourceId,
+        userId: actorUserId
+      }
+    });
+  } catch (error) {
+    console.error("[admin-library] auditLog write skipped", {
+      action,
+      resourceId,
+      name: error instanceof Error ? error.constructor.name : typeof error,
+      message: error instanceof Error ? error.message : String(error)
+    });
+  }
 }
 
 async function runSerializableWrite<T>(operation: () => Promise<T>) {
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  // Bump to 8 attempts because report-number collisions are common when the
+  // sequence scanner starts from a stale snapshot, and each retry re-reads
+  // the highest existing number inside the transaction before writing.
+  const maxAttempts = 8;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
       return await operation();
     } catch (error) {
@@ -418,9 +471,14 @@ async function runSerializableWrite<T>(operation: () => Promise<T>) {
         error instanceof Prisma.PrismaClientKnownRequestError &&
         (error.code === "P2002" || error.code === "P2034");
 
-      if (!isRetriable || attempt === 2) {
+      if (!isRetriable || attempt === maxAttempts - 1) {
         throw error;
       }
+
+      // Add a small linear+random delay between retries so concurrent writers
+      // don't re-collide on the same newly-computed sequence number.
+      const delayMs = 25 + attempt * 15 + Math.floor(Math.random() * 30);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }
 
@@ -976,7 +1034,7 @@ export async function createAdminLibraryMaterial(
       })
   );
 
-  await createLibraryAuditLog(actorUserId, "admin.library.material.created", material.id, {
+  await tryCreateLibraryAuditLog(actorUserId, "admin.library.material.created", material.id, {
     categorySlug: category.slug,
     reportDate: material.reportDate?.toISOString() ?? null,
     materialType: material.materialType,
@@ -1059,7 +1117,7 @@ export async function updateAdminLibraryMaterial(
       })
   );
 
-  await createLibraryAuditLog(actorUserId, "admin.library.material.updated", material.id, {
+  await tryCreateLibraryAuditLog(actorUserId, "admin.library.material.updated", material.id, {
     categorySlug: category.slug,
     reportDate: material.reportDate?.toISOString() ?? null,
     materialType: material.materialType,
@@ -1102,7 +1160,7 @@ export async function deleteAdminLibraryMaterial(
     }
   });
 
-  await createLibraryAuditLog(actorUserId, "admin.library.material.deleted", materialId, {
+  await tryCreateLibraryAuditLog(actorUserId, "admin.library.material.deleted", materialId, {
     categorySlug: category.slug,
     reportNumber: existingMaterial.reportNumber,
     title: existingMaterial.title

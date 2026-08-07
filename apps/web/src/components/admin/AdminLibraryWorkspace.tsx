@@ -31,6 +31,7 @@ import { useTheme } from "@/hooks/useTheme";
 import {
   createAdminLibraryMaterial,
   deleteAdminLibraryMaterial,
+  extractServerErrorMessage,
   fetchAdminLibraryMaterials,
   type AdminLibraryFilters,
   type AdminLibraryMaterial,
@@ -1048,8 +1049,10 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
       setIsModalOpen(false);
       void queryClient.invalidateQueries({ queryKey: ["admin-library", section] });
     },
-    onError: () => {
-      showToast(isLawReports ? "Could not create the law report right now." : "Could not create the library material right now.", "error");
+    onError: (error) => {
+      const serverMessage = extractServerErrorMessage(error);
+      const fallback = isLawReports ? "Could not create the law report right now." : "Could not create the library material right now.";
+      showToast(serverMessage ?? fallback, "error");
     }
   });
 
@@ -1070,8 +1073,10 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
       setIsModalOpen(false);
       void queryClient.invalidateQueries({ queryKey: ["admin-library", section] });
     },
-    onError: () => {
-      showToast(isLawReports ? "Could not update the law report right now." : "Could not update the library material right now.", "error");
+    onError: (error) => {
+      const serverMessage = extractServerErrorMessage(error);
+      const fallback = isLawReports ? "Could not update the law report right now." : "Could not update the library material right now.";
+      showToast(serverMessage ?? fallback, "error");
     }
   });
 
@@ -1081,8 +1086,10 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
       showToast(isLawReports ? "Law report removed successfully." : "Library material removed successfully.", "success");
       void queryClient.invalidateQueries({ queryKey: ["admin-library", section] });
     },
-    onError: () => {
-      showToast(isLawReports ? "Could not remove the law report right now." : "Could not remove the library material right now.", "error");
+    onError: (error) => {
+      const serverMessage = extractServerErrorMessage(error);
+      const fallback = isLawReports ? "Could not remove the law report right now." : "Could not remove the library material right now.";
+      showToast(serverMessage ?? fallback, "error");
     }
   });
 

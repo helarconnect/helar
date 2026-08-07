@@ -685,6 +685,100 @@ function classifyDatabaseError(error: unknown): DatabaseErrorClassification {
   return "UNKNOWN";
 }
 
+type AdminLibraryFailureClassification =
+  | "REPORT_NUMBER_COLLISION"
+  | "REPORT_SEQUENCE_EXHAUSTED"
+  | "LIBRARY_CATEGORY_MISSING"
+  | "LIBRARY_MATERIAL_TYPE_MISMATCH"
+  | "TRANSACTION_CONFLICT"
+  | "DATABASE_UNAVAILABLE"
+  | "UNKNOWN";
+
+// Translate a caught library-write exception into a human-usable category.
+// The response surfaces the raw `message` on 4xx and a user-safe hint on 5xx,
+// while the server keeps the full error in console.error for forensics.
+function classifyAdminLibraryWriteError(error: unknown): AdminLibraryFailureClassification {
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    if (error.code === "P2002") {
+      const target = Array.isArray((error.meta as { target?: unknown })?.target)
+        ? String((error.meta as { target: unknown }).target)
+        : "";
+      if (/reportNumber/i.test(target)) return "REPORT_NUMBER_COLLISION";
+      return "TRANSACTION_CONFLICT";
+    }
+    if (error.code === "P2034") return "TRANSACTION_CONFLICT";
+    if (error.code === "P2021" || error.code === "P2022" || error.code === "P1000") return "DATABASE_UNAVAILABLE";
+  }
+
+  if (error instanceof Error) {
+    const msg = error.message;
+    if (/REPORT_NUMBER_COLLISION/i.test(msg)) return "REPORT_NUMBER_COLLISION";
+    if (/LAW_REPORT_SEQUENCE_EXHAUSTED/i.test(msg)) return "REPORT_SEQUENCE_EXHAUSTED";
+    if (/LIBRARY_CATEGORY_NOT_FOUND/i.test(msg)) return "LIBRARY_CATEGORY_MISSING";
+    if (/LIBRARY_MATERIAL_TYPE_INVALID|SECTION_MATERIAL_TYPE/i.test(msg)) return "LIBRARY_MATERIAL_TYPE_MISMATCH";
+    if (/SERIALIZABLE_WRITE_FAILED/i.test(msg)) return "TRANSACTION_CONFLICT";
+  }
+
+  const msg = String(error instanceof Error ? error.message : error);
+  if (/MongoNetworkError|ECONNRESET|connection/i.test(msg)) return "DATABASE_UNAVAILABLE";
+
+  return "UNKNOWN";
+}
+
+function buildAdminLibraryFailureResponse(
+  classification: AdminLibraryFailureClassification,
+  error: unknown,
+  fallbackMessage: string
+): { status: number; code: string; message: string } {
+  const rawMessage = error instanceof Error ? error.message : fallbackMessage;
+
+  switch (classification) {
+    case "REPORT_NUMBER_COLLISION":
+      return {
+        status: 409,
+        code: "LAW_REPORT_NUMBER_COLLISION",
+        message: "The generated law report number collided with an existing record. Please try again."
+      };
+    case "REPORT_SEQUENCE_EXHAUSTED":
+      return {
+        status: 409,
+        code: "LAW_REPORT_SEQUENCE_EXHAUSTED",
+        message: "Unable to generate a unique law report number. Please contact support."
+      };
+    case "LIBRARY_CATEGORY_MISSING":
+      return {
+        status: 400,
+        code: "LIBRARY_CATEGORY_NOT_FOUND",
+        message: "The requested library section does not exist. Please refresh and try again."
+      };
+    case "LIBRARY_MATERIAL_TYPE_MISMATCH":
+      return {
+        status: 400,
+        code: "LIBRARY_MATERIAL_TYPE_INVALID",
+        message: rawMessage
+      };
+    case "TRANSACTION_CONFLICT":
+      return {
+        status: 409,
+        code: "LIBRARY_TRANSACTION_CONFLICT",
+        message: "Another admin may have saved a law report at the same time. Please try again."
+      };
+    case "DATABASE_UNAVAILABLE":
+      return {
+        status: 503,
+        code: "DATABASE_UNAVAILABLE",
+        message: "Database connection lost. Please try again in a moment."
+      };
+    case "UNKNOWN":
+    default:
+      return {
+        status: 500,
+        code: fallbackMessage.includes("update") ? "ADMIN_LIBRARY_UPDATE_FAILED" : fallbackMessage.includes("remove") ? "ADMIN_LIBRARY_DELETE_FAILED" : "ADMIN_LIBRARY_CREATE_FAILED",
+        message: fallbackMessage
+      };
+  }
+}
+
 async function registerUserDevice(
   tx: Prisma.TransactionClient,
   userId: string,
@@ -8066,12 +8160,25 @@ export function createApp(options: AppOptions = {}) {
           });
         }
 
-        console.error(error);
-        return response.status(500).json({
+        const classification = classifyAdminLibraryWriteError(error);
+        const failure = buildAdminLibraryFailureResponse(
+          classification,
+          error,
+          "Could not create the library material."
+        );
+
+        console.error("[admin-library:create] write failed", {
+          classification,
+          code: failure.code,
+          name: error instanceof Error ? error.constructor.name : typeof error,
+          message: error instanceof Error ? error.message : String(error)
+        });
+
+        return response.status(failure.status).json({
           success: false,
           error: {
-            code: "ADMIN_LIBRARY_CREATE_FAILED",
-            message: "Could not create the library material."
+            code: failure.code,
+            message: failure.message
           }
         });
       }
@@ -8130,12 +8237,25 @@ export function createApp(options: AppOptions = {}) {
           });
         }
 
-        console.error(error);
-        return response.status(500).json({
+        const classification = classifyAdminLibraryWriteError(error);
+        const failure = buildAdminLibraryFailureResponse(
+          classification,
+          error,
+          "Could not update the library material."
+        );
+
+        console.error("[admin-library:update] write failed", {
+          classification,
+          code: failure.code,
+          name: error instanceof Error ? error.constructor.name : typeof error,
+          message: error instanceof Error ? error.message : String(error)
+        });
+
+        return response.status(failure.status).json({
           success: false,
           error: {
-            code: "ADMIN_LIBRARY_UPDATE_FAILED",
-            message: "Could not update the library material."
+            code: failure.code,
+            message: failure.message
           }
         });
       }
@@ -8187,12 +8307,25 @@ export function createApp(options: AppOptions = {}) {
           });
         }
 
-        console.error(error);
-        return response.status(500).json({
+        const classification = classifyAdminLibraryWriteError(error);
+        const failure = buildAdminLibraryFailureResponse(
+          classification,
+          error,
+          "Could not remove the library material."
+        );
+
+        console.error("[admin-library:delete] write failed", {
+          classification,
+          code: failure.code,
+          name: error instanceof Error ? error.constructor.name : typeof error,
+          message: error instanceof Error ? error.message : String(error)
+        });
+
+        return response.status(failure.status).json({
           success: false,
           error: {
-            code: "ADMIN_LIBRARY_DELETE_FAILED",
-            message: "Could not remove the library material."
+            code: failure.code,
+            message: failure.message
           }
         });
       }
