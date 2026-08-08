@@ -909,7 +909,7 @@ export function AdminLawReportReader() {
   }
 
   return (
-    <div className="space-y-6 xl:h-[calc(100vh-8rem)] xl:overflow-hidden">
+    <div className="space-y-6 min-w-0 xl:h-[calc(100vh-8rem)] xl:overflow-hidden">
       {shareNotice ? (
         <div className="pointer-events-none fixed right-5 top-5 z-[120]">
           <div
@@ -929,8 +929,8 @@ export function AdminLawReportReader() {
           </div>
         </div>
       ) : null}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div ref={titleRef}>
+      <div className="flex flex-wrap items-center justify-between gap-4 min-w-0">
+        <div ref={titleRef} className="min-w-0 w-full md:w-auto md:flex-1">
           <Link
             className={cn(
               "inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium transition",
@@ -944,11 +944,11 @@ export function AdminLawReportReader() {
             {backLabel}
           </Link>
           <p className={cn("mt-4 text-xs uppercase tracking-[0.24em]", isDark ? "text-slate-500" : "text-slate-400")}>Law report reader</p>
-          <h1 className={cn("mt-2 font-heading text-4xl leading-tight", isDark ? "text-white" : "text-slate-950")}>
+          <h1 className={cn("mt-2 font-heading text-3xl sm:text-4xl leading-tight break-words max-w-full", isDark ? "text-white" : "text-slate-950")}>
             {renderHighlightedText(report.title, searchTerm, highlightClassName, "title")}
           </h1>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 min-w-0">
           {[
             report.reportNumber ?? "Pending case number",
             prettifyCourt(report.materialType),
@@ -956,7 +956,7 @@ export function AdminLawReportReader() {
           ].map((item) => (
             <span
               className={cn(
-                "rounded-full border px-4 py-2 text-sm",
+                "rounded-full border px-4 py-2 text-sm break-words max-w-full",
                 isDark ? "border-slate-700 bg-slate-900 text-slate-200" : "border-slate-200 bg-white text-slate-700"
               )}
               key={item}
@@ -967,10 +967,10 @@ export function AdminLawReportReader() {
         </div>
       </div>
 
-      <div className="items-start gap-6 xl:grid xl:h-[calc(100%-8.5rem)] xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-stretch xl:overflow-hidden" ref={contentAreaRef}>
-        <div className="space-y-6 xl:h-full xl:min-h-0 xl:overflow-y-auto xl:pr-2" ref={contentScrollRef}>
-          <Surface className="p-6 lg:p-7" isDark={isDark}>
-            <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4" ref={overviewRef}>
+      <div className="items-start gap-6 min-w-0 xl:grid xl:h-[calc(100%-8.5rem)] xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-stretch xl:overflow-hidden" ref={contentAreaRef}>
+        <div className="space-y-6 min-w-0 xl:h-full xl:min-h-0 xl:overflow-y-auto xl:pr-2" ref={contentScrollRef}>
+          <Surface className="p-5 sm:p-6 lg:p-7 min-w-0" isDark={isDark}>
+            <section className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 min-w-0" ref={overviewRef}>
               {(
                 [
                   { icon: Scale, id: "court", label: "Court", value: prettifyCourt(report.materialType) },
@@ -1007,19 +1007,19 @@ export function AdminLawReportReader() {
             </section>
           </Surface>
 
-          <Surface className="p-6 lg:p-7" isDark={isDark}>
+          <Surface className="p-5 sm:p-6 lg:p-7 min-w-0 overflow-hidden" isDark={isDark}>
             {isStudentReader && contentAccess?.isPreview ? (
               <div
                 className={cn(
-                  "mb-6 rounded-[24px] border px-5 py-4",
+                  "mb-6 rounded-[24px] border px-4 sm:px-5 py-4 min-w-0",
                   isDark ? "border-amber-500/30 bg-amber-500/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-800"
                 )}
               >
                 <p className="text-xs uppercase tracking-[0.18em]">Preview only</p>
-                <p className="mt-2 text-sm leading-7">
+                <p className="mt-2 text-sm leading-7 break-words">
                   {contentAccess.upgradeMessage} You can read up to {contentAccess.previewWordLimit} words until a subscription is active.
                 </p>
-                <Link className="mt-3 inline-flex rounded-full border px-4 py-2 text-sm font-medium" to="/app/subscription">
+                <Link className="mt-3 inline-flex rounded-full border px-4 py-2 text-sm font-medium break-words" to="/app/subscription">
                   View subscription plans
                 </Link>
               </div>
@@ -1029,7 +1029,7 @@ export function AdminLawReportReader() {
               {stripHtml(report.summary) ? (
                 <div
                   className={cn(
-                    "mt-4 rounded-[24px] border px-5 py-5 leading-8",
+                    "mt-4 rounded-[24px] border px-4 sm:px-5 py-5 leading-8 min-w-0 overflow-hidden rich-text-content",
                     isDark ? "border-slate-800 bg-slate-950 text-slate-200" : "border-slate-200 bg-slate-50 text-slate-700"
                   )}
                   dangerouslySetInnerHTML={{ __html: highlightedSummary }}
@@ -1040,7 +1040,7 @@ export function AdminLawReportReader() {
             </section>
           </Surface>
 
-          <Surface className="p-6 lg:p-7" isDark={isDark}>
+          <Surface className="p-5 sm:p-6 lg:p-7 min-w-0 overflow-hidden" isDark={isDark}>
             <section ref={bodyRef}>
               <p className={cn("text-xs uppercase tracking-[0.22em]", isDark ? "text-slate-500" : "text-slate-400")}>
                 {isStudentReader && contentAccess?.isPreview ? "Full report locked" : "Full report"}
@@ -1048,7 +1048,7 @@ export function AdminLawReportReader() {
               {stripHtml(report.body) ? (
                 <div
                   className={cn(
-                    "mt-4 rounded-[24px] border px-5 py-6 leading-8",
+                    "mt-4 rounded-[24px] border px-4 sm:px-5 py-6 leading-8 min-w-0 overflow-hidden rich-text-content",
                     isDark ? "border-slate-800 bg-slate-950 text-slate-200" : "border-slate-200 bg-white text-slate-700"
                   )}
                   onMouseUp={() => {
@@ -1058,11 +1058,11 @@ export function AdminLawReportReader() {
                   }}
                 >
                   {isDeepLinkEnabled && bodyBlocks.length ? (
-                    <div className="space-y-4">
+                    <div className="space-y-4 min-w-0">
                       {bodyBlocks.map((block) => (
                         <div
                           className={cn(
-                            "group relative scroll-mt-24 rounded-[18px] px-2 py-1 transition",
+                            "group relative scroll-mt-24 rounded-[18px] px-2 py-1 transition min-w-0 break-words",
                             isDark ? "hover:bg-white/5" : "hover:bg-slate-50"
                           )}
                           data-helar-paragraph="true"
@@ -1072,7 +1072,7 @@ export function AdminLawReportReader() {
                           {canUseSharingTools ? (
                             <button
                               className={cn(
-                                "absolute -left-3 top-2 hidden h-9 w-9 items-center justify-center rounded-2xl border backdrop-blur-sm transition group-hover:inline-flex",
+                                "absolute -left-3 top-2 hidden h-9 w-9 items-center justify-center rounded-2xl border backdrop-blur-sm transition group-hover:inline-flex shrink-0",
                                 isDark
                                   ? "border-slate-700 bg-slate-900/90 text-slate-200 hover:border-slate-600 hover:text-white"
                                   : "border-slate-200 bg-white/90 text-slate-600 hover:border-slate-300 hover:text-slate-950"
@@ -1084,12 +1084,12 @@ export function AdminLawReportReader() {
                               <Link2 className="h-4 w-4" />
                             </button>
                           ) : null}
-                          <div dangerouslySetInnerHTML={{ __html: block.html }} />
+                          <div className="rich-text-content" dangerouslySetInnerHTML={{ __html: block.html }} />
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <div dangerouslySetInnerHTML={{ __html: highlightedBody }} />
+                    <div className="rich-text-content" dangerouslySetInnerHTML={{ __html: highlightedBody }} />
                   )}
 
                   {canUseSharingTools ? (

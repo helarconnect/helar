@@ -27,9 +27,9 @@ function Section({
   title: string;
 }) {
   return (
-    <section className={cn("rounded-[28px] border p-6", isDark ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-white")}>
+    <section className={cn("rounded-[28px] border p-5 sm:p-6 min-w-0 overflow-hidden break-words", isDark ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-white")}>
       <p className={cn("text-xs uppercase tracking-[0.22em]", isDark ? "text-slate-500" : "text-slate-400")}>{title}</p>
-      <div className={cn("mt-4 text-sm leading-7", isDark ? "text-slate-200" : "text-slate-700")}>{children}</div>
+      <div className={cn("mt-4 text-sm leading-7 min-w-0 break-words overflow-wrap-anywhere", isDark ? "text-slate-200" : "text-slate-700")}>{children}</div>
     </section>
   );
 }
@@ -49,11 +49,11 @@ function ArraySection({
 
   return (
     <Section isDark={isDark} title={title}>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-2 min-w-0">
         {items.map((item) => (
           <span
             className={cn(
-              "inline-flex rounded-full border px-3 py-1.5 text-sm",
+              "inline-flex rounded-full border px-3 py-1.5 text-sm break-words max-w-full",
               isDark ? "border-slate-700 bg-slate-950 text-slate-200" : "border-slate-200 bg-slate-50 text-slate-700"
             )}
             key={item}
@@ -200,39 +200,39 @@ export function AdminSubjectSummaryCaseReader() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2 text-sm">
+    <div className="space-y-6 min-w-0">
+      <div className="flex flex-wrap items-center justify-between gap-4 min-w-0">
+        <div className="space-y-3 min-w-0 w-full">
+          <div className="flex flex-wrap items-center gap-2 text-sm min-w-0">
             <Link className={cn("inline-flex items-center gap-2 rounded-full border px-4 py-2", isDark ? "border-slate-700 bg-slate-900 text-slate-200" : "border-slate-200 bg-white text-slate-700")} to={backPath}>
               <ArrowLeft className="h-4 w-4" />
               {backLabel}
             </Link>
-            <span className={cn("text-sm", isDark ? "text-slate-500" : "text-slate-400")}>
+            <span className={cn("text-sm break-words min-w-0", isDark ? "text-slate-500" : "text-slate-400")}>
               {item.subject.name} / {item.topic.name}
             </span>
           </div>
-          <h2 className={cn("font-heading text-4xl leading-tight", isDark ? "text-white" : "text-slate-950")}>{item.title}</h2>
-          <div className="flex flex-wrap items-center gap-3">
+          <h2 className={cn("font-heading text-3xl sm:text-4xl leading-tight break-words max-w-full", isDark ? "text-white" : "text-slate-950")}>{item.title}</h2>
+          <div className="flex flex-wrap items-center gap-3 min-w-0">
             {item.citation ? (
-              <span className={cn("inline-flex rounded-full border px-3 py-1.5 text-sm", isDark ? "border-slate-700 bg-slate-900 text-slate-200" : "border-slate-200 bg-white text-slate-700")}>
+              <span className={cn("inline-flex rounded-full border px-3 py-1.5 text-sm break-words max-w-full", isDark ? "border-slate-700 bg-slate-900 text-slate-200" : "border-slate-200 bg-white text-slate-700")}>
                 {item.citation}
               </span>
             ) : null}
             {item.court ? (
-              <span className={cn("inline-flex rounded-full border px-3 py-1.5 text-sm", isDark ? "border-slate-700 bg-slate-900 text-slate-200" : "border-slate-200 bg-white text-slate-700")}>
+              <span className={cn("inline-flex rounded-full border px-3 py-1.5 text-sm break-words max-w-full", isDark ? "border-slate-700 bg-slate-900 text-slate-200" : "border-slate-200 bg-white text-slate-700")}>
                 {item.court}
               </span>
             ) : null}
             {item.year ? (
-              <span className={cn("inline-flex rounded-full border px-3 py-1.5 text-sm", isDark ? "border-slate-700 bg-slate-900 text-slate-200" : "border-slate-200 bg-white text-slate-700")}>
+              <span className={cn("inline-flex rounded-full border px-3 py-1.5 text-sm break-words max-w-full", isDark ? "border-slate-700 bg-slate-900 text-slate-200" : "border-slate-200 bg-white text-slate-700")}>
                 {item.year}
               </span>
             ) : null}
             {isStudentReader ? (
               <button
                 className={cn(
-                  "inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm transition",
+                  "inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm transition break-words max-w-full",
                   activeBookmark
                     ? isDark
                       ? "border-amber-500/30 bg-amber-500/10 text-amber-100"
@@ -266,7 +266,7 @@ export function AdminSubjectSummaryCaseReader() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-4 min-w-0">
         {[
           { label: "Subject", value: item.subject.name, icon: BookOpenText },
           { label: "Topic", value: item.topic.name, icon: BookOpenText },
@@ -276,14 +276,14 @@ export function AdminSubjectSummaryCaseReader() {
           const Icon = entry.icon;
 
           return (
-            <article className={cn("rounded-[24px] border p-5", isDark ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-white")} key={entry.label}>
-              <div className="flex items-center gap-3">
-                <div className={cn("inline-flex h-11 w-11 items-center justify-center rounded-2xl", isDark ? "bg-slate-800 text-slate-200" : "bg-slate-100 text-slate-700")}>
+            <article className={cn("rounded-[24px] border p-4 sm:p-5 min-w-0 overflow-hidden break-words", isDark ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-white")} key={entry.label}>
+              <div className="flex items-center gap-3 min-w-0">
+                <div className={cn("inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl", isDark ? "bg-slate-800 text-slate-200" : "bg-slate-100 text-slate-700")}>
                   <Icon className="h-5 w-5" />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <p className={cn("text-xs uppercase tracking-[0.22em]", isDark ? "text-slate-500" : "text-slate-400")}>{entry.label}</p>
-                  <p className={cn("mt-2 text-base font-medium", isDark ? "text-white" : "text-slate-950")}>{entry.value}</p>
+                  <p className={cn("mt-2 text-base font-medium break-words max-w-full", isDark ? "text-white" : "text-slate-950")}>{entry.value}</p>
                 </div>
               </div>
             </article>
@@ -294,22 +294,22 @@ export function AdminSubjectSummaryCaseReader() {
       {isStudentReader && item.isPreview ? (
         <section
           className={cn(
-            "rounded-[28px] border px-6 py-5",
+            "rounded-[28px] border px-5 sm:px-6 py-5 min-w-0 break-words",
             isDark ? "border-amber-500/30 bg-amber-500/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-800"
           )}
         >
           <p className="text-xs uppercase tracking-[0.2em]">Preview only</p>
-          <h3 className="mt-3 text-lg font-semibold">This case is limited to a short preview.</h3>
-          <p className="mt-2 text-sm leading-7">
+          <h3 className="mt-3 text-lg font-semibold break-words max-w-full">This case is limited to a short preview.</h3>
+          <p className="mt-2 text-sm leading-7 break-words">
             {item.upgradeMessage} You can read up to {item.previewWordLimit} words of published case content until a subscription is active.
           </p>
-          <Link className="mt-3 inline-flex rounded-full border px-4 py-2 text-sm font-medium" to="/app/subscription">
+          <Link className="mt-3 inline-flex rounded-full border px-4 py-2 text-sm font-medium break-words" to="/app/subscription">
             Upgrade access
           </Link>
         </section>
       ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className="grid gap-4 grid-cols-1 lg:grid-cols-2 min-w-0">
         {item.caseSummary ? <Section isDark={isDark} title="Ratio Summary">{item.caseSummary}</Section> : null}
         {item.facts ? <Section isDark={isDark} title="Facts">{item.facts}</Section> : null}
         {item.issues ? <Section isDark={isDark} title="Issues">{item.issues}</Section> : null}
@@ -326,10 +326,10 @@ export function AdminSubjectSummaryCaseReader() {
 
       {item.attachments.length ? (
         <Section isDark={isDark} title="Attachments">
-          <div className="space-y-3">
+          <div className="space-y-3 min-w-0">
             {item.attachments.map((attachment) => (
               <a
-                className={cn("flex items-center justify-between rounded-[20px] border px-4 py-3 transition", isDark ? "border-slate-700 bg-slate-950 text-slate-200 hover:border-slate-600" : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300")}
+                className={cn("flex items-center justify-between gap-3 rounded-[20px] border px-4 py-3 transition min-w-0 break-words", isDark ? "border-slate-700 bg-slate-950 text-slate-200 hover:border-slate-600" : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300")}
                 href={attachment}
                 key={attachment}
                 onClick={() => {
@@ -350,7 +350,7 @@ export function AdminSubjectSummaryCaseReader() {
                 rel="noreferrer"
                 target="_blank"
               >
-                <span className="truncate">{attachment}</span>
+                <span className="truncate min-w-0">{attachment}</span>
                 <ExternalLink className="h-4 w-4 shrink-0" />
               </a>
             ))}
@@ -360,16 +360,16 @@ export function AdminSubjectSummaryCaseReader() {
 
       {item.externalReferences.length ? (
         <Section isDark={isDark} title="External References">
-          <div className="space-y-3">
+          <div className="space-y-3 min-w-0">
             {item.externalReferences.map((reference) => (
               <a
-                className={cn("flex items-center justify-between rounded-[20px] border px-4 py-3 transition", isDark ? "border-slate-700 bg-slate-950 text-slate-200 hover:border-slate-600" : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300")}
+                className={cn("flex items-center justify-between gap-3 rounded-[20px] border px-4 py-3 transition min-w-0 break-words", isDark ? "border-slate-700 bg-slate-950 text-slate-200 hover:border-slate-600" : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300")}
                 href={reference}
                 key={reference}
                 rel="noreferrer"
                 target="_blank"
               >
-                <span className="truncate">{reference}</span>
+                <span className="truncate min-w-0">{reference}</span>
                 <ExternalLink className="h-4 w-4 shrink-0" />
               </a>
             ))}

@@ -196,10 +196,10 @@ export function AppLayout() {
               isDark ? 'border-slate-800 bg-slate-950/55' : 'border-slate-200/80 bg-white/72',
             )}
           >
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 min-w-0">
               <button
                 className={cn(
-                  'inline-flex h-11 w-11 items-center justify-center rounded-2xl border lg:hidden',
+                  'inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border lg:hidden',
                   isDark ? 'border-slate-700 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-900',
                 )}
                 onClick={toggleSidebar}
@@ -207,9 +207,9 @@ export function AppLayout() {
               >
                 <Menu className="h-4 w-4" />
               </button>
-              <div>
-                <p className={cn('text-xs uppercase tracking-[0.26em]', isDark ? 'text-slate-500' : 'text-slate-400')}>Workspace</p>
-                <h1 className={cn('mt-1 font-heading text-3xl', isDark ? 'text-white' : 'text-slate-950')}>{resolvedPageTitle}</h1>
+              <div className="min-w-0">
+                <p className={cn('text-xs uppercase tracking-[0.26em] truncate', isDark ? 'text-slate-500' : 'text-slate-400')}>Workspace</p>
+                <h1 className={cn('mt-1 font-heading text-2xl sm:text-3xl break-words max-w-full', isDark ? 'text-white' : 'text-slate-950')}>{resolvedPageTitle}</h1>
               </div>
             </div>
             <div className="hidden items-center gap-3 md:flex">
@@ -318,7 +318,9 @@ export function AppLayout() {
               </div>
             </div>
           ) : null}
-          <div className="p-5 sm:p-8">
+          {/* Leave enough bottom padding so the fixed StudyNotesFab (about 64px tall,
+              offset by bottom-5/6) never obscures the last sections of reader pages. */}
+          <div className="p-5 pb-28 sm:p-8 sm:pb-32">
             <Outlet />
           </div>
         </div>
