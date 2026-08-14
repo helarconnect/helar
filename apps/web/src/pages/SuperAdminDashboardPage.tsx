@@ -352,10 +352,15 @@ export function SuperAdminDashboardPage() {
   const canViewPayments = canAccessPayments(roleCodes);
   const executiveUserName = session?.user.fullName ?? "Super Admin";
 
+  // Keep dashboard data fresh for 5 minutes to avoid long round-trips every time
+  // an admin navigates away and back. The refetchInterval still refreshes in-place
+  // every 60 seconds if the page stays open.
   const dashboardQuery = useQuery({
     queryFn: fetchAdminDashboardOverview,
     queryKey: queryKeys.adminDashboardOverview,
-    refetchInterval: 60_000
+    refetchInterval: 60_000,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000
   });
 
   useEffect(() => {

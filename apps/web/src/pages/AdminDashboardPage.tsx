@@ -260,9 +260,14 @@ export function AdminDashboardPage() {
   const { isDark } = useTheme();
   const session = useAuthStore((state) => state.session);
   const adminName = session?.user.fullName ?? "Helar Administrator";
+  // 5-minute stale window: navigating back to the admin dashboard reuses cached
+  // data instantly (no loading skeleton) instead of re-running the full overview
+  // query on every mount.
   const adminQuery = useQuery({
     queryKey: queryKeys.adminDashboardOverview,
-    queryFn: fetchAdminDashboardOverview
+    queryFn: fetchAdminDashboardOverview,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000
   });
 
   if (adminQuery.isLoading || !adminQuery.data) {
