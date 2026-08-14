@@ -916,12 +916,15 @@ export async function getAdminDashboardOverview() {
       take: 10
     }),
     // Top 10 subject summary titles read subjectSummaryEntry progress instead of all rows.
+    // NOTE: { not: null } on a String field fails strict TypeScript (NestedStringFilter).
+    // Using `gt: ''` produces the same practical effect — non-empty, non-null titles — while
+    // satisfying both Prisma's runtime behaviour and TypeScript's type-checker.
     prisma.studentStudyProgress.groupBy({
       by: ["title"],
       where: {
         deletedAt: null,
         contentType: StudentStudyContentType.SUBJECT_SUMMARY_ENTRY,
-        title: { not: null }
+        title: { gt: "" }
       },
       _count: { title: true },
       orderBy: { _count: { title: "desc" } },
@@ -932,7 +935,7 @@ export async function getAdminDashboardOverview() {
       by: ["topicName"],
       where: {
         deletedAt: null,
-        topicName: { not: null }
+        topicName: { gt: "" }
       },
       _count: { topicName: true },
       orderBy: { _count: { topicName: "desc" } },
@@ -943,7 +946,7 @@ export async function getAdminDashboardOverview() {
       by: ["subjectName"],
       where: {
         deletedAt: null,
-        subjectName: { not: null }
+        subjectName: { gt: "" }
       },
       _count: { subjectName: true },
       orderBy: { _count: { subjectName: "desc" } },
@@ -1448,24 +1451,31 @@ export async function getAdminDashboardOverview() {
   );
 
   // For progress/bookmark/subject ranking we also use grouped aggregates which already
-  // include counts; inline mapping replaces the generic aggregateCounts helper for these
-  // specific inputs (and aggregateCounts is still available for generic uses elsewhere).
+  // include counts. Prisma's type system unions `_count: true` with the per-key shape
+  // because at call-site level it can't statically know which `_count` form was passed.
+  // The narrowers below safely project the numeric field we asked for (we know the DB
+  // returned it because that specific `_count` selector was used), and otherwise return 0.
+  function pickCount<T extends object>(row: T, field: keyof NonNullable<T["_count"]> extends never ? string : keyof NonNullable<T["_count"]>): number {
+    const c = (row as { _count?: Record<string, number | undefined> })._count;
+    const n = c?.[String(field)];
+    return typeof n === "number" ? n : 0;
+  }
   const mostReadSubjectSummaries = rankItems(
     summaryProgressItems.map((row) => ({
       label: row.title ?? "",
-      value: row._count.title
+      value: pickCount(row as never, "title" as never)
     }))
   );
   const mostBookmarkedTopics = rankItems(
     bookmarkedTopics.map((row) => ({
       label: row.topicName ?? "",
-      value: row._count.topicName
+      value: pickCount(row as never, "topicName" as never)
     }))
   );
   const mostStudiedSubjects = rankItems(
     studiedSubjects.map((row) => ({
       label: row.subjectName ?? "",
-      value: row._count.subjectName
+      value: pickCount(row as never, "subjectName" as never)
     }))
   );
 
