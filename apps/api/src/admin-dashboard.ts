@@ -1453,29 +1453,29 @@ export async function getAdminDashboardOverview() {
   // For progress/bookmark/subject ranking we also use grouped aggregates which already
   // include counts. Prisma's type system unions `_count: true` with the per-key shape
   // because at call-site level it can't statically know which `_count` form was passed.
-  // The narrowers below safely project the numeric field we asked for (we know the DB
-  // returned it because that specific `_count` selector was used), and otherwise return 0.
-  function pickCount<T extends object>(row: T, field: keyof NonNullable<T["_count"]> extends never ? string : keyof NonNullable<T["_count"]>): number {
-    const c = (row as { _count?: Record<string, number | undefined> })._count;
-    const n = c?.[String(field)];
+  // The helper below safely projects the numeric field we asked for (we know the DB
+  // returned it because that specific `_count` selector was used), and otherwise returns 0.
+  function pickCount(row: unknown, field: string): number {
+    const asRec = row as { _count?: Record<string, number | undefined> };
+    const n = asRec._count?.[field];
     return typeof n === "number" ? n : 0;
   }
   const mostReadSubjectSummaries = rankItems(
     summaryProgressItems.map((row) => ({
       label: row.title ?? "",
-      value: pickCount(row as never, "title" as never)
+      value: pickCount(row, "title")
     }))
   );
   const mostBookmarkedTopics = rankItems(
     bookmarkedTopics.map((row) => ({
       label: row.topicName ?? "",
-      value: pickCount(row as never, "topicName" as never)
+      value: pickCount(row, "topicName")
     }))
   );
   const mostStudiedSubjects = rankItems(
     studiedSubjects.map((row) => ({
       label: row.subjectName ?? "",
-      value: pickCount(row as never, "subjectName" as never)
+      value: pickCount(row, "subjectName")
     }))
   );
 
