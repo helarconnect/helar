@@ -122,13 +122,19 @@ function normalizeRichText(value: string | undefined) {
 // BODY CHUNKING — MongoDB has a hard 16MB BSON size cap per document, and very
 // large law reports (full judgments with embedded images / tables / inline scans)
 // can exceed that cap when stored as a single `body` / `summary` string.
-// We therefore keep a "safe head" (~6 MB UTF-16 chars) on the parent document
-// and spill everything after that into one or more StudyMaterialBodyChunk rows,
-// ordered by (materialId, field, index). The reader path reassembles the full
-// string transparently so the rest of the stack stays unchanged.
+//
+// We keep a *very* conservative 1M-character safe head on the parent document
+// (≈2 MB UTF-16, ≈1–4 MB UTF-8 depending on content) and spill everything after
+// that into one or more StudyMaterialBodyChunk rows, ordered by
+// (materialId, field, index). Chunks themselves are also capped at 1M chars so
+// they too stay comfortably under the 16MB BSON ceiling. A 26-page MS-Word
+// HTML export is typically 5–20 MB on the wire and will therefore split into
+// 5–20 chunks on a typical import. The reader path reassembles everything
+// transparently so the rest of the stack stays unchanged.
 const CHUNK_FIELD_BODY = 0;
 const CHUNK_FIELD_SUMMARY = 1;
-const PER_DOC_SAFE_HEAD_CHARS = 6 * 1024 * 1024; // 6M chars ~ 12MB UTF-16, well under 16MB BSON
+const PER_DOC_SAFE_HEAD_CHARS = 1 * 1024 * 1024; // 1M chars ~ 2MB UTF-16
+const PER_CHUNK_MAX_CHARS = 1 * 1024 * 1024;    // 1M chars per overflow chunk doc
 
 function bufferUtf16Length(value: string | null) {
   // UTF-16 (V8's internal representation) uses 2 bytes per BMP code point, 4 bytes
@@ -170,6 +176,14 @@ function chunkifyOverflow(overflow: string, chunkChars: number): string[] {
 // structural type at Render's strict TS settings. We perform the structural cast
 // inside the try block where every call is already protected against runtime
 // shape mismatches.
+//
+// NOTE on create vs createMany: on MongoDB Prisma v6 `createMany` support depends
+// on both the driver and the backing Atlas topology. Small saves (no overflow
+// chunks) succeed because they never hit the `createMany` path, but any large
+// save that overflows the single-document safe head fails with "batch writes
+// aren't supported" or similar driver-level errors. We therefore insert each
+// chunk with an individual `create()` call. It's marginally slower but 100%
+// portable regardless of MongoDB topology.
 async function tryWriteMaterialBodyChunks(
   tx: unknown,
   materialId: string,
@@ -180,16 +194,18 @@ async function tryWriteMaterialBodyChunks(
     const db = tx as {
       studyMaterialBodyChunk: {
         deleteMany: (args: { where: { materialId: string; field: number } }) => Promise<unknown>;
-        createMany: (args: {
-          data: Array<{ content: string; field: number; index: number; materialId: string }>;
+        create: (args: {
+          data: { content: string; field: number; index: number; materialId: string };
         }) => Promise<unknown>;
       };
     };
     await db.studyMaterialBodyChunk.deleteMany({ where: { materialId, field } });
     if (chunks.length === 0) return;
-    await db.studyMaterialBodyChunk.createMany({
-      data: chunks.map((content, index) => ({ content, field, index, materialId }))
-    });
+    for (let index = 0; index < chunks.length; index += 1) {
+      await db.studyMaterialBodyChunk.create({
+        data: { content: chunks[index], field, index, materialId }
+      });
+    }
   } catch (error) {
     console.error("[admin-library] tryWriteMaterialBodyChunks failed (tail may be lost)", {
       materialId,
@@ -1121,9 +1137,9 @@ export async function createAdminLibraryMaterial(
   const bodySplit = splitSafeHeadAndOverflow(body, PER_DOC_SAFE_HEAD_CHARS);
   const summarySplit = splitSafeHeadAndOverflow(summary, PER_DOC_SAFE_HEAD_CHARS);
   // Each individual chunk must also fit comfortably into a BSON document (we use
-  // ~4MB chars per chunk doc to keep plenty of headroom for fields/overhead).
-  const bodyChunks = chunkifyOverflow(bodySplit.overflow, 4 * 1024 * 1024);
-  const summaryChunks = chunkifyOverflow(summarySplit.overflow, 4 * 1024 * 1024);
+  // ~1MB chars per chunk doc to keep plenty of headroom for fields/overhead).
+  const bodyChunks = chunkifyOverflow(bodySplit.overflow, PER_CHUNK_MAX_CHARS);
+  const summaryChunks = chunkifyOverflow(summarySplit.overflow, PER_CHUNK_MAX_CHARS);
   const estimatedMins = isLawReportsSection(section) ? calculateEstimatedMinutesFromBody(body) : input.estimatedMins;
   const reportDate = parseReportDate(input.reportDate, section);
   const internalReportNumber = isLawReportsSection(section) ? null : `internal-${randomUUID()}`;
@@ -1225,8 +1241,10 @@ export async function updateAdminLibraryMaterial(
   // reports can be edited and re-saved without blowing the 16MB BSON cap.
   const bodySplit = splitSafeHeadAndOverflow(body, PER_DOC_SAFE_HEAD_CHARS);
   const summarySplit = splitSafeHeadAndOverflow(summary, PER_DOC_SAFE_HEAD_CHARS);
-  const bodyChunks = chunkifyOverflow(bodySplit.overflow, 4 * 1024 * 1024);
-  const summaryChunks = chunkifyOverflow(summarySplit.overflow, 4 * 1024 * 1024);
+  // Keep chunk size identical on update and create, so edits of previously saved
+  // content remain deterministic regardless of which direction size moves.
+  const bodyChunks = chunkifyOverflow(bodySplit.overflow, PER_CHUNK_MAX_CHARS);
+  const summaryChunks = chunkifyOverflow(summarySplit.overflow, PER_CHUNK_MAX_CHARS);
   const estimatedMins = isLawReportsSection(section) ? calculateEstimatedMinutesFromBody(body) : input.estimatedMins;
   const reportDate = parseReportDate(input.reportDate, section);
 

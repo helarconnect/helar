@@ -728,6 +728,17 @@ function classifyAdminLibraryWriteError(error: unknown): AdminLibraryFailureClas
   // JSON request exceeds the size cap. Map it directly so users see "Your report is
   // too large" instead of a generic 500.
   if (/request entity too large|payload too large|entity.too.large/i.test(msg)) return "LIBRARY_PAYLOAD_TOO_LARGE";
+  // MongoDB + Prisma driver raise one of several messages when a single BSON doc
+  // exceeds the architectural 16MB cap. A very large 26-page MS-Word HTML import
+  // can occasionally still trigger this even with chunking if the 1MB "safe head"
+  // combines with other fields (metadata, indexed fields) to edge over 16MB; when
+  // it does, classify it explicitly so the user gets a clear hint rather than the
+  // generic "Could not create law report" toast.
+  if (
+    /BSONObj size|document is larger than|exceeds max bson size|16.?MB|BSON document too large/i.test(msg)
+  ) {
+    return "LIBRARY_BODY_TOO_LARGE";
+  }
   if (/MongoNetworkError|ECONNRESET|connection/i.test(msg)) return "DATABASE_UNAVAILABLE";
 
   return "UNKNOWN";
