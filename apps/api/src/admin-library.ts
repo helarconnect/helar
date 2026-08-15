@@ -33,7 +33,9 @@ const adminLibraryMaterialInputSchema = z
     reportDate: z.string().trim().optional().default(""),
     reportNumber: z.string().trim().optional().default(""),
     sharingEnabled: z.boolean().optional().default(false),
-    storageUrl: z.string().trim().min(2).max(2_000),
+    // Raised from 2_000 to 1_000_000 to accommodate both plain URLs and very large
+    // data-URL/base64 attachments if an admin pastes document content inline.
+    storageUrl: z.string().trim().min(2).max(1_000_000),
     summary: z.string().optional().default(""),
     title: z.string().trim().min(2)
   })
@@ -115,6 +117,110 @@ function isLawReportMaterialType(materialType: MaterialType) {
 
 function normalizeRichText(value: string | undefined) {
   return (value ?? "").trim();
+}
+
+// BODY CHUNKING — MongoDB has a hard 16MB BSON size cap per document, and very
+// large law reports (full judgments with embedded images / tables / inline scans)
+// can exceed that cap when stored as a single `body` / `summary` string.
+// We therefore keep a "safe head" (~6 MB UTF-16 chars) on the parent document
+// and spill everything after that into one or more StudyMaterialBodyChunk rows,
+// ordered by (materialId, field, index). The reader path reassembles the full
+// string transparently so the rest of the stack stays unchanged.
+const CHUNK_FIELD_BODY = 0;
+const CHUNK_FIELD_SUMMARY = 1;
+const PER_DOC_SAFE_HEAD_CHARS = 6 * 1024 * 1024; // 6M chars ~ 12MB UTF-16, well under 16MB BSON
+
+function bufferUtf16Length(value: string | null) {
+  // UTF-16 (V8's internal representation) uses 2 bytes per BMP code point, 4 bytes
+  // per surrogate pair. For payload-sizing decisions this is a reasonable proxy of
+  // in-memory cost, so we use it to decide when to start chunking.
+  if (!value) return 0;
+  let length = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    length += code >= 0xd800 && code <= 0xdbff ? 4 : 2;
+  }
+  return length;
+}
+
+function splitSafeHeadAndOverflow(value: string, safeChars: number): { head: string; overflow: string } {
+  if (value.length <= safeChars) {
+    return { head: value, overflow: "" };
+  }
+  return { head: value.slice(0, safeChars), overflow: value.slice(safeChars) };
+}
+
+function chunkifyOverflow(overflow: string, chunkChars: number): string[] {
+  if (!overflow) return [];
+  const chunks: string[] = [];
+  for (let offset = 0; offset < overflow.length; offset += chunkChars) {
+    chunks.push(overflow.slice(offset, offset + chunkChars));
+  }
+  return chunks;
+}
+
+// Persist chunks for one field. Intentionally non-fatal if chunk write fails — we
+// still return the saved material; the caller can decide whether it's acceptable
+// to lose the tail. This mirrors the tryCreateLibraryAuditLog soft-failure pattern.
+async function tryWriteMaterialBodyChunks(
+  tx: {
+    studyMaterialBodyChunk: {
+      deleteMany: (where: { materialId: string; field: number }) => Promise<unknown>;
+      createMany: (input: { data: Array<{ content: string; field: number; index: number; materialId: string }> }) => Promise<unknown>;
+    };
+  },
+  materialId: string,
+  field: number,
+  chunks: string[]
+): Promise<void> {
+  try {
+    await tx.studyMaterialBodyChunk.deleteMany({ materialId, field });
+    if (chunks.length === 0) return;
+    await tx.studyMaterialBodyChunk.createMany({
+      data: chunks.map((content, index) => ({ content, field, index, materialId }))
+    });
+  } catch (error) {
+    console.error("[admin-library] tryWriteMaterialBodyChunks failed (tail may be lost)", {
+      materialId,
+      field,
+      chunks: chunks.length,
+      firstChars: chunks[0]?.length ?? 0,
+      name: error instanceof Error ? error.name : String(error),
+      message: error instanceof Error ? error.message : String(error)
+    });
+  }
+}
+
+async function reassembleMaterialText(
+  db: {
+    studyMaterialBodyChunk: {
+      findMany: (where: {
+        orderBy: { index: "asc" };
+        select: { content: true; field: true; index: true };
+        where: { materialId: string };
+      }) => Promise<Array<{ content: string; field: number; index: number }>>;
+    };
+  },
+  materialId: string,
+  baseBody: string | null,
+  baseSummary: string | null
+): Promise<{ body: string; summary: string }> {
+  const rows = await db.studyMaterialBodyChunk.findMany({
+    where: { materialId },
+    orderBy: { index: "asc" },
+    select: { content: true, field: true, index: true }
+  });
+  const tailByField = new Map<number, string[]>();
+  for (const row of rows) {
+    const list = tailByField.get(row.field) ?? [];
+    list[row.index] = row.content;
+    tailByField.set(row.field, list);
+  }
+  const join = (field: number) => (tailByField.get(field) ?? []).filter(Boolean).join("");
+  return {
+    body: (baseBody ?? "") + join(CHUNK_FIELD_BODY),
+    summary: (baseSummary ?? "") + join(CHUNK_FIELD_SUMMARY)
+  };
 }
 
 function stripHtml(value: string) {
@@ -748,6 +854,10 @@ export async function getAdminLibraryMaterial(section: AdminLibrarySection, mate
     return null;
   }
 
+  // Reattach body/summary overflow chunks so the reader sees the full, coherent
+  // law report text no matter how large it is.
+  const reassembled = await reassembleMaterialText(prisma, material.id, material.body, material.summary);
+
   return {
     category: {
       description: category.description,
@@ -755,7 +865,7 @@ export async function getAdminLibraryMaterial(section: AdminLibrarySection, mate
       name: category.name,
       slug: category.slug
     },
-    material: mapLibraryMaterial(material)
+    material: mapLibraryMaterial({ ...material, body: reassembled.body, summary: reassembled.summary })
   };
 }
 
@@ -787,7 +897,10 @@ export async function getLibraryMaterial(section: AdminLibrarySection, materialI
     return null;
   }
 
-  const mappedMaterial = mapLibraryMaterial(material);
+  // Student reader also needs the full body/summary text for huge law reports, not
+  // just the first 6 MB chunk stored on the parent row.
+  const reassembled = await reassembleMaterialText(prisma, material.id, material.body, material.summary);
+  const mappedMaterial = mapLibraryMaterial({ ...material, body: reassembled.body, summary: reassembled.summary });
   const contentAccess = userId
     ? await getPremiumContentAccess(userId)
     : {
@@ -991,6 +1104,14 @@ export async function createAdminLibraryMaterial(
 
   const summary = normalizeRichText(input.summary);
   const body = normalizeRichText(input.body);
+  // Large body/summary strings are split so the parent document stays under the
+  // MongoDB 16MB BSON cap regardless of how long the law report judgment text is.
+  const bodySplit = splitSafeHeadAndOverflow(body, PER_DOC_SAFE_HEAD_CHARS);
+  const summarySplit = splitSafeHeadAndOverflow(summary, PER_DOC_SAFE_HEAD_CHARS);
+  // Each individual chunk must also fit comfortably into a BSON document (we use
+  // ~4MB chars per chunk doc to keep plenty of headroom for fields/overhead).
+  const bodyChunks = chunkifyOverflow(bodySplit.overflow, 4 * 1024 * 1024);
+  const summaryChunks = chunkifyOverflow(summarySplit.overflow, 4 * 1024 * 1024);
   const estimatedMins = isLawReportsSection(section) ? calculateEstimatedMinutesFromBody(body) : input.estimatedMins;
   const reportDate = parseReportDate(input.reportDate, section);
   const internalReportNumber = isLawReportsSection(section) ? null : `internal-${randomUUID()}`;
@@ -1002,9 +1123,9 @@ export async function createAdminLibraryMaterial(
           ? await buildNextLawReportNumber(tx, category.id)
           : internalReportNumber;
 
-        return tx.studyMaterial.create({
+        const created = await tx.studyMaterial.create({
           data: {
-            body: body || null,
+            body: bodySplit.head || null,
             categoryId: category.id,
             deletedAt: null,
             downloadable: input.downloadable,
@@ -1018,7 +1139,7 @@ export async function createAdminLibraryMaterial(
             approvedAt: publicationStatus === ContentPublicationStatus.PUBLISHED ? new Date() : null,
             approvedBy: publicationStatus === ContentPublicationStatus.PUBLISHED ? actorUserId : null,
             storageUrl: input.storageUrl.trim(),
-            summary: summary || null,
+            summary: summarySplit.head || null,
             title: input.title.trim(),
             ...(reportNumber ? { reportNumber } : {})
           },
@@ -1031,6 +1152,13 @@ export async function createAdminLibraryMaterial(
             }
           }
         });
+
+        // Write chunk overflow inside the same transaction so chunks and the
+        // parent document roll back together if anything later fails.
+        await tryWriteMaterialBodyChunks(tx, created.id, CHUNK_FIELD_BODY, bodyChunks);
+        await tryWriteMaterialBodyChunks(tx, created.id, CHUNK_FIELD_SUMMARY, summaryChunks);
+
+        return created;
       })
   );
 
@@ -1039,10 +1167,17 @@ export async function createAdminLibraryMaterial(
     reportDate: material.reportDate?.toISOString() ?? null,
     materialType: material.materialType,
     reportNumber: material.reportNumber,
-    title: material.title
+    title: material.title,
+    bodyBytes: bufferUtf16Length(body),
+    summaryBytes: bufferUtf16Length(summary),
+    bodyChunkCount: bodyChunks.length,
+    summaryChunkCount: summaryChunks.length
   });
 
-  return mapLibraryMaterial(material);
+  // Reassemble the saved body/summary so callers get the exact text they submitted,
+  // even for gigantic reports that exceeded the single-doc safe head.
+  const reassembled = await reassembleMaterialText(prisma, material.id, material.body, material.summary);
+  return mapLibraryMaterial({ ...material, body: reassembled.body, summary: reassembled.summary });
 }
 
 export async function updateAdminLibraryMaterial(
@@ -1074,6 +1209,12 @@ export async function updateAdminLibraryMaterial(
 
   const summary = normalizeRichText(input.summary);
   const body = normalizeRichText(input.body);
+  // On update, split body/summary the same way as create so arbitrarily large law
+  // reports can be edited and re-saved without blowing the 16MB BSON cap.
+  const bodySplit = splitSafeHeadAndOverflow(body, PER_DOC_SAFE_HEAD_CHARS);
+  const summarySplit = splitSafeHeadAndOverflow(summary, PER_DOC_SAFE_HEAD_CHARS);
+  const bodyChunks = chunkifyOverflow(bodySplit.overflow, 4 * 1024 * 1024);
+  const summaryChunks = chunkifyOverflow(summarySplit.overflow, 4 * 1024 * 1024);
   const estimatedMins = isLawReportsSection(section) ? calculateEstimatedMinutesFromBody(body) : input.estimatedMins;
   const reportDate = parseReportDate(input.reportDate, section);
 
@@ -1085,12 +1226,12 @@ export async function updateAdminLibraryMaterial(
             ? await buildNextLawReportNumber(tx, category.id)
             : existingMaterial.reportNumber ?? `internal-${materialId}`;
 
-        return tx.studyMaterial.update({
+        const updated = await tx.studyMaterial.update({
           where: {
             id: materialId
           },
           data: {
-            body: body || null,
+            body: bodySplit.head || null,
             downloadable: input.downloadable,
             estimatedMins,
             materialType: input.materialType,
@@ -1101,7 +1242,7 @@ export async function updateAdminLibraryMaterial(
             approvedAt: publicationStatus === ContentPublicationStatus.PUBLISHED ? new Date() : null,
             approvedBy: publicationStatus === ContentPublicationStatus.PUBLISHED ? actorUserId : null,
             storageUrl: input.storageUrl.trim(),
-            summary: summary || null,
+            summary: summarySplit.head || null,
             title: input.title.trim(),
             ...(reportNumber ? { reportNumber } : {})
           },
@@ -1114,6 +1255,13 @@ export async function updateAdminLibraryMaterial(
             }
           }
         });
+
+        // Chunks are (re)written inside the same transaction as the parent update
+        // so stale tails from previous content don't leak into future readers.
+        await tryWriteMaterialBodyChunks(tx, updated.id, CHUNK_FIELD_BODY, bodyChunks);
+        await tryWriteMaterialBodyChunks(tx, updated.id, CHUNK_FIELD_SUMMARY, summaryChunks);
+
+        return updated;
       })
   );
 
@@ -1122,10 +1270,16 @@ export async function updateAdminLibraryMaterial(
     reportDate: material.reportDate?.toISOString() ?? null,
     materialType: material.materialType,
     reportNumber: material.reportNumber,
-    title: material.title
+    title: material.title,
+    bodyBytes: bufferUtf16Length(body),
+    summaryBytes: bufferUtf16Length(summary),
+    bodyChunkCount: bodyChunks.length,
+    summaryChunkCount: summaryChunks.length
   });
 
-  return mapLibraryMaterial(material);
+  // Reassemble so the caller receives the complete body/summary they just saved.
+  const reassembled = await reassembleMaterialText(prisma, material.id, material.body, material.summary);
+  return mapLibraryMaterial({ ...material, body: reassembled.body, summary: reassembled.summary });
 }
 
 export async function deleteAdminLibraryMaterial(

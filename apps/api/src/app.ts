@@ -690,6 +690,8 @@ type AdminLibraryFailureClassification =
   | "REPORT_SEQUENCE_EXHAUSTED"
   | "LIBRARY_CATEGORY_MISSING"
   | "LIBRARY_MATERIAL_TYPE_MISMATCH"
+  | "LIBRARY_BODY_TOO_LARGE"
+  | "LIBRARY_PAYLOAD_TOO_LARGE"
   | "TRANSACTION_CONFLICT"
   | "DATABASE_UNAVAILABLE"
   | "UNKNOWN";
@@ -716,10 +718,16 @@ function classifyAdminLibraryWriteError(error: unknown): AdminLibraryFailureClas
     if (/LAW_REPORT_SEQUENCE_EXHAUSTED/i.test(msg)) return "REPORT_SEQUENCE_EXHAUSTED";
     if (/LIBRARY_CATEGORY_NOT_FOUND/i.test(msg)) return "LIBRARY_CATEGORY_MISSING";
     if (/LIBRARY_MATERIAL_TYPE_INVALID|SECTION_MATERIAL_TYPE/i.test(msg)) return "LIBRARY_MATERIAL_TYPE_MISMATCH";
+    if (/LIBRARY_BODY_EXCEEDS_MAX_SIZE/i.test(msg)) return "LIBRARY_BODY_TOO_LARGE";
+    if (/LIBRARY_PAYLOAD_TOO_LARGE/i.test(msg)) return "LIBRARY_PAYLOAD_TOO_LARGE";
     if (/SERIALIZABLE_WRITE_FAILED/i.test(msg)) return "TRANSACTION_CONFLICT";
   }
 
   const msg = String(error instanceof Error ? error.message : error);
+  // Express body-parser raises SyntaxError with 'request entity too large' when a
+  // JSON request exceeds the size cap. Map it directly so users see "Your report is
+  // too large" instead of a generic 500.
+  if (/request entity too large|payload too large|entity.too.large/i.test(msg)) return "LIBRARY_PAYLOAD_TOO_LARGE";
   if (/MongoNetworkError|ECONNRESET|connection/i.test(msg)) return "DATABASE_UNAVAILABLE";
 
   return "UNKNOWN";
@@ -756,6 +764,20 @@ function buildAdminLibraryFailureResponse(
         status: 400,
         code: "LIBRARY_MATERIAL_TYPE_INVALID",
         message: rawMessage
+      };
+    case "LIBRARY_BODY_TOO_LARGE":
+      return {
+        status: 413,
+        code: "LIBRARY_BODY_TOO_LARGE",
+        message:
+          "The report content is too large to save in a single document. Please reduce embedded images or split the report into smaller sections, then try again."
+      };
+    case "LIBRARY_PAYLOAD_TOO_LARGE":
+      return {
+        status: 413,
+        code: "LIBRARY_PAYLOAD_TOO_LARGE",
+        message:
+          "The report you tried to upload is too large for a single request. Please reduce embedded images, remove base64 attachments, or split the report into smaller records, then try again."
       };
     case "TRANSACTION_CONFLICT":
       return {
@@ -1574,7 +1596,12 @@ export function createApp(options: AppOptions = {}) {
 
   app.use(cors());
   app.use(helmet());
-  app.use(express.json({ limit: "30mb" }));
+  // Raised from 30mb → 200mb so admin library submissions (large law report HTML with
+  // embedded tables / inline images / full judgment text pasted into the body editor)
+  // survive JSON serialization. Each endpoint still enforces its own safe upper bound
+  // below (and MongoDB's per-document 16MB BSON cap is handled transparently via body
+  // chunking in admin-library.ts so users can save arbitrarily long report content).
+  app.use(express.json({ limit: "200mb" }));
   app.use(morgan("dev"));
   app.use(
     ["/api/v1/auth/demo-sign-in", "/api/v1/auth/register", "/api/v1/auth/forgot-password", "/api/v1/auth/reset-password"],
@@ -8978,6 +9005,73 @@ export function createApp(options: AppOptions = {}) {
       }
     }
   );
+
+  // Global JSON-safe error handler. Catches SyntaxError from express.json() when a
+  // request exceeds the 200mb JSON payload cap and surfaces it as our structured
+  // error envelope (instead of Express's default HTML payload). Without this, the
+  // admin library create/update routes below would never be reached on huge payloads
+  // and the frontend toast would be a generic "Network Error".
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  app.use((error: unknown, request: Request, response: Response, _next: (err?: unknown) => void) => {
+    const msg = error instanceof Error ? error.message : String(error);
+
+    if (/request entity too large|payload too large|entity.too.large/i.test(msg)) {
+      const code = request.path.startsWith("/api/v1/admin/library/")
+        ? "LIBRARY_PAYLOAD_TOO_LARGE"
+        : "PAYLOAD_TOO_LARGE";
+      const message = request.path.startsWith("/api/v1/admin/library/")
+        ? "The report you tried to upload is too large for a single request. Please reduce embedded images, remove base64 attachments, or split the report into smaller records, then try again."
+        : "Your request was too large. Please reduce the payload size and try again.";
+
+      console.error("[app:payload-too-large]", {
+        path: request.path,
+        method: request.method,
+        code
+      });
+
+      return response.status(413).json({
+        success: false,
+        error: {
+          code,
+          message
+        }
+      });
+    }
+
+    if (error instanceof SyntaxError) {
+      console.error("[app:syntax-error]", {
+        path: request.path,
+        method: request.method,
+        message: msg
+      });
+
+      return response.status(400).json({
+        success: false,
+        error: {
+          code: "INVALID_JSON_BODY",
+          message: "The request contained invalid JSON."
+        }
+      });
+    }
+
+    const statusCode =
+      error instanceof Error && "status" in error && typeof (error as { status?: unknown }).status === "number"
+        ? (error as { status: number }).status
+        : 500;
+    console.error("[app:unhandled]", {
+      path: request.path,
+      method: request.method,
+      name: error instanceof Error ? error.name : typeof error,
+      message: msg
+    });
+    return response.status(statusCode).json({
+      success: false,
+      error: {
+        code: "INTERNAL_SERVER_ERROR",
+        message: statusCode === 500 ? "An unexpected error occurred." : msg
+      }
+    });
+  });
 
   return app;
 }

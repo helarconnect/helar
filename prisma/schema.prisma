@@ -500,6 +500,10 @@ model StudyMaterial {
   reportDate        DateTime?
   summary           String?
   body              String?
+  // When body/summary exceed the per-chunk safe threshold, the overflow is stored
+  // as ordered `bodyChunks` rows and reassembled on read. This lets admins save
+  // arbitrarily long law reports without hitting MongoDB's 16MB-per-document cap.
+  bodyChunks        StudyMaterialBodyChunk[]
   sharingEnabled    Boolean?                 @default(false)
   downloadable      Boolean                  @default(true)
   estimatedMins     Int                      @default(0)
@@ -521,6 +525,25 @@ model StudyMaterial {
   @@index([publicationStatus])
   @@index([createdAt])
   @@index([deletedAt])
+}
+
+// Oversized body/summary overflow chunks. One document per ~4MB of content, ordered
+// by `index` ascending. MongoDB 16MB-per-doc is the hard bound; we chunk well before
+// that so the parent StudyMaterial document still has room for title, metadata, and
+// Prisma transaction overhead.
+model StudyMaterialBodyChunk {
+  id         String        @id @default(auto()) @map("_id") @db.ObjectId
+  materialId String        @db.ObjectId
+  // 0 → the parent.body overflow continuation; 1 → parent.summary overflow
+  field      Int // 0 = body, 1 = summary
+  index      Int
+  content    String
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+  material   StudyMaterial @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@unique([materialId, field, index])
+  @@index([materialId])
 }
 
 model ReadingHistory {
