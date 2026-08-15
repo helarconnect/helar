@@ -162,21 +162,32 @@ function chunkifyOverflow(overflow: string, chunkChars: number): string[] {
 // Persist chunks for one field. Intentionally non-fatal if chunk write fails — we
 // still return the saved material; the caller can decide whether it's acceptable
 // to lose the tail. This mirrors the tryCreateLibraryAuditLog soft-failure pattern.
+//
+// NOTE on tx typing: we deliberately accept `unknown` instead of naming the exact
+// Prisma `TransactionClient`. The reason is Prisma v6 for MongoDB exports an
+// overloaded `deleteMany({ where?, limit? })` signature whose exact return type
+// (PrismaPromise with SelectSubset) can't be matched against a literal hand-written
+// structural type at Render's strict TS settings. We perform the structural cast
+// inside the try block where every call is already protected against runtime
+// shape mismatches.
 async function tryWriteMaterialBodyChunks(
-  tx: {
-    studyMaterialBodyChunk: {
-      deleteMany: (where: { materialId: string; field: number }) => Promise<unknown>;
-      createMany: (input: { data: Array<{ content: string; field: number; index: number; materialId: string }> }) => Promise<unknown>;
-    };
-  },
+  tx: unknown,
   materialId: string,
   field: number,
   chunks: string[]
 ): Promise<void> {
   try {
-    await tx.studyMaterialBodyChunk.deleteMany({ materialId, field });
+    const db = tx as {
+      studyMaterialBodyChunk: {
+        deleteMany: (args: { where: { materialId: string; field: number } }) => Promise<unknown>;
+        createMany: (args: {
+          data: Array<{ content: string; field: number; index: number; materialId: string }>;
+        }) => Promise<unknown>;
+      };
+    };
+    await db.studyMaterialBodyChunk.deleteMany({ where: { materialId, field } });
     if (chunks.length === 0) return;
-    await tx.studyMaterialBodyChunk.createMany({
+    await db.studyMaterialBodyChunk.createMany({
       data: chunks.map((content, index) => ({ content, field, index, materialId }))
     });
   } catch (error) {
@@ -192,20 +203,21 @@ async function tryWriteMaterialBodyChunks(
 }
 
 async function reassembleMaterialText(
-  db: {
-    studyMaterialBodyChunk: {
-      findMany: (where: {
-        orderBy: { index: "asc" };
-        select: { content: true; field: true; index: true };
-        where: { materialId: string };
-      }) => Promise<Array<{ content: string; field: number; index: number }>>;
-    };
-  },
+  db: unknown,
   materialId: string,
   baseBody: string | null,
   baseSummary: string | null
 ): Promise<{ body: string; summary: string }> {
-  const rows = await db.studyMaterialBodyChunk.findMany({
+  const store = db as {
+    studyMaterialBodyChunk: {
+      findMany: (args: {
+        where: { materialId: string };
+        orderBy: { index: "asc" };
+        select: { content: true; field: true; index: true };
+      }) => Promise<Array<{ content: string; field: number; index: number }>>;
+    };
+  };
+  const rows = await store.studyMaterialBodyChunk.findMany({
     where: { materialId },
     orderBy: { index: "asc" },
     select: { content: true, field: true, index: true }
