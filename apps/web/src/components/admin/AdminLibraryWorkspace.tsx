@@ -72,6 +72,11 @@ const sectionCopy: Record<
     description: "Review, update, and publish case materials with clear links, estimated reading time, and quick action controls.",
     title: "Manage cases and ratios with a cleaner editorial workflow."
   },
+  helarpedia: {
+    badge: "Admin library",
+    description: "Curate legal-term encyclopedia entries, definition summaries, and links to related Helar law report citations.",
+    title: "Manage Helarpedia issue definitions, summaries, and related cases."
+  },
   "law-reports": {
     badge: "Admin library",
     description: "Organize report entries, keep court references tidy, and maintain a dependable archive for legal research.",
@@ -97,12 +102,24 @@ function isLawReportsSection(section: AdminLibrarySection) {
   return section === "law-reports";
 }
 
+function isHelarpediaSection(section: AdminLibrarySection) {
+  return section === "helarpedia";
+}
+
+function isReportNumberedSection(section: AdminLibrarySection) {
+  return isLawReportsSection(section) || isHelarpediaSection(section);
+}
+
 function getMaterialTypeOptions(section: AdminLibrarySection) {
   return isLawReportsSection(section) ? lawReportCourtOptions : standardMaterialTypeOptions;
 }
 
 function getDefaultReportNumber() {
   return `Helar-${new Date().getFullYear()}-501`;
+}
+
+function getDefaultHelarpediaNumber() {
+  return "Helarpedia-1000";
 }
 
 function formatDate(dateString: string) {
@@ -160,8 +177,10 @@ function createDraft(section: AdminLibrarySection, nextReportNumber?: string | n
     estimatedMins: 0,
     materialType: isLawReportsSection(section) ? "COURT_OF_APPEAL" : "PDF",
     reportDate: isLawReportsSection(section) ? new Date().toISOString().slice(0, 10) : "",
-    reportNumber: isLawReportsSection(section) ? nextReportNumber ?? getDefaultReportNumber() : "",
-    sharingEnabled: isLawReportsSection(section),
+    reportNumber: isReportNumberedSection(section)
+      ? nextReportNumber ?? (isLawReportsSection(section) ? getDefaultReportNumber() : getDefaultHelarpediaNumber())
+      : "",
+    sharingEnabled: isReportNumberedSection(section),
     storageUrl: "",
     summary: "",
     title: ""
@@ -491,6 +510,12 @@ function LibraryMaterialModal({
   }
 
   const isLawReports = isLawReportsSection(section);
+  const isHelarpedia = isHelarpediaSection(section);
+  // Any section that receives a dedicated auto-incrementing report number
+  // (law reports → Helar-{year}-N, Helarpedia → Helarpedia-1000+) displays the
+  // same structured modal: report number field, suit/serial header section,
+  // estimate body from text, numbered serial reference summary-card badge.
+  const numberedSection = isLawReports || isHelarpedia;
   const materialOptions = getMaterialTypeOptions(section);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const [canScrollUp, setCanScrollUp] = useState(false);
@@ -516,7 +541,7 @@ function LibraryMaterialModal({
       bodyElement.removeEventListener("scroll", updateScrollState);
       window.removeEventListener("resize", updateScrollState);
     };
-  }, [draft.body, draft.summary, isLawReports, materialOptions.length, title]);
+  }, [draft.body, draft.summary, numberedSection, materialOptions.length, title]);
 
   return createPortal(
     <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/60 p-6 backdrop-blur-sm">
@@ -529,12 +554,12 @@ function LibraryMaterialModal({
         <div className={cn("flex items-center justify-between border-b px-4 py-3.5", isDark ? "border-slate-800" : "border-slate-200")}>
           <div className="min-w-0">
             <p className={cn("text-xs uppercase tracking-[0.22em]", isDark ? "text-slate-500" : "text-slate-400")}>
-              {isLawReports ? "Law report" : "Library material"}
+              {isLawReports ? "Law report" : isHelarpedia ? "Helarpedia entry" : "Library material"}
             </p>
             <h3 className={cn("mt-1 font-heading text-[1.55rem]", isDark ? "text-white" : "text-slate-950")}>{title}</h3>
           </div>
           <div className="flex items-center gap-2.5">
-            {isLawReports ? (
+            {numberedSection ? (
               <div
                 className={cn(
                   "rounded-full border px-3 py-1.5 text-right",
@@ -560,9 +585,11 @@ function LibraryMaterialModal({
 
         <div className="relative min-h-0 flex-1">
         <div className="h-full overflow-y-auto px-4 py-3.5" ref={bodyRef}>
-          <div className={cn("grid gap-4 pb-2", isLawReports ? "grid-cols-1" : "md:grid-cols-2")}>
-            <label className={cn("space-y-1.5", isLawReports ? "" : "md:col-span-2")}>
-              <span className={cn("text-xs font-medium uppercase tracking-[0.2em]", isDark ? "text-slate-500" : "text-slate-500")}>Title</span>
+          <div className={cn("grid gap-4 pb-2", numberedSection ? "grid-cols-1" : "md:grid-cols-2")}>
+            <label className={cn("space-y-1.5", numberedSection ? "" : "md:col-span-2")}>
+              <span className={cn("text-xs font-medium uppercase tracking-[0.2em]", isDark ? "text-slate-500" : "text-slate-500")}>
+                {isHelarpedia ? "Issue & terms" : "Title"}
+              </span>
               <input
                 className={cn(
                   "w-full rounded-2xl border px-3.5 py-2 text-sm outline-none transition",
@@ -571,7 +598,13 @@ function LibraryMaterialModal({
                     : "border-slate-200 bg-slate-50 text-slate-950 placeholder:text-slate-400"
                 )}
                 onChange={(event) => onChange("title", event.target.value)}
-                placeholder={isLawReports ? "Enter the law report title" : "Enter a clear material title"}
+                placeholder={
+                  isLawReports
+                    ? "Enter the law report title"
+                    : isHelarpedia
+                      ? "Name the legal issue or term this entry covers (e.g. 'Doctrine of precedent')."
+                      : "Enter a clear material title"
+                }
                 value={draft.title}
               />
             </label>
@@ -642,6 +675,54 @@ function LibraryMaterialModal({
                   </div>
                 </div>
               </>
+            ) : isHelarpedia ? (
+              <>
+                <div className="overflow-x-auto pb-1">
+                  <div className="grid min-w-[620px] grid-cols-2 gap-2.5">
+                    <label className="space-y-1">
+                      <span className={cn("text-[11px] font-medium uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Serial no.</span>
+                      <input
+                        className={cn(
+                          "w-full rounded-2xl border px-3 py-2 text-sm outline-none transition",
+                          isDark
+                            ? "border-slate-700 bg-slate-900 text-slate-300"
+                            : "border-slate-200 bg-slate-100 text-slate-700"
+                        )}
+                        readOnly
+                        value={draft.reportNumber ?? ""}
+                      />
+                    </label>
+
+                    <label className="space-y-1">
+                      <span className={cn("text-[11px] font-medium uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Updated</span>
+                      <input
+                        className={cn(
+                          "w-full rounded-2xl border px-3 py-2 text-sm outline-none transition",
+                          isDark ? "border-slate-700 bg-slate-900 text-white" : "border-slate-200 bg-slate-50 text-slate-950"
+                        )}
+                        onChange={(event) => onChange("reportDate", event.target.value)}
+                        type="date"
+                        value={draft.reportDate ?? ""}
+                      />
+                    </label>
+
+                    <label className="space-y-1 md:col-span-2">
+                      <span className={cn("text-[11px] font-medium uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Cross-reference link / attachment</span>
+                      <input
+                        className={cn(
+                          "w-full rounded-2xl border px-3 py-2 text-sm outline-none transition",
+                          isDark
+                            ? "border-slate-700 bg-slate-900 text-white placeholder:text-slate-500"
+                            : "border-slate-200 bg-slate-50 text-slate-950 placeholder:text-slate-400"
+                        )}
+                        onChange={(event) => onChange("storageUrl", event.target.value)}
+                        placeholder="Helarpedia-### or a downloadable attachment URL"
+                        value={draft.storageUrl}
+                      />
+                    </label>
+                  </div>
+                </div>
+              </>
             ) : (
               <>
                 <label className="space-y-2">
@@ -696,15 +777,19 @@ function LibraryMaterialModal({
               </>
             )}
 
-            {isLawReports ? (
+            {numberedSection ? (
               <>
                 <div>
                   <RichTextField
                     isDark={isDark}
-                    label="Summary"
-                    minHeight={104}
+                    label={isHelarpedia ? "Definition / summary" : "Summary"}
+                    minHeight={isHelarpedia ? 160 : 104}
                     onChange={(value) => onChange("summary", value)}
-                    placeholder="Write a concise formatted summary for this report."
+                    placeholder={
+                      isHelarpedia
+                        ? "Write the concise definition or legal explanation for this issue."
+                        : "Write a concise formatted summary for this report."
+                    }
                     value={draft.summary}
                   />
                 </div>
@@ -712,10 +797,14 @@ function LibraryMaterialModal({
                 <div>
                   <RichTextField
                     isDark={isDark}
-                    label="Body"
-                    minHeight={128}
+                    label={isHelarpedia ? "Related cases" : "Body"}
+                    minHeight={isHelarpedia ? 200 : 128}
                     onChange={(value) => onChange("body", value)}
-                    placeholder="Write the full law report body here."
+                    placeholder={
+                      isHelarpedia
+                        ? "List related case law citations, Helar-YYYY-NNN references, and supporting authorities here."
+                        : "Write the full law report body here."
+                    }
                     value={draft.body}
                   />
                 </div>
@@ -729,7 +818,9 @@ function LibraryMaterialModal({
                   <div>
                     <p className={cn("text-sm font-medium", isDark ? "text-white" : "text-slate-950")}>Enable sharing and deep links</p>
                     <p className={cn("mt-0.5 text-sm", isDark ? "text-slate-400" : "text-slate-600")}>
-                      Adds paragraph deep links and selection sharing tools in the law report reader for admins and content admins.
+                      {isHelarpedia
+                        ? "Adds paragraph deep links and selection sharing tools so admins can cite and share specific Helarpedia paragraphs."
+                        : "Adds paragraph deep links and selection sharing tools in the law report reader for admins and content admins."}
                     </p>
                   </div>
                   <input checked={draft.sharingEnabled} onChange={(event) => onChange("sharingEnabled", event.target.checked)} type="checkbox" />
@@ -897,7 +988,8 @@ function LawReportEngagementSection({
   onAddReport,
   reports,
   totalHoursSpent,
-  totalVisits
+  totalVisits,
+  variant = "law-reports"
 }: {
   isDark: boolean;
   onAddReport: () => void;
@@ -910,7 +1002,9 @@ function LawReportEngagementSection({
   }>;
   totalHoursSpent: number;
   totalVisits: number;
+  variant?: "law-reports" | "helarpedia";
 }) {
+  const isHelarpedia = variant === "helarpedia";
   const topReports = useMemo(() => {
     if (reports.length <= 1) {
       return reports.slice(0, 5);
@@ -931,17 +1025,21 @@ function LawReportEngagementSection({
     >
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="max-w-3xl">
-          <p className={cn("text-xs uppercase tracking-[0.24em]", isDark ? "text-slate-500" : "text-slate-400")}>Law report engagement</p>
+          <p className={cn("text-xs uppercase tracking-[0.24em]", isDark ? "text-slate-500" : "text-slate-400")}>
+            {isHelarpedia ? "Helarpedia engagement" : "Law report engagement"}
+          </p>
           <h2 className={cn("mt-3 font-heading text-3xl leading-tight", isDark ? "text-white" : "text-slate-950")}>
-            See which reports are drawing attention.
+            {isHelarpedia ? "See which Helarpedia entries are drawing attention." : "See which reports are drawing attention."}
           </h2>
           <p className={cn("mt-3 max-w-2xl text-sm leading-7", isDark ? "text-slate-300" : "text-slate-600")}>
-            This chart shows the most visited law reports and the real hours spent across the full law report archive.
+            {isHelarpedia
+              ? "This chart shows the most visited Helarpedia entries and the real hours spent across the full Helarpedia archive."
+              : "This chart shows the most visited law reports and the real hours spent across the full law report archive."}
           </p>
         </div>
         <button className="button-primary !px-5 !py-3" onClick={onAddReport} type="button">
           <Plus className="h-4 w-4" />
-          Add law report
+          {isHelarpedia ? "Add Helarpedia entry" : "Add law report"}
         </button>
       </div>
 
@@ -954,7 +1052,9 @@ function LawReportEngagementSection({
         >
           <div className="flex items-center gap-2">
             <BarChart3 className={cn("h-4 w-4", isDark ? "text-slate-300" : "text-slate-600")} />
-            <p className={cn("text-sm font-medium", isDark ? "text-white" : "text-slate-950")}>Most visited reports</p>
+            <p className={cn("text-sm font-medium", isDark ? "text-white" : "text-slate-950")}>
+              {isHelarpedia ? "Most visited entries" : "Most visited reports"}
+            </p>
           </div>
 
           {reports.length ? (
@@ -991,7 +1091,7 @@ function LawReportEngagementSection({
                 isDark ? "border-slate-800 text-slate-400" : "border-slate-200 text-slate-500"
               )}
             >
-              No visits have been recorded for law reports yet.
+              No visits have been recorded for {isHelarpedia ? "Helarpedia entries" : "law reports"} yet.
             </div>
           )}
         </div>
@@ -1042,6 +1142,14 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
   const queryClient = useQueryClient();
   const copy = sectionCopy[section];
   const isLawReports = isLawReportsSection(section);
+  const isHelarpedia = isHelarpediaSection(section);
+  // Both law reports (Helar-{year}-N) and Helarpedia (Helarpedia-1000+) use
+  // auto-incrementing serial numbers, next-number preview badges, summary
+  // engagement cards, and the same create/edit modal structure. Any
+  // remaining `isLawReports` discriminator below is for court-specific UX
+  // (Court enum, Suit number, Date-only fields); Helarpedia uses the generic
+  // Serial no. / Updated / Cross-ref layout instead.
+  const numberedSection = isLawReports || isHelarpedia;
   const isContentAdminWorkspace = isContentAdmin(roleCodes);
   const [filters, setFilters] = useState(defaultFilters);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -1083,15 +1191,18 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
   });
 
   useEffect(() => {
-    if (!isLawReports || editingMaterial || !isModalOpen) {
+    if (!numberedSection || editingMaterial || !isModalOpen) {
       return;
     }
 
     setDraft((current) => ({
       ...current,
-      reportNumber: materialsQuery.data?.nextReportNumber ?? current.reportNumber ?? getDefaultReportNumber()
+      reportNumber:
+        materialsQuery.data?.nextReportNumber ??
+        current.reportNumber ??
+        (isLawReports ? getDefaultReportNumber() : getDefaultHelarpediaNumber())
     }));
-  }, [editingMaterial, isLawReports, isModalOpen, materialsQuery.data?.nextReportNumber]);
+  }, [editingMaterial, isHelarpedia, isLawReports, isModalOpen, materialsQuery.data?.nextReportNumber, numberedSection]);
 
   useEffect(() => {
     const editMaterialId = searchParams.get("edit");
@@ -1233,10 +1344,14 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
         isContentAdminWorkspace
           ? isLawReports
             ? "Law report submitted for super admin approval."
-            : "Library material submitted for super admin approval."
+            : isHelarpedia
+              ? "Helarpedia entry submitted for super admin approval."
+              : "Library material submitted for super admin approval."
           : isLawReports
             ? "Law report created successfully."
-            : "Library material created successfully.",
+            : isHelarpedia
+              ? "Helarpedia entry created successfully."
+              : "Library material created successfully.",
         "success"
       );
       setIsModalOpen(false);
@@ -1323,7 +1438,11 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
       });
       // #endregion debug-point frontend-create-onerror
       const serverMessage = extractServerErrorMessage(error);
-      const fallback = isLawReports ? "Could not create the law report right now." : "Could not create the library material right now.";
+      const fallback = isLawReports
+        ? "Could not create the law report right now."
+        : isHelarpedia
+          ? "Could not create the Helarpedia entry right now."
+          : "Could not create the library material right now.";
       showToast(serverMessage ?? fallback, "error");
       setSaveProgress({ kind: "idle" });
     }
@@ -1410,10 +1529,14 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
         isContentAdminWorkspace
           ? isLawReports
             ? "Law report changes sent for super admin approval."
-            : "Library material changes sent for super admin approval."
+            : isHelarpedia
+              ? "Helarpedia entry changes sent for super admin approval."
+              : "Library material changes sent for super admin approval."
           : isLawReports
             ? "Law report updated successfully."
-            : "Library material updated successfully.",
+            : isHelarpedia
+              ? "Helarpedia entry updated successfully."
+              : "Library material updated successfully.",
         "success"
       );
       setIsModalOpen(false);
@@ -1444,7 +1567,11 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
         rawErrorString: String(error)
       });
       const serverMessage = extractServerErrorMessage(error);
-      const fallback = isLawReports ? "Could not update the law report right now." : "Could not update the library material right now.";
+      const fallback = isLawReports
+        ? "Could not update the law report right now."
+        : isHelarpedia
+          ? "Could not update the Helarpedia entry right now."
+          : "Could not update the library material right now.";
       showToast(serverMessage ?? fallback, "error");
       setSaveProgress({ kind: "idle" });
     }
@@ -1453,38 +1580,60 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
   const deleteMutation = useMutation({
     mutationFn: (materialId: string) => deleteAdminLibraryMaterial(section, materialId),
     onSuccess: () => {
-      showToast(isLawReports ? "Law report removed successfully." : "Library material removed successfully.", "success");
+      showToast(
+        isLawReports
+          ? "Law report removed successfully."
+          : isHelarpedia
+            ? "Helarpedia entry removed successfully."
+            : "Library material removed successfully.",
+        "success"
+      );
       void queryClient.invalidateQueries({ queryKey: ["admin-library", section] });
     },
     onError: (error) => {
       const serverMessage = extractServerErrorMessage(error);
-      const fallback = isLawReports ? "Could not remove the law report right now." : "Could not remove the library material right now.";
+      const fallback = isLawReports
+        ? "Could not remove the law report right now."
+        : isHelarpedia
+          ? "Could not remove the Helarpedia entry right now."
+          : "Could not remove the library material right now.";
       showToast(serverMessage ?? fallback, "error");
     }
   });
 
   const summaryCards = useMemo(() => {
     const summary = materialsQuery.data?.summary;
+    const nextNumber = materialsQuery.data?.nextReportNumber;
 
-    return [
+    const cards: Array<{ label: string; value: string }> = [
       {
-        label: isLawReports ? "Total reports" : "Total materials",
+        label: isLawReports ? "Total reports" : isHelarpedia ? "Total entries" : "Total materials",
         value: String(summary?.totalMaterials ?? 0)
-      },
-      {
-        label: "Download enabled",
-        value: String(summary?.downloadableCount ?? 0)
-      },
-      {
-        label: "Recent uploads",
-        value: String(summary?.recentUploadsCount ?? 0)
-      },
-      {
-        label: "Avg read time",
-        value: `${summary?.averageReadTimeMins ?? 0} min`
       }
     ];
-  }, [isLawReports, materialsQuery.data]);
+
+    if (numberedSection && nextNumber) {
+      cards.push({
+        label: isLawReports ? "Next case number" : "Next serial",
+        value: nextNumber
+      });
+    }
+
+    cards.push({
+      label: "Download enabled",
+      value: String(summary?.downloadableCount ?? 0)
+    });
+    cards.push({
+      label: "Recent uploads",
+      value: String(summary?.recentUploadsCount ?? 0)
+    });
+    cards.push({
+      label: "Avg read time",
+      value: `${summary?.averageReadTimeMins ?? 0} min`
+    });
+
+    return cards;
+  }, [isHelarpedia, isLawReports, materialsQuery.data, numberedSection]);
 
   const lawReportEngagement = materialsQuery.data?.summary.lawReportEngagement;
 
@@ -1518,11 +1667,11 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
         [field]: value
       } as AdminLibraryMaterialInput;
 
-      if (field === "body" && isLawReports) {
+      if (field === "body" && numberedSection) {
         nextDraft.estimatedMins = estimateMinutesFromBody(String(value));
       }
 
-      if (field === "estimatedMins" && !isLawReports) {
+      if (field === "estimatedMins" && !numberedSection) {
         nextDraft.estimatedMins = Number(value);
       }
 
@@ -1532,12 +1681,24 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
 
   async function handleSubmit() {
     if (!draft.title.trim() || !draft.storageUrl.trim()) {
-      showToast(isLawReports ? "Add a title and suit number before saving." : "Add a title and a valid storage URL before saving.", "error");
+      showToast(
+        isLawReports
+          ? "Add a title and suit number before saving."
+          : isHelarpedia
+            ? "Add the issue/term and a cross-reference link before saving."
+            : "Add a title and a valid storage URL before saving.",
+        "error"
+      );
       return;
     }
 
-    if (isLawReports && !stripHtml(draft.body)) {
-      showToast("Add the report body before saving this law report.", "error");
+    if (numberedSection && !stripHtml(draft.body)) {
+      showToast(
+        isLawReports
+          ? "Add the report body before saving this law report."
+          : "Add at least one related case or supporting authority before saving this Helarpedia entry.",
+        "error"
+      );
       return;
     }
 
@@ -1603,13 +1764,14 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
       <ToastViewport isDark={isDark} onDismiss={dismissToast} toasts={toasts} />
 
       <div className="space-y-6">
-        {isLawReports ? (
+        {numberedSection ? (
           <LawReportEngagementSection
             isDark={isDark}
             onAddReport={openCreateModal}
             reports={lawReportEngagement?.topReports ?? []}
             totalHoursSpent={lawReportEngagement?.totalHoursSpent ?? 0}
             totalVisits={lawReportEngagement?.totalVisits ?? 0}
+            variant={isLawReports ? "law-reports" : "helarpedia"}
           />
         ) : (
           <section className="overflow-hidden rounded-[30px] bg-[linear-gradient(135deg,#25112b_0%,#0f1f4d_55%,#112a5b_100%)] p-7 text-white shadow-[0_30px_90px_rgba(15,23,42,0.24)] lg:p-8">
@@ -1651,7 +1813,13 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
               <input
                 className={cn("w-full bg-transparent text-sm outline-none", isDark ? "text-white placeholder:text-slate-500" : "text-slate-950 placeholder:text-slate-400")}
                 onChange={(event) => setFilters((current) => ({ ...current, page: 1, search: event.target.value }))}
-                placeholder={isLawReports ? "Search title, suit number, or case number" : "Search title or URL"}
+                placeholder={
+                  isLawReports
+                    ? "Search title, suit number, or case number"
+                    : isHelarpedia
+                      ? "Search issue name, serial number, or related-case citation"
+                      : "Search title or URL"
+                }
                 value={filters.search}
               />
             </label>
@@ -1667,7 +1835,9 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
               }
               value={filters.materialType}
             >
-              <option value="all">{isLawReports ? "All courts" : "All material types"}</option>
+              <option value="all">
+                {isLawReports ? "All courts" : isHelarpedia ? "All entry types" : "All material types"}
+              </option>
               {typeOptions.map((materialType) => (
                 <option key={materialType} value={materialType}>
                   {prettifyMaterialType(materialType)}
@@ -1729,7 +1899,9 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
               <table className="min-w-full border-separate border-spacing-y-3">
                 <thead>
                   <tr className={cn("text-left text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-400")}>
-                    <th className="px-4 py-2 font-medium">{isLawReports ? "Law report" : "Material"}</th>
+                    <th className="px-4 py-2 font-medium">
+                      {isLawReports ? "Law report" : isHelarpedia ? "Helarpedia entry" : "Material"}
+                    </th>
                     <th className="px-4 py-2 font-medium">{isLawReports ? "Court" : "Type"}</th>
                     <th className="px-4 py-2 font-medium">Engagement</th>
                     <th className="px-4 py-2 font-medium">Updated</th>
@@ -1748,7 +1920,7 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
                     >
                       <td className="rounded-l-[22px] px-4 py-4 align-top">
                         <div>
-                          {isLawReports ? (
+                          {numberedSection ? (
                             <>
                               <Link
                                 className={cn(
@@ -1756,14 +1928,20 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
                                   isDark ? "text-white" : "text-slate-950"
                                 )}
                                 onClick={(event) => event.stopPropagation()}
-                                to={`/app/admin/library/law-reports/${material.id}`}
+                                to={
+                                  isLawReports
+                                    ? `/app/admin/library/law-reports/${material.id}`
+                                    : `/app/admin/library/helarpedia/${material.id}`
+                                }
                               >
                                 {material.title}
                               </Link>
                               <p className={cn("mt-2 text-xs", isDark ? "text-slate-400" : "text-slate-500")}>
-                                Case Number: {material.reportNumber ?? "Pending assignment"}
+                                {isLawReports ? "Case Number" : "Serial no."}: {material.reportNumber ?? "Pending assignment"}
                               </p>
-                              <p className={cn("mt-1 text-xs", isDark ? "text-slate-400" : "text-slate-500")}>Suit Number: {material.storageUrl}</p>
+                              <p className={cn("mt-1 text-xs", isDark ? "text-slate-400" : "text-slate-500")}>
+                                {isLawReports ? "Suit Number" : "Cross-reference"}: {material.storageUrl}
+                              </p>
                               {stripHtml(material.summary) ? (
                                 <p className={cn("mt-3 line-clamp-2 text-sm leading-6", isDark ? "text-slate-300" : "text-slate-600")}>{stripHtml(material.summary)}</p>
                               ) : null}
@@ -1873,11 +2051,21 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
                 action={
                   <button className="button-primary !px-4 !py-3" onClick={openCreateModal} type="button">
                     <Plus className="h-4 w-4" />
-                    {isLawReports ? "Add first law report" : "Add first material"}
+                    {isLawReports
+                      ? "Add first law report"
+                      : isHelarpedia
+                        ? "Add first Helarpedia entry"
+                        : "Add first material"}
                   </button>
                 }
                 isDark={isDark}
-                message={isLawReports ? "No law reports exist yet. Add the first report to start building the archive." : "No materials match this library section yet. Add the first record to make the page useful for your admin team."}
+                message={
+                  isLawReports
+                    ? "No law reports exist yet. Add the first report to start building the archive."
+                    : isHelarpedia
+                      ? "No Helarpedia entries exist yet. Add the first issue/term entry to start the legal encyclopedia."
+                      : "No materials match this library section yet. Add the first record to make the page useful for your admin team."
+                }
               />
             )}
           </div>

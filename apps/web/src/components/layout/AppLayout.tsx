@@ -18,6 +18,7 @@ const studentPageTitles: Record<string, string> = {
   '/app/bar-final-exams-mcq': 'Bar Final Exam • MCQ',
   '/app/dashboard': 'Student Dashboard',
   '/app/library': 'Library',
+  '/app/library/helarpedia': 'Helarpedia',
   '/app/library/law-reports': 'Law Reports',
   '/app/profile': 'Profile',
   '/app/library/subject-summaries': 'Cases and Ratios',
@@ -28,6 +29,7 @@ const adminPageTitles: Record<string, string> = {
   '/app/admin/content': 'Content Review',
   '/app/admin/library/cases-and-ratios': 'Cases and Ratios',
   '/app/admin/library/cases-and-ratios/materials': 'Subject Summary Materials',
+  '/app/admin/library/helarpedia': 'Helarpedia',
   '/app/admin/library/law-reports': 'Law Reports',
   '/app/admin/library/subject-summaries': 'Cases and Ratios',
   '/app/admin/library/subject-summaries/cases': 'Subject Summary Cases',
@@ -78,23 +80,27 @@ export function AppLayout() {
       : pageTitles[location.pathname]) ??
     (location.pathname.startsWith('/app/library/law-reports/')
       ? 'Law Report Reader'
-      : location.pathname.startsWith('/app/library/subject-summaries/cases/')
-        ? 'Case Detail'
-        : location.pathname.startsWith('/app/bar-final-exams-nls-mcq/')
-          ? 'Bar Final Exam'
-          : location.pathname.startsWith('/app/bar-final-exams-mcq/')
+      : location.pathname.startsWith('/app/library/helarpedia/')
+        ? 'Helarpedia Reader'
+        : location.pathname.startsWith('/app/library/subject-summaries/cases/')
+          ? 'Case Detail'
+          : location.pathname.startsWith('/app/bar-final-exams-nls-mcq/')
             ? 'Bar Final Exam'
-            : location.pathname.startsWith('/app/admin/bar-final-exams-nls-mcq/')
+            : location.pathname.startsWith('/app/bar-final-exams-mcq/')
               ? 'Bar Final Exam'
-              : location.pathname.startsWith('/app/admin/bar-final-exams-mcq/')
+              : location.pathname.startsWith('/app/admin/bar-final-exams-nls-mcq/')
                 ? 'Bar Final Exam'
-        : location.pathname.startsWith('/app/admin/library/law-reports/')
-          ? 'Law Report Reader'
-          : location.pathname.startsWith('/app/admin/library/subject-summaries/cases/')
-            ? 'Case Detail'
-            : location.pathname.startsWith('/app/admin/content/review/')
-              ? 'Content Review'
-            : 'Workspace')
+                : location.pathname.startsWith('/app/admin/bar-final-exams-mcq/')
+                  ? 'Bar Final Exam'
+                  : location.pathname.startsWith('/app/admin/library/law-reports/')
+                    ? 'Law Report Reader'
+                    : location.pathname.startsWith('/app/admin/library/helarpedia/')
+                      ? 'Helarpedia Reader'
+                      : location.pathname.startsWith('/app/admin/library/subject-summaries/cases/')
+                        ? 'Case Detail'
+                        : location.pathname.startsWith('/app/admin/content/review/')
+                          ? 'Content Review'
+                        : 'Workspace')
   const moduleType = new URLSearchParams(location.search).get('moduleType') === 'NLS' ? 'NLS' : 'FACULTY'
   const modulePageTitle =
     moduleType === 'NLS' ? 'NLS Summaries' : 'Faculty Summaries'

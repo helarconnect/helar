@@ -7,7 +7,7 @@ import { containsText } from "./lib/text-search.js";
 import { createPreviewHtml, getPremiumContentAccess, PREMIUM_PREVIEW_WORD_LIMIT } from "./premium-access.js";
 import { runInTransaction } from "./lib/transactions.js";
 
-const adminLibrarySectionSchema = z.enum(["law-reports", "subject-summaries", "cases-and-ratios"]);
+const adminLibrarySectionSchema = z.enum(["law-reports", "subject-summaries", "cases-and-ratios", "helarpedia"]);
 
 const adminLibraryFiltersSchema = z.object({
   materialType: z.union([z.nativeEnum(MaterialType), z.literal("all")]).default("all"),
@@ -96,6 +96,11 @@ const adminLibrarySectionConfig: Record<
     name: "Cases And Ratios",
     slug: "cases-and-ratios"
   },
+  helarpedia: {
+    description: "Manage Helarpedia issue definitions, concise legal term explanations, and cross-links to related cases.",
+    name: "Helarpedia",
+    slug: "helarpedia"
+  },
   "law-reports": {
     description: "Manage report archives, citations, and downloadable legal report resources.",
     name: "Law Reports",
@@ -122,6 +127,14 @@ function getSectionFromCategorySlug(slug: string): AdminLibrarySection | null {
 
 function isLawReportsSection(section: AdminLibrarySection) {
   return section === "law-reports";
+}
+
+function isHelarpediaSection(section: AdminLibrarySection) {
+  return section === "helarpedia";
+}
+
+function isReportNumberedSection(section: AdminLibrarySection) {
+  return isLawReportsSection(section) || isHelarpediaSection(section);
 }
 
 function getAllowedMaterialTypes(section: AdminLibrarySection) {
@@ -673,6 +686,124 @@ async function buildNextLawReportNumber(
   return `${prefix}${chosenInteger}`;
 }
 
+// Helarpedia serial number generator. Format is `Helarpedia-{n}` with the first
+// entry starting at 1000. This matches the publisher's request: "The serial
+// number should start from 1000 and should have this format: Helarpedia-1000."
+// Law of strict monotonic increase applies here too — never fill gaps once a
+// baseline is established (start from maxUsed + 1), only use 1000 if zero
+// Helarpedia entries have ever been saved.
+async function buildNextHelarpediaNumber(
+  db: Prisma.TransactionClient | typeof prisma,
+  categoryId: string
+) {
+  const HELARPEDIA_BASELINE = 1000;
+  const prefix = "Helarpedia-";
+
+  const reports = await db.studyMaterial.findMany({
+    where: {
+      categoryId,
+      reportNumber: {
+        startsWith: prefix
+      }
+    },
+    select: {
+      reportNumber: true
+    }
+  });
+
+  let maxUsed = 0;
+  const usedIntegers = new Set<number>();
+  for (const material of reports) {
+    const rawSuffix = material.reportNumber?.slice(prefix.length) ?? "";
+    const parsed = Number(rawSuffix);
+    if (Number.isInteger(parsed) && parsed > 0) {
+      usedIntegers.add(parsed);
+      if (parsed > maxUsed) maxUsed = parsed;
+    }
+  }
+
+  // Start from 1000 on an empty Helarpedia archive; strictly advance from
+  // maxUsed + 1 once any entry has been saved.
+  let chosenInteger = maxUsed === 0 ? HELARPEDIA_BASELINE : maxUsed + 1;
+
+  let raceProbes = 0;
+  while (raceProbes < 16) {
+    while (usedIntegers.has(chosenInteger)) {
+      chosenInteger += 1;
+    }
+    const candidate = `${prefix}${chosenInteger}`;
+    const existing = await db.studyMaterial.findFirst({
+      where: { reportNumber: candidate },
+      select: { id: true }
+    });
+    if (!existing) {
+      try {
+        void fetch("http://127.0.0.1:7777/event", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId: "law-reports-save-failing",
+            runId: "pre",
+            hypothesisIds: ["H2", "H5"],
+            timestamp: new Date().toISOString(),
+            level: "info",
+            message: "buildNextHelarpediaNumber chose candidate (strict monotonic)",
+            data: {
+              categoryId,
+              prefix,
+              maxUsed,
+              baseline: HELARPEDIA_BASELINE,
+              chosenInteger,
+              chosenCandidate: candidate,
+              raceProbes,
+              scannedExistingCount: reports.length,
+              usedIntegerCount: usedIntegers.size
+            }
+          })
+        }).catch(() => {});
+      } catch {
+        /* debug-only */
+      }
+      console.debug("[debug-law-reports-save-failing][H2|H5] buildNextHelarpediaNumber chose candidate (strict monotonic)", {
+        categoryId,
+        prefix,
+        maxUsed,
+        baseline: HELARPEDIA_BASELINE,
+        chosenInteger,
+        chosenCandidate: candidate,
+        raceProbes,
+        scannedExistingCount: reports.length,
+        usedIntegerCount: usedIntegers.size
+      });
+      return candidate;
+    }
+    usedIntegers.add(chosenInteger);
+    if (chosenInteger > maxUsed) maxUsed = chosenInteger;
+    raceProbes += 1;
+    chosenInteger += 1;
+  }
+
+  return `${prefix}${chosenInteger}`;
+}
+
+// Dispatcher: pick the correct section-specific next-report-number generator.
+// Law reports use Helar-{year}-N. Helarpedia uses Helarpedia-{1000+N}. Other
+// generic library sections (cases-and-ratios, subject-summaries) do not have
+// dedicated citation numbers; they use internal-{uuid} instead.
+async function buildNextReportNumberForSection(
+  section: AdminLibrarySection,
+  db: Prisma.TransactionClient | typeof prisma,
+  categoryId: string
+): Promise<string | null> {
+  if (isLawReportsSection(section)) {
+    return buildNextLawReportNumber(db, categoryId);
+  }
+  if (isHelarpediaSection(section)) {
+    return buildNextHelarpediaNumber(db, categoryId);
+  }
+  return null;
+}
+
 // Fire-and-forget style audit logger. Audit writes MUST never block or fail
 // the business operation they're observing — the material was already saved,
 // so losing an audit log is acceptable; surfacing a save error to the admin
@@ -851,7 +982,9 @@ export async function listAdminLibraryMaterials(
   }
 
   const where = createLibraryMaterialWhere(category.id, filters, audience);
+  const reportNumberedSection = isReportNumberedSection(section);
   const lawReports = isLawReportsSection(section);
+  const helarpedia = isHelarpediaSection(section);
 
   // Primary pagination queries - failures here are surfaced to the caller.
   const [totalItems, materials, totalInSection, downloadableCount, recentUploadsCount] = await Promise.all([
@@ -902,8 +1035,10 @@ export async function listAdminLibraryMaterials(
   // Auxiliary/summary queries - isolated with safe fallbacks to avoid 500s on
   // metrics-only regressions (e.g., readingHistory include issues, aggregate errors).
   const [nextReportNumber, engagementMaterials, averageReadTimeAggregate] = await Promise.all([
-    lawReports ? safely(buildNextLawReportNumber(prisma, category.id), null as string | null) : Promise.resolve(null),
-    lawReports
+    reportNumberedSection
+      ? safely(buildNextReportNumberForSection(section, prisma, category.id), null as string | null)
+      : Promise.resolve(null),
+    reportNumberedSection
       ? safely(
           prisma.studyMaterial.findMany({
             where: {
@@ -951,8 +1086,12 @@ export async function listAdminLibraryMaterials(
     )
   ]);
 
-  // Law-report engagement reduction is computed in-process but still wrapped
-  // defensively in case of unexpected data shape inconsistencies.
+  // Law-report & Helarpedia engagement reduction is computed in-process but still
+  // wrapped defensively in case of unexpected data shape inconsistencies.
+  //
+  // Helarpedia uses the EXACT same metrics as law reports (top 5 most-read entries
+  // entries, total hours, total visits) so admin gets the same "reports about
+  // uploaded items" dashboard for both numbered sections.
   let lawReportEngagement: {
     topReports: Array<{
       id: string;
@@ -965,7 +1104,7 @@ export async function listAdminLibraryMaterials(
     totalVisits: number;
   } | null = null;
 
-  if (lawReports) {
+  if (reportNumberedSection) {
     try {
       const reportMetrics = engagementMaterials.map((material) => {
         const readingHistoryEntries = material.readingHistory ?? [];
@@ -1328,36 +1467,25 @@ export async function createAdminLibraryMaterial(
   // ~1MB chars per chunk doc to keep plenty of headroom for fields/overhead).
   const bodyChunks = chunkifyOverflow(bodySplit.overflow, PER_CHUNK_MAX_CHARS);
   const summaryChunks = chunkifyOverflow(summarySplit.overflow, PER_CHUNK_MAX_CHARS);
-  const estimatedMins = isLawReportsSection(section) ? calculateEstimatedMinutesFromBody(body) : input.estimatedMins;
+  const estimatedMins = isLawReportsSection(section) || isHelarpediaSection(section) ? calculateEstimatedMinutesFromBody(body) : input.estimatedMins;
   const reportDate = parseReportDate(input.reportDate, section);
-  const internalReportNumber = isLawReportsSection(section) ? null : `internal-${randomUUID()}`;
+  // Helarpedia also gets a serial number (Helarpedia-1000, 1001, …). Sections with
+  // dedicated numbering both fall through the isReportNumberedSection branch below.
+  const internalReportNumber = isReportNumberedSection(section) ? null : `internal-${randomUUID()}`;
   const publicationStatus = resolvePublicationStatus(actorRoleCodes);
 
-  // CRITICAL reliability fix: pick the next law report number OUTSIDE any
-  // transaction using the global prisma client (reads latest committed data,
-  // no MongoDB snapshot isolation that could hide concurrently saved numbers
-  // from within the tx). Previously buildNextLawReportNumber was run INSIDE
-  // a multi-document tx where findMany/findFirst only saw a frozen
-  // point-in-time snapshot, so a number committed between tx start and the
-  // create write appeared available to the probe but P2002'd on commit, and
-  // every one of the 16 runSerializableWrite retries repeated the same stale
-  // scan — all 16 failed identically.
-  //
-  // By running the scan outside the tx, every retry performs a FRESH scan of
-  // the actually committed data and assigns the next truly-free slot.
-  //
-  // NOTE: the ONE write (studyMaterial.create) is executed DIRECTLY on prisma
-  // (not wrapped in a MongoDB multi-doc tx). Multi-doc tx with just ONE write
-  // is pure overhead on MongoDB, and shared Atlas topologies (serverless /
-  // M0/M2/M5) emit spurious P2024/P2034/P2028 "Transaction API error"
-  // aborts for single-write txs under normal load. Removing the unnecessary
-  // wrapper eliminates an entire class of false "another admin may be
-  // uploading" toasts on single-admin deployments.
+  // See create/update parity comments above for the reliability principles here:
+  //   (a) serial number resolution runs OUTSIDE the one-statement write against
+  //       the global prisma client (latest committed data, no snapshot isolation
+  //       → no stale candidates).
+  //   (b) studyMaterial.create runs directly on prisma, not wrapped in a
+  //       multi-doc MongoDB tx (removes spurious P2024/P2034 from Atlas shared
+  //       tiers on single-statement writes).
+  //   (c) buildNextReportNumberForSection dispatches law-reports → Helar-{year}-N
+  //       and helarpedia → Helarpedia-{1000+N}; generic sections keep internal-{uuid}.
   const material = await runSerializableWrite(async () => {
-    // Every retry re-scans committed data for a free sequence number. This is
-    // the only way to guarantee a fresh candidate after a P2002 race.
-    const computedReportNumber = isLawReportsSection(section)
-      ? await buildNextLawReportNumber(prisma, category.id)
+    const computedReportNumber = isReportNumberedSection(section)
+      ? await buildNextReportNumberForSection(section, prisma, category.id)
       : internalReportNumber;
     return prisma.studyMaterial.create({
       data: {
@@ -1475,27 +1603,24 @@ export async function updateAdminLibraryMaterial(
   // content remain deterministic regardless of which direction size moves.
   const bodyChunks = chunkifyOverflow(bodySplit.overflow, PER_CHUNK_MAX_CHARS);
   const summaryChunks = chunkifyOverflow(summarySplit.overflow, PER_CHUNK_MAX_CHARS);
-  const estimatedMins = isLawReportsSection(section) ? calculateEstimatedMinutesFromBody(body) : input.estimatedMins;
+  const estimatedMins = isLawReportsSection(section) || isHelarpediaSection(section) ? calculateEstimatedMinutesFromBody(body) : input.estimatedMins;
   const reportDate = parseReportDate(input.reportDate, section);
 
   const publicationStatus = resolvePublicationStatus(actorRoleCodes, existingMaterial.publicationStatus);
 
-  // Match create's reliability fix:
-  //   (a) if we need to assign a new report number (rare update-case: editing
-  //       an old migrated report that was never assigned a Helar-{year}-N)
-  //       compute it OUTSIDE the write tx against the committed global prisma
-  //       client so every runSerializableWrite retry on P2002 gets a fresh
-  //       scan, not a stale snapshot.
-  //   (b) one-statement writes don't need a MongoDB multi-doc tx. Removing the
-  //       runLibraryWriteTransaction wrapper on studyMaterial.update eliminates
-  //       the spurious P2024/P2034/P2028 "Transaction API error" that Atlas
-  //       serverless/shared clusters can emit for single-write txs on their
-  //       own, which surfaced as the false "another admin may be uploading"
-  //       toast on single-admin deployments.
+  // Mirror create flow:
+  //   (a) Assign a serial number on update ONLY if the entry was imported/migrated
+  //       with no reportNumber previously. For Helarpedia this uses Helarpedia-1000+N
+  //       strict monotonic; for law reports it uses Helar-{year}-N strict monotonic.
+  //   (b) Numbering runs OUTSIDE the one-statement write against the global prisma
+  //       client (reads committed data, no snapshot stale reads).
+  //   (c) Single-statement prisma.studyMaterial.update runs directly — no MongoDB
+  //       multi-doc tx wrapper; eliminates spurious P2024/P2034 on Atlas shared
+  //       clusters as a false "another admin may be uploading" toast.
   const material = await runSerializableWrite(async () => {
     const reportNumber =
-      isLawReportsSection(section) && !existingMaterial.reportNumber
-        ? await buildNextLawReportNumber(prisma, category.id)
+      isReportNumberedSection(section) && !existingMaterial.reportNumber
+        ? await buildNextReportNumberForSection(section, prisma, category.id)
         : existingMaterial.reportNumber ?? `internal-${materialId}`;
     return prisma.studyMaterial.update({
       where: {

@@ -81,6 +81,7 @@ export function AppSidebar() {
   const libraryItems: SidebarLibraryItem[] = isAdminWorkspace
     ? [
         { href: '/app/admin/library/law-reports', label: 'Law Reports' },
+        { href: '/app/admin/library/helarpedia', label: 'Helarpedia' },
         { href: '/app/admin/library/subject-summaries', label: 'Cases and Ratios' },
         {
           label: 'Subject Summaries',
@@ -92,6 +93,7 @@ export function AppSidebar() {
       ]
     : [
         { href: '/app/library/law-reports', label: 'Law Reports' },
+        { href: '/app/library/helarpedia', label: 'Helarpedia' },
         { href: '/app/library/subject-summaries', label: 'Cases and Ratios' },
         {
           label: 'Subject Summaries',

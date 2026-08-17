@@ -9,6 +9,7 @@ import {
   deleteStudentStudyBookmark,
   fetchStudentStudyBookmarks,
   autocompletePublishedSubjectSummaries,
+  fetchLibraryHelarpedia,
   fetchLibraryLawReports,
   fetchPublishedSubjectSummaryHierarchy,
   fetchPublishedSubjectSummaryHierarchyCases,
@@ -471,6 +472,224 @@ export function StudentLawReportsPage() {
           )}
         >
           No law reports match the current search yet.
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function StudentHelarpediaPage() {
+  const { isDark } = useTheme();
+  const queryClient = useQueryClient();
+  const [filters, setFilters] = useState(defaultFilters);
+  const reportsQuery = useQuery({
+    queryFn: () => fetchLibraryHelarpedia(filters),
+    queryKey: queryKeys.adminLibrary("student-helarpedia", filters)
+  });
+  const bookmarksQuery = useQuery({
+    queryFn: () => fetchStudentStudyBookmarks({}),
+    queryKey: queryKeys.studentStudyBookmarks({})
+  });
+  const createBookmarkMutation = useMutation({
+    mutationFn: createStudentStudyBookmark,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.studentStudyBookmarks({}) });
+    }
+  });
+  const deleteBookmarkMutation = useMutation({
+    mutationFn: deleteStudentStudyBookmark,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.studentStudyBookmarks({}) });
+    }
+  });
+
+  const materials = reportsQuery.data?.materials ?? [];
+  const bookmarks = bookmarksQuery.data?.items ?? [];
+  const totalItems = reportsQuery.data?.pagination.totalItems ?? 0;
+  const summaryText = useMemo(
+    () => `${totalItems} Helarpedia entr${totalItems === 1 ? "y" : "ies"} covering legal terms, issue definitions, and cross-linked case law.`,
+    [totalItems]
+  );
+
+  return (
+    <div className="space-y-6">
+      <section
+        className={cn(
+          "overflow-visible rounded-[30px] border p-6 shadow-[0_30px_90px_rgba(15,23,42,0.12)] lg:p-7",
+          isDark ? "border-slate-800 bg-slate-950" : "border-slate-200 bg-white"
+        )}
+      >
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div className="max-w-3xl">
+            <p className={cn("text-xs uppercase tracking-[0.24em]", isDark ? "text-slate-500" : "text-slate-400")}>Helarpedia</p>
+            <h2 className={cn("mt-3 font-heading text-3xl leading-tight", isDark ? "text-white" : "text-slate-950")}>
+              Browse published Helarpedia legal issue and term entries.
+            </h2>
+            <p className={cn("mt-3 max-w-2xl text-sm leading-7", isDark ? "text-slate-300" : "text-slate-600")}>{summaryText}</p>
+          </div>
+
+          <div className={cn("flex items-center gap-3 rounded-[24px] border px-4 py-3", isDark ? "border-slate-700 bg-slate-900" : "border-slate-200 bg-slate-50")}>
+            <Search className={cn("h-4 w-4", isDark ? "text-slate-500" : "text-slate-400")} />
+            <input
+              className={cn("w-72 bg-transparent text-sm outline-none", isDark ? "text-white placeholder:text-slate-500" : "text-slate-950 placeholder:text-slate-400")}
+              onChange={(event) => setFilters((current) => ({ ...current, page: 1, search: event.target.value }))}
+              placeholder="Search issue, serial, or related case"
+              value={filters.search}
+            />
+          </div>
+        </div>
+      </section>
+
+      {reportsQuery.isLoading ? (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, index) => (
+            <div className={cn("h-64 animate-pulse rounded-[28px]", isDark ? "bg-slate-800" : "bg-slate-100")} key={index} />
+          ))}
+        </div>
+      ) : reportsQuery.isError ? (
+        <div
+          className={cn(
+            "rounded-[28px] border px-6 py-8 text-sm leading-7",
+            isDark ? "border-slate-800 bg-slate-900 text-slate-300" : "border-slate-200 bg-white text-slate-600"
+          )}
+        >
+          Could not load Helarpedia entries right now.
+        </div>
+      ) : materials.length ? (
+        <>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {materials.map((material) => (
+              <article
+                className={cn(
+                  "rounded-[28px] border p-5 shadow-[0_20px_60px_rgba(15,23,42,0.06)]",
+                  isDark ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-white"
+                )}
+                key={material.id}
+              >
+                {(() => {
+                  const contentKey = `HELARPEDIA:${material.id}`;
+                  const activeBookmark = bookmarks.find((bookmark) => bookmark.contentKey === contentKey);
+
+                  return (
+                    <>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className={cn("inline-flex rounded-full border px-3 py-1 text-xs uppercase tracking-[0.16em]", isDark ? "border-slate-700 bg-slate-950 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600")}>
+                          {material.reportNumber ? `Serial: ${material.reportNumber}` : "Serial number pending"}
+                        </span>
+                        <span className={cn("inline-flex rounded-full border px-3 py-1 text-xs", isDark ? "border-slate-700 bg-slate-950 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600")}>
+                          {material.estimatedMins ? `${material.estimatedMins} min read` : "Read time pending"}
+                        </span>
+                      </div>
+
+                      <h3 className={cn("mt-4 font-heading text-2xl leading-tight", isDark ? "text-white" : "text-slate-950")}>{material.title}</h3>
+
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                        <div className={cn("rounded-[20px] border p-3", isDark ? "border-slate-800 bg-slate-950" : "border-slate-200 bg-slate-50")}>
+                          <div className="flex items-center gap-2">
+                            <BookOpenText className={cn("h-4 w-4", isDark ? "text-slate-500" : "text-slate-400")} />
+                            <p className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-400")}>Updated</p>
+                          </div>
+                          <p className={cn("mt-2 text-sm font-medium", isDark ? "text-white" : "text-slate-950")}>{formatDate(material.reportDate)}</p>
+                        </div>
+
+                        <div className={cn("rounded-[20px] border p-3", isDark ? "border-slate-800 bg-slate-950" : "border-slate-200 bg-slate-50")}>
+                          <div className="flex items-center gap-2">
+                            <ExternalLink className={cn("h-4 w-4", isDark ? "text-slate-500" : "text-slate-400")} />
+                            <p className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-400")}>Cross-ref</p>
+                          </div>
+                          <p className={cn("mt-2 line-clamp-1 text-sm font-medium break-all", isDark ? "text-white" : "text-slate-950")}>{material.storageUrl || "—"}</p>
+                        </div>
+                      </div>
+
+                      <p className={cn("mt-4 line-clamp-4 text-sm leading-7", isDark ? "text-slate-300" : "text-slate-600")}>
+                        {stripHtml(material.summary) || "No definition has been added for this Helarpedia entry yet."}
+                      </p>
+
+                      <div className="mt-5 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <BookmarkButton
+                            active={Boolean(activeBookmark)}
+                            isDark={isDark}
+                            onClick={() => {
+                              if (activeBookmark) {
+                                deleteBookmarkMutation.mutate(activeBookmark.id);
+                                return;
+                              }
+
+                              createBookmarkMutation.mutate({
+                                contentKey,
+                                contentType: "HELARPEDIA",
+                                path: `/app/library/helarpedia/${material.id}`,
+                                title: material.title
+                              });
+                            }}
+                          />
+                        </div>
+                        <Link
+                          className={cn(
+                            "inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium transition",
+                            isDark
+                              ? "border-slate-700 bg-slate-950 text-white hover:border-slate-600"
+                              : "border-slate-300 bg-white text-slate-950 shadow-sm hover:border-slate-400 hover:bg-slate-50"
+                          )}
+                          to={`/app/library/helarpedia/${material.id}`}
+                        >
+                          Open
+                          <ExternalLink className="h-4 w-4" />
+                        </Link>
+                      </div>
+                    </>
+                  );
+                })()}
+              </article>
+            ))}
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
+            <p className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-500")}>
+              Page {reportsQuery.data?.pagination.page ?? 1} of {reportsQuery.data?.pagination.totalPages ?? 1}
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60",
+                  isDark ? "border-slate-700 bg-slate-900 text-slate-100" : "border-slate-300 bg-white text-slate-900 shadow-sm"
+                )}
+                disabled={(reportsQuery.data?.pagination.page ?? 1) <= 1}
+                onClick={() => setFilters((current) => ({ ...current, page: Math.max(1, current.page - 1) }))}
+                type="button"
+              >
+                <ChevronLeft className="h-4 w-4" />
+                Previous
+              </button>
+              <button
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60",
+                  isDark ? "border-slate-700 bg-slate-900 text-slate-100" : "border-slate-300 bg-white text-slate-900 shadow-sm"
+                )}
+                disabled={(reportsQuery.data?.pagination.page ?? 1) >= (reportsQuery.data?.pagination.totalPages ?? 1)}
+                onClick={() =>
+                  setFilters((current) => ({
+                    ...current,
+                    page: Math.min(reportsQuery.data?.pagination.totalPages ?? current.page, current.page + 1)
+                  }))
+                }
+                type="button"
+              >
+                Next
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </>
+      ) : (
+        <div
+          className={cn(
+            "rounded-[28px] border px-6 py-8 text-sm leading-7",
+            isDark ? "border-slate-800 bg-slate-900 text-slate-300" : "border-slate-200 bg-white text-slate-600"
+          )}
+        >
+          No Helarpedia entries match the current search yet.
         </div>
       )}
     </div>

@@ -106,6 +106,7 @@ enum StudentStudyContentType {
   SUBJECT_SUMMARY_ENTRY
   STATUTE
   REVISION_MATERIAL
+  HELARPEDIA
 }
 
 model User {

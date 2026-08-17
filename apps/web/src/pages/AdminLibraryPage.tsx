@@ -8,6 +8,10 @@ export function AdminLawReportsPage() {
   return <AdminLibraryWorkspace section="law-reports" />;
 }
 
+export function AdminHelarpediaPage() {
+  return <AdminLibraryWorkspace section="helarpedia" />;
+}
+
 export function AdminSubjectSummariesPage() {
   return <AdminSubjectSummaryWorkspace mode="overview" />;
 }

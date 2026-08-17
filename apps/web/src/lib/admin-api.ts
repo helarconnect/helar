@@ -2,7 +2,7 @@ import { authenticatedHttp } from "@/lib/http";
 import type { ActiveSubscriptionSummary, SubscriptionPaymentSummary } from "@/lib/api";
 import type { DashboardMetric } from "@/types/domain";
 
-export type AdminLibrarySection = "law-reports" | "subject-summaries" | "cases-and-ratios";
+export type AdminLibrarySection = "law-reports" | "subject-summaries" | "cases-and-ratios" | "helarpedia";
 export type AdminLibraryMaterialType =
   | "PDF"
   | "DOCX"
@@ -841,7 +841,8 @@ export type StudyContentType =
   | "SUBJECT_SUMMARY_CASE"
   | "SUBJECT_SUMMARY_ENTRY"
   | "STATUTE"
-  | "REVISION_MATERIAL";
+  | "REVISION_MATERIAL"
+  | "HELARPEDIA";
 
 export type StudentStudyProgress = {
   completed: boolean;
@@ -2462,6 +2463,14 @@ export async function fetchLibraryMaterial(section: "law-reports", materialId: s
 
 export async function fetchLibraryLawReports(filters: AdminLibraryFilters) {
   const response = await authenticatedHttp.get<{ success: true; data: AdminLibrarySnapshot }>("/api/v1/library/law-reports", {
+    params: Object.fromEntries(createQueryParams(filters).entries())
+  });
+
+  return response.data.data;
+}
+
+export async function fetchLibraryHelarpedia(filters: AdminLibraryFilters) {
+  const response = await authenticatedHttp.get<{ success: true; data: AdminLibrarySnapshot }>("/api/v1/library/helarpedia", {
     params: Object.fromEntries(createQueryParams(filters).entries())
   });
 

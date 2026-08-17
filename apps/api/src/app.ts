@@ -5555,6 +5555,52 @@ export function createApp(options: AppOptions = {}) {
   );
 
   app.get(
+    "/api/v1/library/helarpedia",
+    authenticateRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required for the Helarpedia library."
+          }
+        });
+      }
+
+      try {
+        const filters = parseAdminLibraryFilters(request.query as Record<string, string | string[] | undefined>);
+        const data = await listAdminLibraryMaterials("helarpedia", filters, "student");
+
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return response.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "The Helarpedia query is invalid.",
+              details: error.flatten()
+            }
+          });
+        }
+
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "HELARPEDIA_FETCH_FAILED",
+            message: "Could not load the Helarpedia entries."
+          }
+        });
+      }
+    }
+  );
+
+  app.get(
     "/api/v1/student/study-center/dashboard",
     authenticateRequest,
     async (request: AuthenticatedRequest, response: Response) => {

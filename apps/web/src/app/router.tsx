@@ -9,6 +9,7 @@ import { RequirePaymentAccess } from '@/components/routing/RequirePaymentAccess'
 import {
   AdminCasesAndRatiosPage,
   AdminCasesAndRatiosMaterialsPage,
+  AdminHelarpediaPage,
   AdminLawReportsPage,
   AdminLawReportReaderPage,
   AdminSubjectSummariesCasesPage,
@@ -39,7 +40,7 @@ import { SubscriptionPage } from '@/pages/SubscriptionPage'
 import { StudentSubjectSummaryModulePage } from '@/pages/SubjectSummaryModulePage'
 import { WorkspaceDashboardPage } from '@/pages/WorkspaceDashboardPage'
 import { WorkspacePlaceholderPage } from '@/pages/WorkspacePlaceholderPage'
-import { StudentLawReportsPage, StudentSubjectSummariesPage } from '@/pages/StudentLibraryPage'
+import { StudentHelarpediaPage, StudentLawReportsPage, StudentSubjectSummariesPage } from '@/pages/StudentLibraryPage'
 import { AdminBarFinalExamsMlsMcqPage, StudentBarFinalExamsMlsMcqPage } from '@/pages/BarFinalExamsMlsMcqPage'
 import { StudentBarFinalExamQuestionPage } from '@/pages/BarFinalExamQuestionPage'
 import {
@@ -91,6 +92,10 @@ export const router = createBrowserRouter([
             element: <StudentLawReportsPage />,
           },
           {
+            path: 'library/helarpedia',
+            element: <StudentHelarpediaPage />,
+          },
+          {
             path: 'library/subject-summaries',
             element: <StudentSubjectSummariesPage />,
           },
@@ -119,6 +124,7 @@ export const router = createBrowserRouter([
             element: <StudentBarFinalExamMcqQuestionPage />,
           },
           { path: 'library/law-reports/:materialId', element: <AdminLawReportReaderPage /> },
+          { path: 'library/helarpedia/:materialId', element: <AdminLawReportReaderPage /> },
           { path: 'library/subject-summaries/cases/:caseId', element: <AdminSubjectSummaryCaseReaderPage /> },
           {
             path: 'cbt',
@@ -162,6 +168,8 @@ export const router = createBrowserRouter([
               { path: 'cbt/question-bank', element: <AdminQuestionBankPage /> },
               { path: 'library/law-reports', element: <AdminLawReportsPage /> },
               { path: 'library/law-reports/:materialId', element: <AdminLawReportReaderPage /> },
+              { path: 'library/helarpedia', element: <AdminHelarpediaPage /> },
+              { path: 'library/helarpedia/:materialId', element: <AdminLawReportReaderPage /> },
               { path: 'library/subject-summaries', element: <AdminSubjectSummariesPage /> },
               { path: 'library/subject-summaries/materials', element: <AdminSubjectSummariesMaterialsPage /> },
               { path: 'library/subject-summaries/subjects', element: <AdminSubjectSummariesSubjectsPage /> },
