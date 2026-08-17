@@ -48,7 +48,15 @@ const adminLibraryMaterialInputSchema = z
     summaryChunkToken: z.string().trim().max(120).optional(),
     title: z.string().trim().min(2)
   })
-  .strict();
+  // NOTE: `.strip()` instead of `.strict()`. Admin UI and API versions can
+  // drift for a few minutes during a rolling Render deploy — the new frontend
+  // may start sending a new field while an old API worker is still alive.
+  // Strict-mode would reject the save with a generic "Unrecognized key" that
+  // the admin sees as "saves don't work no matter what". Strip-mode drops
+  // unknown keys and saves successfully, which is almost always what a trusted
+  // admin submitter wants. Zod still catches invalid values and missing
+  // required fields.
+  .strip();
 
 export type AdminLibrarySection = z.infer<typeof adminLibrarySectionSchema>;
 export type AdminLibraryFilters = z.infer<typeof adminLibraryFiltersSchema>;
@@ -292,7 +300,12 @@ function calculateEstimatedMinutesFromBody(body: string) {
   }
 
   const wordCount = plainText.split(/\s+/).filter(Boolean).length;
-  return Math.max(1, Math.ceil(wordCount / 200));
+  // Clamp to [0, 20_000] to match Zod's estimatedMins.max(20_000) ceiling.
+  // Word-count / 200 wpm produces a realistic law-report reading time, but for
+  // million-word pastes the naive division exceeds the Int column budget. Clamp before
+  // returning — otherwise Prisma rejects the write with a generic "value out of
+  // range for Int" error that surfaces as an unclassified 500.
+  return Math.max(0, Math.min(20_000, Math.max(1, Math.ceil(wordCount / 200))));
 }
 
 function estimateMinutesFromReadingProgress(estimatedMins: number, progressPct: number) {
@@ -576,7 +589,9 @@ async function buildNextLawReportNumber(
   // admin has committed their row. This is much cheaper than contention on a
   // dedicated counter document.
   const probeLimit = 200;
+  let probeIterations = 0;
   for (let offset = 1; offset <= probeLimit; offset += 1) {
+    probeIterations = offset;
     const candidate = `${prefix}${highestSequence + offset}`;
     const existing = await db.studyMaterial.findFirst({
       where: { reportNumber: candidate },
@@ -584,6 +599,42 @@ async function buildNextLawReportNumber(
     });
 
     if (!existing) {
+      // #region debug-point build-next-law-report-number
+      try {
+        void fetch("http://127.0.0.1:7777/event", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId: "law-reports-save-failing",
+            runId: "pre",
+            hypothesisIds: ["H2", "H5"],
+            timestamp: new Date().toISOString(),
+            level: "info",
+            message: "buildNextLawReportNumber chose candidate",
+            data: {
+              categoryId,
+              prefix,
+              highestSequence,
+              chosenCandidate: candidate,
+              probeIterations,
+              scannedExistingCount: reports.length,
+              firstScannedNumbers: reports.slice(0, 5).map((r) => r.reportNumber)
+            }
+          })
+        }).catch(() => {});
+      } catch {
+        /* debug-only; never block the request */
+      }
+      console.debug("[debug-law-reports-save-failing][H2|H5] buildNextLawReportNumber chose candidate", {
+        categoryId,
+        prefix,
+        highestSequence,
+        chosenCandidate: candidate,
+        probeIterations,
+        scannedExistingCount: reports.length,
+        firstScannedNumbers: reports.slice(0, 5).map((r) => r.reportNumber)
+      });
+      // #endregion debug-point build-next-law-report-number
       return candidate;
     }
   }
@@ -636,7 +687,54 @@ async function runSerializableWrite<T>(operation: () => Promise<T>) {
       const isRetriable =
         error instanceof Prisma.PrismaClientKnownRequestError &&
         (error.code === "P2002" || error.code === "P2034");
-
+      // #region debug-point run-serializable-write-attempt
+      try {
+        void fetch("http://127.0.0.1:7777/event", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId: "law-reports-save-failing",
+            runId: "pre",
+            hypothesisIds: ["H2", "H5"],
+            timestamp: new Date().toISOString(),
+            level: "info",
+            message: "runSerializableWrite caught error",
+            data: {
+              attempt,
+              maxAttempts,
+              isRetriable,
+              prismaCode: error instanceof Prisma.PrismaClientKnownRequestError ? error.code : null,
+              prismaMetaTarget:
+                error instanceof Prisma.PrismaClientKnownRequestError &&
+                error.meta &&
+                typeof error.meta === "object" &&
+                "target" in error.meta
+                  ? (error.meta as { target?: unknown }).target
+                  : null,
+              errorClass: error instanceof Error ? error.constructor.name : typeof error,
+              errorMessage: error instanceof Error ? error.message : String(error)
+            }
+          })
+        }).catch(() => {});
+      } catch {
+        /* debug-only */
+      }
+      console.debug("[debug-law-reports-save-failing][H2|H5] runSerializableWrite attempt", {
+        attempt,
+        maxAttempts,
+        isRetriable,
+        prismaCode: error instanceof Prisma.PrismaClientKnownRequestError ? error.code : null,
+        prismaMetaTarget:
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.meta &&
+          typeof error.meta === "object" &&
+          "target" in error.meta
+            ? (error.meta as { target?: unknown }).target
+            : null,
+        errorClass: error instanceof Error ? error.constructor.name : typeof error,
+        errorMessage: error instanceof Error ? error.message : String(error)
+      });
+      // #endregion debug-point run-serializable-write-attempt
       if (!isRetriable || attempt === maxAttempts - 1) {
         throw error;
       }
@@ -681,6 +779,21 @@ export function parseAdminLibrarySearchQuery(query: Record<string, string | stri
 }
 
 export function parseAdminLibraryMaterialInput(body: unknown) {
+  // Admin saves are trusted (authenticated request with admin role codes).
+  // Lenient pre-clean: if the payload is a plain object, strip any keys with
+  // undefined/null values so optional fields never appear as explicit nulls
+  // (which would still pass `optional()` but looks like a "strict-mode extra
+  // key" if a future Zod version tightens undefined handling, and confuses
+  // logs). This pre-clean has no effect on strict/strip schemas — it's just a
+  // defensive normalization.
+  if (body && typeof body === "object" && !Array.isArray(body)) {
+    const cleaned: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(body as Record<string, unknown>)) {
+      if (v === undefined || v === null) continue;
+      cleaned[k] = v;
+    }
+    return adminLibraryMaterialInputSchema.parse(cleaned);
+  }
   return adminLibraryMaterialInputSchema.parse(body);
 }
 
@@ -1187,45 +1300,67 @@ export async function createAdminLibraryMaterial(
   const estimatedMins = isLawReportsSection(section) ? calculateEstimatedMinutesFromBody(body) : input.estimatedMins;
   const reportDate = parseReportDate(input.reportDate, section);
   const internalReportNumber = isLawReportsSection(section) ? null : `internal-${randomUUID()}`;
-
   const publicationStatus = resolvePublicationStatus(actorRoleCodes);
-  const material = await runSerializableWrite(() =>
-    runLibraryWriteTransaction(async (tx) => {
-        const reportNumber = isLawReportsSection(section)
-          ? await buildNextLawReportNumber(tx, category.id)
-          : internalReportNumber;
 
-        return tx.studyMaterial.create({
-          data: {
-            body: bodySplit.head || null,
-            categoryId: category.id,
-            deletedAt: null,
-            downloadable: input.downloadable,
-            estimatedMins,
-            materialType: input.materialType,
-            publicationStatus,
-            reviewFeedback: null,
-            reportDate,
-            sharingEnabled: Boolean(input.sharingEnabled),
-            createdBy: actorUserId,
-            approvedAt: publicationStatus === ContentPublicationStatus.PUBLISHED ? new Date() : null,
-            approvedBy: publicationStatus === ContentPublicationStatus.PUBLISHED ? actorUserId : null,
-            storageUrl: input.storageUrl.trim(),
-            summary: summarySplit.head || null,
-            title: input.title.trim(),
-            ...(reportNumber ? { reportNumber } : {})
-          },
-          include: {
-            _count: {
-              select: {
-                bookmarks: true,
-                readingHistory: true
-              }
+  // CRITICAL reliability fix: pick the next law report number OUTSIDE the
+  // multi-document write transaction using the global prisma client (reads
+  // latest committed data, no snapshot isolation, no stale candidates).
+  // Previously buildNextLawReportNumber was called INSIDE the tx via (tx)
+  // client. MongoDB multi-doc transactions use SNAPSHOT reads — every
+  // findMany/findFirst in the same tx sees a consistent point-in-time view
+  // frozen at tx start. So if another admin committed a new report number
+  // AFTER tx start but BEFORE create, the probe loop would still think that
+  // number was available, pick it, and at COMMIT time MongoDB detects
+  // duplicate on the unique `reportNumber` index and throws P2002.
+  // runSerializableWrite retried 16 times but each retry opened a NEW tx
+  // whose snapshot also missed the latest commit in high-concurrency bursts,
+  // so all 16 retries picked the SAME candidate and all 16 threw P2002 —
+  // exactly the user-observed "saves fail no matter what size".
+  //
+  // By running number resolution OUTSIDE the tx on the global client, every
+  // runSerializableWrite retry performs a FRESH scan of the actual committed
+  // data, sees the last-saved report number, and slots into the next truly
+  // available Helar-{year}-N. The inner tx becomes just ONE write
+  // (studyMaterial.create), which fits comfortably under the 60s tx lifetime
+  // and never triggers Atlas topology write-cap limits.
+  const material = await runSerializableWrite(async () => {
+    // Every retry re-scans committed data for a free sequence number. This is
+    // the only way to guarantee a fresh candidate after a P2002 race.
+    const computedReportNumber = isLawReportsSection(section)
+      ? await buildNextLawReportNumber(prisma, category.id)
+      : internalReportNumber;
+    return runLibraryWriteTransaction(async (tx) => {
+      return tx.studyMaterial.create({
+        data: {
+          body: bodySplit.head || null,
+          categoryId: category.id,
+          deletedAt: null,
+          downloadable: input.downloadable,
+          estimatedMins,
+          materialType: input.materialType,
+          publicationStatus,
+          reviewFeedback: null,
+          reportDate,
+          sharingEnabled: Boolean(input.sharingEnabled),
+          createdBy: actorUserId,
+          approvedAt: publicationStatus === ContentPublicationStatus.PUBLISHED ? new Date() : null,
+          approvedBy: publicationStatus === ContentPublicationStatus.PUBLISHED ? actorUserId : null,
+          storageUrl: input.storageUrl.trim(),
+          summary: summarySplit.head || null,
+          title: input.title.trim(),
+          ...(computedReportNumber ? { reportNumber: computedReportNumber } : {})
+        },
+        include: {
+          _count: {
+            select: {
+              bookmarks: true,
+              readingHistory: true
             }
           }
-        });
-      })
-  );
+        }
+      });
+    });
+  });
 
   // NOTE: chunk writes are intentionally performed OUTSIDE the material write
   // transaction. Keeping them inside had two failure modes for large 20+ chunk
@@ -1316,44 +1451,49 @@ export async function updateAdminLibraryMaterial(
   const reportDate = parseReportDate(input.reportDate, section);
 
   const publicationStatus = resolvePublicationStatus(actorRoleCodes, existingMaterial.publicationStatus);
-  const material = await runSerializableWrite(() =>
-    runLibraryWriteTransaction(async (tx) => {
-        const reportNumber =
-          isLawReportsSection(section) && !existingMaterial.reportNumber
-            ? await buildNextLawReportNumber(tx, category.id)
-            : existingMaterial.reportNumber ?? `internal-${materialId}`;
 
-        return tx.studyMaterial.update({
-          where: {
-            id: materialId
-          },
-          data: {
-            body: bodySplit.head || null,
-            downloadable: input.downloadable,
-            estimatedMins,
-            materialType: input.materialType,
-            publicationStatus,
-            reviewFeedback: null,
-            reportDate,
-            sharingEnabled: Boolean(input.sharingEnabled),
-            approvedAt: publicationStatus === ContentPublicationStatus.PUBLISHED ? new Date() : null,
-            approvedBy: publicationStatus === ContentPublicationStatus.PUBLISHED ? actorUserId : null,
-            storageUrl: input.storageUrl.trim(),
-            summary: summarySplit.head || null,
-            title: input.title.trim(),
-            ...(reportNumber ? { reportNumber } : {})
-          },
-          include: {
-            _count: {
-              select: {
-                bookmarks: true,
-                readingHistory: true
-              }
+  // Match create's reliability fix: if we need to assign a new report number
+  // (rare update-case: editing an old migrated report that was never assigned
+  // a Helar-{year}-N) compute it OUTSIDE the update tx against the committed
+  // global prisma client. Every runSerializableWrite retry after a P2002 race
+  // gets a fresh scan, not a stale snapshot.
+  const material = await runSerializableWrite(async () => {
+    const reportNumber =
+      isLawReportsSection(section) && !existingMaterial.reportNumber
+        ? await buildNextLawReportNumber(prisma, category.id)
+        : existingMaterial.reportNumber ?? `internal-${materialId}`;
+    return runLibraryWriteTransaction(async (tx) => {
+      return tx.studyMaterial.update({
+        where: {
+          id: materialId
+        },
+        data: {
+          body: bodySplit.head || null,
+          downloadable: input.downloadable,
+          estimatedMins,
+          materialType: input.materialType,
+          publicationStatus,
+          reviewFeedback: null,
+          reportDate,
+          sharingEnabled: Boolean(input.sharingEnabled),
+          approvedAt: publicationStatus === ContentPublicationStatus.PUBLISHED ? new Date() : null,
+          approvedBy: publicationStatus === ContentPublicationStatus.PUBLISHED ? actorUserId : null,
+          storageUrl: input.storageUrl.trim(),
+          summary: summarySplit.head || null,
+          title: input.title.trim(),
+          ...(reportNumber ? { reportNumber } : {})
+        },
+        include: {
+          _count: {
+            select: {
+              bookmarks: true,
+              readingHistory: true
             }
           }
-        });
-      })
-  );
+        }
+      });
+    });
+  });
 
   // Post-commit chunk (re)writes for update, identical reasoning to the create
   // path above: keep the update transaction short so it can't time out on

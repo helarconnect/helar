@@ -2191,21 +2191,109 @@ async function appendAdminLibraryTransportChunk(
         String(index)
       )}?token=${encodeURIComponent(token)}`
     : `/api/v1/admin/library/${section}/materials/_chunks/${encodeURIComponent(field)}/${encodeURIComponent(String(index))}`;
-  const response = await authenticatedHttp.post<{ success: true; data: AdminLibraryTransportChunkAppendResult }>(
-    url,
-    chunk,
-    {
-      // NOTE: `express.text()` default type is `*/*`, so omitting Content-Type
-      // or sending text/plain both work. Explicitly set text/plain so Axios
-      // never JSON-serializes the huge HTML string.
-      headers: { "Content-Type": "text/plain;charset=UTF-8" },
-      // 2 MB chunks over slow home Wi-Fi (≤ 1 Mbps upload) can take 16+ s.
-      // Keep a generous 120 s timeout so legitimate slow connections never
-      // abort mid-save (the user explicitly complained "taking too long").
-      timeout: 120_000
+  try {
+    const response = await authenticatedHttp.post<{ success: true; data: AdminLibraryTransportChunkAppendResult }>(
+      url,
+      chunk,
+      {
+        // NOTE: `express.text()` default type is `*/*`, so omitting Content-Type
+        // or sending text/plain both work. Explicitly set text/plain so Axios
+        // never JSON-serializes the huge HTML string.
+        headers: { "Content-Type": "text/plain;charset=UTF-8" },
+        // 2 MB chunks over slow home Wi-Fi (≤ 1 Mbps upload) can take 16+ s.
+        // Keep a generous 120 s timeout so legitimate slow connections never
+        // abort mid-save (the user explicitly complained "taking too long").
+        timeout: 120_000
+      }
+    );
+    // #region debug-point append-chunk-success
+    try {
+      void fetch("http://127.0.0.1:7777/event", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: "law-reports-save-failing",
+          runId: "pre",
+          hypothesisIds: ["H4", "H6"],
+          timestamp: new Date().toISOString(),
+          level: "info",
+          message: "transport chunk append succeeded",
+          data: { field, index, token: token ?? "ALLOCATED", chunkChars: chunk.length, httpStatus: response.status }
+        })
+      }).catch(() => {});
+    } catch {
+      /* debug-only */
     }
-  );
-  return response.data.data.token;
+    console.debug("[debug-law-reports-save-failing][H4|H6] transport chunk append succeeded", {
+      field,
+      index,
+      token: token ?? "ALLOCATED",
+      chunkChars: chunk.length,
+      httpStatus: response.status
+    });
+    // #endregion debug-point append-chunk-success
+    return response.data.data.token;
+  } catch (error) {
+    // #region debug-point append-chunk-error
+    try {
+      void fetch("http://127.0.0.1:7777/event", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: "law-reports-save-failing",
+          runId: "pre",
+          hypothesisIds: ["H4", "H6"],
+          timestamp: new Date().toISOString(),
+          level: "error",
+          message: "transport chunk append failed",
+          data: {
+            field,
+            index,
+            token: token ?? "ALLOCATING",
+            chunkChars: chunk.length,
+            httpStatus: error && typeof error === "object" && "response" in error ? (error as { response?: { status?: number } }).response?.status ?? null : null,
+            serverErrorCode:
+              (error &&
+                typeof error === "object" &&
+                "response" in error &&
+                (error as { response?: { data?: { error?: { code?: unknown } } } }).response?.data?.error?.code) ??
+              null,
+            serverErrorMessage:
+              (error &&
+                typeof error === "object" &&
+                "response" in error &&
+                (error as { response?: { data?: { error?: { message?: unknown } } } }).response?.data?.error?.message) ??
+              null,
+            errorMessage: error instanceof Error ? error.message : String(error)
+          }
+        })
+      }).catch(() => {});
+    } catch {
+      /* debug-only */
+    }
+    console.debug("[debug-law-reports-save-failing][H4|H6] transport chunk append failed", {
+      field,
+      index,
+      token: token ?? "ALLOCATING",
+      chunkChars: chunk.length,
+      httpStatus: error && typeof error === "object" && "response" in error ? (error as { response?: { status?: number } }).response?.status ?? null : null,
+      serverErrorCode:
+        (error &&
+          typeof error === "object" &&
+          "response" in error &&
+          (error as { response?: { data?: { error?: { code?: unknown } } } }).response?.data?.error?.code) ??
+        null,
+      serverErrorMessage:
+        (error &&
+          typeof error === "object" &&
+          "response" in error &&
+          (error as { response?: { data?: { error?: { message?: unknown } } } }).response?.data?.error?.message) ??
+        null,
+      errorMessage: error instanceof Error ? error.message : String(error)
+    });
+    // #endregion debug-point append-chunk-error
+    throw error;
+  }
 }
 
 // Runs N async "tasks" with bounded concurrency (p-pull worker pool). Used to

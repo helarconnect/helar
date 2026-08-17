@@ -1159,13 +1159,69 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
       );
       try {
         setSaveProgress({ kind: "finalizing" });
-        const finalPayload: AdminLibraryMaterialInput = {
+        // Build final payload, dropping any undefined transport token. Strict
+        // Zod would accept an explicit undefined value for optional keys, but
+        // stripping undefined keys entirely removes any risk of strict-mode
+        // confusion and keeps the envelope small. JSON.stringify already
+        // strips undefined, but Axios keeps them as explicit keys on the
+        // plain object before stringify, so delete to be 100% explicit.
+        const finalPayload: AdminLibraryMaterialInput & { bodyChunkToken?: unknown; summaryChunkToken?: unknown } = {
           ...payload,
           body: transport.body,
           bodyChunkToken: transport.bodyChunkToken ?? undefined,
           summary: transport.summary,
           summaryChunkToken: transport.summaryChunkToken ?? undefined
         };
+        if (finalPayload.bodyChunkToken === undefined) delete finalPayload.bodyChunkToken;
+        if (finalPayload.summaryChunkToken === undefined) delete finalPayload.summaryChunkToken;
+        // #region debug-point frontend-final-payload-create
+        try {
+          void fetch("http://127.0.0.1:7777/event", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              sessionId: "law-reports-save-failing",
+              runId: "pre",
+              hypothesisIds: ["H1", "H3"],
+              timestamp: new Date().toISOString(),
+              level: "info",
+              message: "frontend submitting final create payload",
+              data: {
+                keys: Object.keys(finalPayload).sort(),
+                title: String(finalPayload.title ?? "").slice(0, 80),
+                reportNumber: finalPayload.reportNumber ?? null,
+                reportDate: finalPayload.reportDate ?? null,
+                estimatedMins: finalPayload.estimatedMins,
+                storageUrlLen: String(finalPayload.storageUrl ?? "").length,
+                materialType: finalPayload.materialType,
+                bodyLen: String(finalPayload.body ?? "").length,
+                summaryLen: String(finalPayload.summary ?? "").length,
+                bodyChunkToken: finalPayload.bodyChunkToken ?? null,
+                summaryChunkToken: finalPayload.summaryChunkToken ?? null,
+                sharingEnabled: finalPayload.sharingEnabled,
+                downloadable: finalPayload.downloadable
+              }
+            })
+          }).catch(() => {});
+        } catch {
+          /* debug-only */
+        }
+        console.debug("[debug-law-reports-save-failing][H1|H3] frontend submitting final create payload", {
+          keys: Object.keys(finalPayload).sort(),
+          title: String(finalPayload.title ?? "").slice(0, 80),
+          reportNumber: finalPayload.reportNumber ?? null,
+          reportDate: finalPayload.reportDate ?? null,
+          estimatedMins: finalPayload.estimatedMins,
+          storageUrlLen: String(finalPayload.storageUrl ?? "").length,
+          materialType: finalPayload.materialType,
+          bodyLen: String(finalPayload.body ?? "").length,
+          summaryLen: String(finalPayload.summary ?? "").length,
+          bodyChunkToken: finalPayload.bodyChunkToken ?? null,
+          summaryChunkToken: finalPayload.summaryChunkToken ?? null,
+          sharingEnabled: finalPayload.sharingEnabled,
+          downloadable: finalPayload.downloadable
+        });
+        // #endregion debug-point frontend-final-payload-create
         const material = await createAdminLibraryMaterial(section, finalPayload);
         return material;
       } finally {
@@ -1188,6 +1244,60 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
       void queryClient.invalidateQueries({ queryKey: ["admin-library", section] });
     },
     onError: (error) => {
+      // #region debug-point frontend-create-onerror
+      try {
+        void fetch("http://127.0.0.1:7777/event", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId: "law-reports-save-failing",
+            runId: "pre",
+            hypothesisIds: ["H1", "H2", "H3", "H4", "H5", "H6"],
+            timestamp: new Date().toISOString(),
+            level: "error",
+            message: "frontend create mutation onError fired",
+            data: {
+              errorClass: error instanceof Error ? error.constructor.name : typeof error,
+              httpStatus: error && typeof error === "object" && "response" in error ? (error as { response?: { status?: number } }).response?.status ?? null : null,
+              serverErrorCode:
+                (error &&
+                  typeof error === "object" &&
+                  "response" in error &&
+                  (error as { response?: { data?: { error?: { code?: unknown } } } }).response?.data?.error?.code) ??
+                null,
+              serverErrorMessage:
+                (error &&
+                  typeof error === "object" &&
+                  "response" in error &&
+                  (error as { response?: { data?: { error?: { message?: unknown } } } }).response?.data?.error?.message) ??
+                null,
+              extractedMessage: extractServerErrorMessage(error),
+              rawErrorString: String(error)
+            }
+          })
+        }).catch(() => {});
+      } catch {
+        /* debug-only */
+      }
+      console.debug("[debug-law-reports-save-failing][H1-H6] frontend create mutation onError fired", {
+        errorClass: error instanceof Error ? error.constructor.name : typeof error,
+        httpStatus: error && typeof error === "object" && "response" in error ? (error as { response?: { status?: number } }).response?.status ?? null : null,
+        serverErrorCode:
+          (error &&
+            typeof error === "object" &&
+            "response" in error &&
+            (error as { response?: { data?: { error?: { code?: unknown } } } }).response?.data?.error?.code) ??
+          null,
+        serverErrorMessage:
+          (error &&
+            typeof error === "object" &&
+            "response" in error &&
+            (error as { response?: { data?: { error?: { message?: unknown } } } }).response?.data?.error?.message) ??
+          null,
+        extractedMessage: extractServerErrorMessage(error),
+        rawErrorString: String(error)
+      });
+      // #endregion debug-point frontend-create-onerror
       const serverMessage = extractServerErrorMessage(error);
       const fallback = isLawReports ? "Could not create the law report right now." : "Could not create the library material right now.";
       showToast(serverMessage ?? fallback, "error");
@@ -1212,13 +1322,59 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
       );
       try {
         setSaveProgress({ kind: "finalizing" });
-        const finalPayload: AdminLibraryMaterialInput = {
+        const finalPayload: AdminLibraryMaterialInput & { bodyChunkToken?: unknown; summaryChunkToken?: unknown } = {
           ...payload,
           body: transport.body,
           bodyChunkToken: transport.bodyChunkToken ?? undefined,
           summary: transport.summary,
           summaryChunkToken: transport.summaryChunkToken ?? undefined
         };
+        if (finalPayload.bodyChunkToken === undefined) delete finalPayload.bodyChunkToken;
+        if (finalPayload.summaryChunkToken === undefined) delete finalPayload.summaryChunkToken;
+        // #region debug-point frontend-final-payload-update
+        try {
+          void fetch("http://127.0.0.1:7777/event", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              sessionId: "law-reports-save-failing",
+              runId: "pre",
+              hypothesisIds: ["H1", "H3"],
+              timestamp: new Date().toISOString(),
+              level: "info",
+              message: "frontend submitting final update payload",
+              data: {
+                materialId,
+                keys: Object.keys(finalPayload).sort(),
+                title: String(finalPayload.title ?? "").slice(0, 80),
+                reportNumber: finalPayload.reportNumber ?? null,
+                estimatedMins: finalPayload.estimatedMins,
+                storageUrlLen: String(finalPayload.storageUrl ?? "").length,
+                materialType: finalPayload.materialType,
+                bodyLen: String(finalPayload.body ?? "").length,
+                summaryLen: String(finalPayload.summary ?? "").length,
+                bodyChunkToken: finalPayload.bodyChunkToken ?? null,
+                summaryChunkToken: finalPayload.summaryChunkToken ?? null
+              }
+            })
+          }).catch(() => {});
+        } catch {
+          /* debug-only */
+        }
+        console.debug("[debug-law-reports-save-failing][H1|H3] frontend submitting final update payload", {
+          materialId,
+          keys: Object.keys(finalPayload).sort(),
+          title: String(finalPayload.title ?? "").slice(0, 80),
+          reportNumber: finalPayload.reportNumber ?? null,
+          estimatedMins: finalPayload.estimatedMins,
+          storageUrlLen: String(finalPayload.storageUrl ?? "").length,
+          materialType: finalPayload.materialType,
+          bodyLen: String(finalPayload.body ?? "").length,
+          summaryLen: String(finalPayload.summary ?? "").length,
+          bodyChunkToken: finalPayload.bodyChunkToken ?? null,
+          summaryChunkToken: finalPayload.summaryChunkToken ?? null
+        });
+        // #endregion debug-point frontend-final-payload-update
         const material = await updateAdminLibraryMaterial(section, materialId, finalPayload);
         return material;
       } finally {

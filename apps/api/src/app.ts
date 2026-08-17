@@ -8544,6 +8544,60 @@ export function createApp(options: AppOptions = {}) {
 
       try {
         const section = parseAdminLibrarySection(String(request.params.section));
+        // #region debug-point admin-library-create-parse-start
+        try {
+          void fetch("http://127.0.0.1:7777/event", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              sessionId: "law-reports-save-failing",
+              runId: "pre",
+              hypothesisIds: ["H1", "H3", "H6"],
+              timestamp: new Date().toISOString(),
+              level: "info",
+              message: "admin library create route parsing input",
+              data: {
+                section,
+                userId: request.auth?.userId ?? null,
+                roleCodes: request.auth?.roleCodes ?? null,
+                keys: typeof request.body === "object" && request.body ? Object.keys(request.body).sort() : null,
+                bodyIsObject: typeof request.body === "object" && request.body,
+                title: typeof request.body === "object" && request.body && "title" in request.body ? String((request.body as { title?: unknown }).title ?? "").slice(0, 80) : null,
+                reportNumber: typeof request.body === "object" && request.body && "reportNumber" in request.body ? (request.body as { reportNumber?: unknown }).reportNumber ?? null : null,
+                estimatedMins: typeof request.body === "object" && request.body && "estimatedMins" in request.body ? (request.body as { estimatedMins?: unknown }).estimatedMins ?? null : null,
+                storageUrlLen: typeof request.body === "object" && request.body && "storageUrl" in request.body ? String((request.body as { storageUrl?: unknown }).storageUrl ?? "").length : null,
+                bodyLen: typeof request.body === "object" && request.body && "body" in request.body ? String((request.body as { body?: unknown }).body ?? "").length : null,
+                summaryLen: typeof request.body === "object" && request.body && "summary" in request.body ? String((request.body as { summary?: unknown }).summary ?? "").length : null,
+                hasBodyChunkToken: typeof request.body === "object" && request.body && "bodyChunkToken" in request.body ? "PRESENT" : "ABSENT",
+                hasSummaryChunkToken: typeof request.body === "object" && request.body && "summaryChunkToken" in request.body ? "PRESENT" : "ABSENT",
+                bodyChunkTokenValue: typeof request.body === "object" && request.body && "bodyChunkToken" in request.body ? String((request.body as { bodyChunkToken?: unknown }).bodyChunkToken ?? "NULL") : null,
+                summaryChunkTokenValue: typeof request.body === "object" && request.body && "summaryChunkToken" in request.body ? String((request.body as { summaryChunkToken?: unknown }).summaryChunkToken ?? "NULL") : null,
+                contentLength: request.headers["content-length"] ?? null
+              }
+            })
+          }).catch(() => {});
+        } catch {
+          /* debug-only */
+        }
+        console.debug("[debug-law-reports-save-failing][H1|H3|H6] admin library create route parsing input", {
+          section,
+          userId: request.auth?.userId ?? null,
+          roleCodes: request.auth?.roleCodes ?? null,
+          keys: typeof request.body === "object" && request.body ? Object.keys(request.body).sort() : null,
+          bodyIsObject: typeof request.body === "object" && request.body,
+          title: typeof request.body === "object" && request.body && "title" in request.body ? String((request.body as { title?: unknown }).title ?? "").slice(0, 80) : null,
+          reportNumber: typeof request.body === "object" && request.body && "reportNumber" in request.body ? (request.body as { reportNumber?: unknown }).reportNumber ?? null : null,
+          estimatedMins: typeof request.body === "object" && request.body && "estimatedMins" in request.body ? (request.body as { estimatedMins?: unknown }).estimatedMins ?? null : null,
+          storageUrlLen: typeof request.body === "object" && request.body && "storageUrl" in request.body ? String((request.body as { storageUrl?: unknown }).storageUrl ?? "").length : null,
+          bodyLen: typeof request.body === "object" && request.body && "body" in request.body ? String((request.body as { body?: unknown }).body ?? "").length : null,
+          summaryLen: typeof request.body === "object" && request.body && "summary" in request.body ? String((request.body as { summary?: unknown }).summary ?? "").length : null,
+          hasBodyChunkToken: typeof request.body === "object" && request.body && "bodyChunkToken" in request.body ? "PRESENT" : "ABSENT",
+          hasSummaryChunkToken: typeof request.body === "object" && request.body && "summaryChunkToken" in request.body ? "PRESENT" : "ABSENT",
+          bodyChunkTokenValue: typeof request.body === "object" && request.body && "bodyChunkToken" in request.body ? String((request.body as { bodyChunkToken?: unknown }).bodyChunkToken ?? "NULL") : null,
+          summaryChunkTokenValue: typeof request.body === "object" && request.body && "summaryChunkToken" in request.body ? String((request.body as { summaryChunkToken?: unknown }).summaryChunkToken ?? "NULL") : null,
+          contentLength: request.headers["content-length"] ?? null
+        });
+        // #endregion debug-point admin-library-create-parse-start
         const parsed = parseAdminLibraryMaterialInput(request.body);
         const material = await createAdminLibraryMaterial(section, parsed, request.auth!.userId, request.auth!.roleCodes);
 
@@ -8559,6 +8613,34 @@ export function createApp(options: AppOptions = {}) {
           // the toast surfaces a hint the admin can act on (e.g.
           // "Unrecognized key: 'outlineItems' — expected one of body, title, …").
           const flattened = error.flatten();
+          // #region debug-point admin-library-create-zod-error
+          try {
+            void fetch("http://127.0.0.1:7777/event", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                sessionId: "law-reports-save-failing",
+                runId: "pre",
+                hypothesisIds: ["H1", "H3"],
+                timestamp: new Date().toISOString(),
+                level: "error",
+                message: "admin library create zod validation error",
+                data: {
+                  fieldErrors: flattened.fieldErrors,
+                  formErrors: flattened.formErrors,
+                  rawKeys: typeof request.body === "object" && request.body ? Object.keys(request.body).sort() : null
+                }
+              })
+            }).catch(() => {});
+          } catch {
+            /* debug-only */
+          }
+          console.debug("[debug-law-reports-save-failing][H1|H3] admin library create zod validation error", {
+            fieldErrors: flattened.fieldErrors,
+            formErrors: flattened.formErrors,
+            rawKeys: typeof request.body === "object" && request.body ? Object.keys(request.body).sort() : null
+          });
+          // #endregion debug-point admin-library-create-zod-error
           const fieldLines = Object.entries(flattened.fieldErrors)
             .map(([field, errors]) => `${field}: ${(errors ?? []).join(", ")}`)
             .concat(flattened.formErrors ?? []);
