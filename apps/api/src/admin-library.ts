@@ -1340,63 +1340,60 @@ export async function createAdminLibraryMaterial(
   const internalReportNumber = isLawReportsSection(section) ? null : `internal-${randomUUID()}`;
   const publicationStatus = resolvePublicationStatus(actorRoleCodes);
 
-  // CRITICAL reliability fix: pick the next law report number OUTSIDE the
-  // multi-document write transaction using the global prisma client (reads
-  // latest committed data, no snapshot isolation, no stale candidates).
-  // Previously buildNextLawReportNumber was called INSIDE the tx via (tx)
-  // client. MongoDB multi-doc transactions use SNAPSHOT reads — every
-  // findMany/findFirst in the same tx sees a consistent point-in-time view
-  // frozen at tx start. So if another admin committed a new report number
-  // AFTER tx start but BEFORE create, the probe loop would still think that
-  // number was available, pick it, and at COMMIT time MongoDB detects
-  // duplicate on the unique `reportNumber` index and throws P2002.
-  // runSerializableWrite retried 16 times but each retry opened a NEW tx
-  // whose snapshot also missed the latest commit in high-concurrency bursts,
-  // so all 16 retries picked the SAME candidate and all 16 threw P2002 —
-  // exactly the user-observed "saves fail no matter what size".
+  // CRITICAL reliability fix: pick the next law report number OUTSIDE any
+  // transaction using the global prisma client (reads latest committed data,
+  // no MongoDB snapshot isolation that could hide concurrently saved numbers
+  // from within the tx). Previously buildNextLawReportNumber was run INSIDE
+  // a multi-document tx where findMany/findFirst only saw a frozen
+  // point-in-time snapshot, so a number committed between tx start and the
+  // create write appeared available to the probe but P2002'd on commit, and
+  // every one of the 16 runSerializableWrite retries repeated the same stale
+  // scan — all 16 failed identically.
   //
-  // By running number resolution OUTSIDE the tx on the global client, every
-  // runSerializableWrite retry performs a FRESH scan of the actual committed
-  // data, sees the last-saved report number, and slots into the next truly
-  // available Helar-{year}-N. The inner tx becomes just ONE write
-  // (studyMaterial.create), which fits comfortably under the 60s tx lifetime
-  // and never triggers Atlas topology write-cap limits.
+  // By running the scan outside the tx, every retry performs a FRESH scan of
+  // the actually committed data and assigns the next truly-free slot.
+  //
+  // NOTE: the ONE write (studyMaterial.create) is executed DIRECTLY on prisma
+  // (not wrapped in a MongoDB multi-doc tx). Multi-doc tx with just ONE write
+  // is pure overhead on MongoDB, and shared Atlas topologies (serverless /
+  // M0/M2/M5) emit spurious P2024/P2034/P2028 "Transaction API error"
+  // aborts for single-write txs under normal load. Removing the unnecessary
+  // wrapper eliminates an entire class of false "another admin may be
+  // uploading" toasts on single-admin deployments.
   const material = await runSerializableWrite(async () => {
     // Every retry re-scans committed data for a free sequence number. This is
     // the only way to guarantee a fresh candidate after a P2002 race.
     const computedReportNumber = isLawReportsSection(section)
       ? await buildNextLawReportNumber(prisma, category.id)
       : internalReportNumber;
-    return runLibraryWriteTransaction(async (tx) => {
-      return tx.studyMaterial.create({
-        data: {
-          body: bodySplit.head || null,
-          categoryId: category.id,
-          deletedAt: null,
-          downloadable: input.downloadable,
-          estimatedMins,
-          materialType: input.materialType,
-          publicationStatus,
-          reviewFeedback: null,
-          reportDate,
-          sharingEnabled: Boolean(input.sharingEnabled),
-          createdBy: actorUserId,
-          approvedAt: publicationStatus === ContentPublicationStatus.PUBLISHED ? new Date() : null,
-          approvedBy: publicationStatus === ContentPublicationStatus.PUBLISHED ? actorUserId : null,
-          storageUrl: input.storageUrl.trim(),
-          summary: summarySplit.head || null,
-          title: input.title.trim(),
-          ...(computedReportNumber ? { reportNumber: computedReportNumber } : {})
-        },
-        include: {
-          _count: {
-            select: {
-              bookmarks: true,
-              readingHistory: true
-            }
+    return prisma.studyMaterial.create({
+      data: {
+        body: bodySplit.head || null,
+        categoryId: category.id,
+        deletedAt: null,
+        downloadable: input.downloadable,
+        estimatedMins,
+        materialType: input.materialType,
+        publicationStatus,
+        reviewFeedback: null,
+        reportDate,
+        sharingEnabled: Boolean(input.sharingEnabled),
+        createdBy: actorUserId,
+        approvedAt: publicationStatus === ContentPublicationStatus.PUBLISHED ? new Date() : null,
+        approvedBy: publicationStatus === ContentPublicationStatus.PUBLISHED ? actorUserId : null,
+        storageUrl: input.storageUrl.trim(),
+        summary: summarySplit.head || null,
+        title: input.title.trim(),
+        ...(computedReportNumber ? { reportNumber: computedReportNumber } : {})
+      },
+      include: {
+        _count: {
+          select: {
+            bookmarks: true,
+            readingHistory: true
           }
         }
-      });
+      }
     });
   });
 
@@ -1490,46 +1487,51 @@ export async function updateAdminLibraryMaterial(
 
   const publicationStatus = resolvePublicationStatus(actorRoleCodes, existingMaterial.publicationStatus);
 
-  // Match create's reliability fix: if we need to assign a new report number
-  // (rare update-case: editing an old migrated report that was never assigned
-  // a Helar-{year}-N) compute it OUTSIDE the update tx against the committed
-  // global prisma client. Every runSerializableWrite retry after a P2002 race
-  // gets a fresh scan, not a stale snapshot.
+  // Match create's reliability fix:
+  //   (a) if we need to assign a new report number (rare update-case: editing
+  //       an old migrated report that was never assigned a Helar-{year}-N)
+  //       compute it OUTSIDE the write tx against the committed global prisma
+  //       client so every runSerializableWrite retry on P2002 gets a fresh
+  //       scan, not a stale snapshot.
+  //   (b) one-statement writes don't need a MongoDB multi-doc tx. Removing the
+  //       runLibraryWriteTransaction wrapper on studyMaterial.update eliminates
+  //       the spurious P2024/P2034/P2028 "Transaction API error" that Atlas
+  //       serverless/shared clusters can emit for single-write txs on their
+  //       own, which surfaced as the false "another admin may be uploading"
+  //       toast on single-admin deployments.
   const material = await runSerializableWrite(async () => {
     const reportNumber =
       isLawReportsSection(section) && !existingMaterial.reportNumber
         ? await buildNextLawReportNumber(prisma, category.id)
         : existingMaterial.reportNumber ?? `internal-${materialId}`;
-    return runLibraryWriteTransaction(async (tx) => {
-      return tx.studyMaterial.update({
-        where: {
-          id: materialId
-        },
-        data: {
-          body: bodySplit.head || null,
-          downloadable: input.downloadable,
-          estimatedMins,
-          materialType: input.materialType,
-          publicationStatus,
-          reviewFeedback: null,
-          reportDate,
-          sharingEnabled: Boolean(input.sharingEnabled),
-          approvedAt: publicationStatus === ContentPublicationStatus.PUBLISHED ? new Date() : null,
-          approvedBy: publicationStatus === ContentPublicationStatus.PUBLISHED ? actorUserId : null,
-          storageUrl: input.storageUrl.trim(),
-          summary: summarySplit.head || null,
-          title: input.title.trim(),
-          ...(reportNumber ? { reportNumber } : {})
-        },
-        include: {
-          _count: {
-            select: {
-              bookmarks: true,
-              readingHistory: true
-            }
+    return prisma.studyMaterial.update({
+      where: {
+        id: materialId
+      },
+      data: {
+        body: bodySplit.head || null,
+        downloadable: input.downloadable,
+        estimatedMins,
+        materialType: input.materialType,
+        publicationStatus,
+        reviewFeedback: null,
+        reportDate,
+        sharingEnabled: Boolean(input.sharingEnabled),
+        approvedAt: publicationStatus === ContentPublicationStatus.PUBLISHED ? new Date() : null,
+        approvedBy: publicationStatus === ContentPublicationStatus.PUBLISHED ? actorUserId : null,
+        storageUrl: input.storageUrl.trim(),
+        summary: summarySplit.head || null,
+        title: input.title.trim(),
+        ...(reportNumber ? { reportNumber } : {})
+      },
+      include: {
+        _count: {
+          select: {
+            bookmarks: true,
+            readingHistory: true
           }
         }
-      });
+      }
     });
   });
 

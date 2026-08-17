@@ -707,10 +707,37 @@ type AdminLibraryFailureClassification =
 function classifyAdminLibraryWriteError(error: unknown): AdminLibraryFailureClassification {
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
     if (error.code === "P2002") {
-      const target = Array.isArray((error.meta as { target?: unknown })?.target)
-        ? String((error.meta as { target: unknown }).target)
-        : "";
-      if (/reportNumber/i.test(target)) return "REPORT_NUMBER_COLLISION";
+      // Prisma reports `meta.target` differently across Prisma versions and
+      // database drivers:
+      //   PostgreSQL+Prisma: `["reportNumber"]` (array of column names)
+      //   MongoDB+Prisma:      `["reportNumber"]` OR the actual MongoDB
+      //                        unique-index name such as
+      //                        `StudyMaterial_reportNumber_key`, OR sometimes
+      //                        a nested `meta.field_name` / `meta.path` field
+      //                        depending on Prisma version.
+      // If ANY of the available meta fields mention "reportNumber" (case
+      // insensitive) we classify this as a specific report-number collision
+      // so the admin sees the "auto-assign next Helar-{year}-N on retry"
+      // guidance instead of the generic "another admin may be uploading".
+      const targetPieces: string[] = [];
+      const rawTarget = (error.meta as { target?: unknown })?.target;
+      if (Array.isArray(rawTarget)) targetPieces.push(rawTarget.map(String).join(","));
+      else if (typeof rawTarget === "string") targetPieces.push(rawTarget);
+      const metaKeys =
+        error.meta && typeof error.meta === "object"
+          ? Object.values(error.meta)
+              .map((value) => (typeof value === "string" ? value : Array.isArray(value) ? value.join(",") : ""))
+              .filter(Boolean)
+          : [];
+      try {
+        targetPieces.push(JSON.stringify(error.meta ?? {}));
+      } catch {
+        /* non-serialisable meta — ignore */
+      }
+      targetPieces.push(...metaKeys);
+      if (typeof error.message === "string") targetPieces.push(error.message);
+      const fingerprint = targetPieces.join(" | ");
+      if (/reportNumber|report_number|report-number/i.test(fingerprint)) return "REPORT_NUMBER_COLLISION";
       return "TRANSACTION_CONFLICT";
     }
     // P2034: transaction conflict due to write/write races (stale snapshot).
