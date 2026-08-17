@@ -1279,6 +1279,30 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
       } catch {
         /* debug-only */
       }
+      // console.error with the same shape so the extracted server error code
+      // + message shows up even with Chrome DevTools default "Errors only"
+      // filter (which hides console.debug/verbose). This lets admins paste a
+      // single Console screenshot and instantly know whether the 409 is
+      // REPORT_NUMBER_COLLISION, TRANSACTION_CONFLICT, or SEQUENCE_EXHAUSTED
+      // without flipping Console filter dropdowns.
+      console.error("[debug-law-reports-save-failing][H1-H6] frontend create mutation onError fired", {
+        errorClass: error instanceof Error ? error.constructor.name : typeof error,
+        httpStatus: error && typeof error === "object" && "response" in error ? (error as { response?: { status?: number } }).response?.status ?? null : null,
+        serverErrorCode:
+          (error &&
+            typeof error === "object" &&
+            "response" in error &&
+            (error as { response?: { data?: { error?: { code?: unknown } } } }).response?.data?.error?.code) ??
+          null,
+        serverErrorMessage:
+          (error &&
+            typeof error === "object" &&
+            "response" in error &&
+            (error as { response?: { data?: { error?: { message?: unknown } } } }).response?.data?.error?.message) ??
+          null,
+        extractedMessage: extractServerErrorMessage(error),
+        rawErrorString: String(error)
+      });
       console.debug("[debug-law-reports-save-failing][H1-H6] frontend create mutation onError fired", {
         errorClass: error instanceof Error ? error.constructor.name : typeof error,
         httpStatus: error && typeof error === "object" && "response" in error ? (error as { response?: { status?: number } }).response?.status ?? null : null,
@@ -1397,6 +1421,28 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
       void queryClient.invalidateQueries({ queryKey: ["admin-library", section] });
     },
     onError: (error) => {
+      // Mirror the create-mutation onError error-level logging. Chrome DevTools
+      // default to "Errors only" — console.debug lines about serverErrorCode
+      // are invisible unless the admin manually flips the dropdown, so every
+      // mutation failure also emits console.error for fast forensics.
+      console.error("[debug-law-reports-save-failing][H1-H6] frontend update mutation onError fired", {
+        errorClass: error instanceof Error ? error.constructor.name : typeof error,
+        httpStatus: error && typeof error === "object" && "response" in error ? (error as { response?: { status?: number } }).response?.status ?? null : null,
+        serverErrorCode:
+          (error &&
+            typeof error === "object" &&
+            "response" in error &&
+            (error as { response?: { data?: { error?: { code?: unknown } } } }).response?.data?.error?.code) ??
+          null,
+        serverErrorMessage:
+          (error &&
+            typeof error === "object" &&
+            "response" in error &&
+            (error as { response?: { data?: { error?: { message?: unknown } } } }).response?.data?.error?.message) ??
+          null,
+        extractedMessage: extractServerErrorMessage(error),
+        rawErrorString: String(error)
+      });
       const serverMessage = extractServerErrorMessage(error);
       const fallback = isLawReports ? "Could not update the law report right now." : "Could not update the library material right now.";
       showToast(serverMessage ?? fallback, "error");
