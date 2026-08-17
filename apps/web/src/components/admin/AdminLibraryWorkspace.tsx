@@ -707,7 +707,9 @@ function LibraryMaterialModal({
                     </label>
 
                     <label className="space-y-1 md:col-span-2">
-                      <span className={cn("text-[11px] font-medium uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Cross-reference link / attachment</span>
+                      <span className={cn("text-[11px] font-medium uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>
+                        Cross-reference link / attachment <span className={cn("lowercase tracking-normal normal-case", isDark ? "text-slate-400" : "text-slate-400")}>(optional)</span>
+                      </span>
                       <input
                         className={cn(
                           "w-full rounded-2xl border px-3 py-2 text-sm outline-none transition",
@@ -716,7 +718,7 @@ function LibraryMaterialModal({
                             : "border-slate-200 bg-slate-50 text-slate-950 placeholder:text-slate-400"
                         )}
                         onChange={(event) => onChange("storageUrl", event.target.value)}
-                        placeholder="Helarpedia-### or a downloadable attachment URL"
+                        placeholder="Helarpedia-###, case cross-reference URL, or a downloadable attachment URL — leave empty if not applicable"
                         value={draft.storageUrl}
                       />
                     </label>
@@ -1603,37 +1605,28 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
 
   const summaryCards = useMemo(() => {
     const summary = materialsQuery.data?.summary;
-    const nextNumber = materialsQuery.data?.nextReportNumber;
 
     const cards: Array<{ label: string; value: string }> = [
       {
         label: isLawReports ? "Total reports" : isHelarpedia ? "Total entries" : "Total materials",
         value: String(summary?.totalMaterials ?? 0)
+      },
+      {
+        label: "Download enabled",
+        value: String(summary?.downloadableCount ?? 0)
+      },
+      {
+        label: "Recent uploads",
+        value: String(summary?.recentUploadsCount ?? 0)
+      },
+      {
+        label: "Avg read time",
+        value: `${summary?.averageReadTimeMins ?? 0} min`
       }
     ];
 
-    if (numberedSection && nextNumber) {
-      cards.push({
-        label: isLawReports ? "Next case number" : "Next serial",
-        value: nextNumber
-      });
-    }
-
-    cards.push({
-      label: "Download enabled",
-      value: String(summary?.downloadableCount ?? 0)
-    });
-    cards.push({
-      label: "Recent uploads",
-      value: String(summary?.recentUploadsCount ?? 0)
-    });
-    cards.push({
-      label: "Avg read time",
-      value: `${summary?.averageReadTimeMins ?? 0} min`
-    });
-
     return cards;
-  }, [isHelarpedia, isLawReports, materialsQuery.data, numberedSection]);
+  }, [isHelarpedia, isLawReports, materialsQuery.data]);
 
   const lawReportEngagement = materialsQuery.data?.summary.lawReportEngagement;
 
@@ -1680,12 +1673,14 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
   }
 
   async function handleSubmit() {
-    if (!draft.title.trim() || !draft.storageUrl.trim()) {
+    const requiresStorageUrl = !isHelarpedia;
+
+    if (!draft.title.trim() || (requiresStorageUrl && !draft.storageUrl.trim())) {
       showToast(
         isLawReports
           ? "Add a title and suit number before saving."
           : isHelarpedia
-            ? "Add the issue/term and a cross-reference link before saving."
+            ? "Add the issue or term name before saving."
             : "Add a title and a valid storage URL before saving.",
         "error"
       );

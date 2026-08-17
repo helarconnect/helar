@@ -43,7 +43,7 @@ const adminLibraryMaterialInputSchema = z
     sharingEnabled: z.boolean().optional().default(false),
     // Raised from 2_000 to 1_000_000 to accommodate both plain URLs and very large
     // data-URL/base64 attachments if an admin pastes document content inline.
-    storageUrl: z.string().trim().min(2).max(1_000_000),
+    storageUrl: z.string().trim().max(1_000_000).default(""),
     summary: z.string().optional().default(""),
     summaryChunkToken: z.string().trim().max(120).optional(),
     title: z.string().trim().min(2)
@@ -351,6 +351,30 @@ function assertSectionMaterialType(section: AdminLibrarySection, materialType: M
         ? "Law reports must use one of the supported court values."
         : "This library section does not support the selected material type.",
       path: ["materialType"]
+    }
+  ]);
+}
+
+function assertStorageUrlFilledForSection(section: AdminLibrarySection, storageUrl: string) {
+  const requiresUrl = !isHelarpediaSection(section);
+
+  if (!requiresUrl) {
+    return;
+  }
+
+  const trimmed = storageUrl.trim();
+
+  if (trimmed.length >= 2) {
+    return;
+  }
+
+  throw new z.ZodError([
+    {
+      code: z.ZodIssueCode.custom,
+      message: isLawReportsSection(section)
+        ? "Provide the suit number or storage URL for this law report."
+        : "Provide a valid storage URL for this library material.",
+      path: ["storageUrl"]
     }
   ]);
 }
@@ -1447,6 +1471,7 @@ export async function createAdminLibraryMaterial(
   }
 
   assertSectionMaterialType(section, input.materialType);
+  assertStorageUrlFilledForSection(section, input.storageUrl);
 
   // Either the body/summary is inline (small) or it's a chunk token (large).
   // The zod schema permits both fields to coexist; we only read from the
@@ -1572,6 +1597,7 @@ export async function updateAdminLibraryMaterial(
   }
 
   assertSectionMaterialType(section, input.materialType);
+  assertStorageUrlFilledForSection(section, input.storageUrl);
 
   const existingMaterial = await prisma.studyMaterial.findFirst({
     where: {
