@@ -570,49 +570,45 @@ async function buildNextLawReportNumber(
     }
   });
 
-  // Step 2: extract the integer suffixes into a sorted deduped Set. A Set lets
-  // us probe "does integer N exist?" in O(1) instead of a per-candidate DB call.
+  // Step 2: extract the integer suffixes. We need TWO things:
+  //   (a) `maxUsed` — the highest suffix ever assigned this year. Law-report
+  //       citations require strictly monotonic numbering; the next entry after
+  //       Helar-2026-1180 MUST be Helar-2026-1181 even if 1..500 are empty.
+  //   (b) `usedIntegers` Set for O(1) race-probe collision checks so we can
+  //       skip a DB round-trip after each lost concurrent-save race.
+  let maxUsed = 0;
   const usedIntegers = new Set<number>();
   for (const material of reports) {
     const rawSuffix = material.reportNumber?.slice(prefix.length) ?? "";
     const parsed = Number(rawSuffix);
     if (Number.isInteger(parsed) && parsed > 0) {
       usedIntegers.add(parsed);
+      if (parsed > maxUsed) maxUsed = parsed;
     }
   }
 
-  // Step 3: find the LOWEST unused positive integer. This handles the case
-  // where a one-off migration or manual DB write created a huge sequence
-  // number (e.g. `Helar-2026-5000`) but 1..4999 are actually all free. The
-  // previous `highestSequence + 1 + 200 probe` algorithm would immediately
-  // try 5001..5200, all of which might be filled by migrations or races, and
-  // then throw `LAW_REPORT_SEQUENCE_EXHAUSTED` even though 4999 perfectly
-  // valid numbers were free. That was the 409 you were seeing on EVERY save.
-  let candidateInteger = 1;
-  // Hard cap just to bound any theoretical bug — 10M law reports/year is
-  // unrealistic for any jurisdiction but keeps us bounded in O(10M) worst case
-  // which in a tight JS loop is ~20ms max.
-  while (candidateInteger <= 10_000_000) {
-    if (!usedIntegers.has(candidateInteger)) {
-      break;
-    }
-    candidateInteger += 1;
-  }
-  if (candidateInteger > 10_000_000) {
-    throw new Error("LAW_REPORT_SEQUENCE_EXHAUSTED");
-  }
+  // Step 3: pick the baseline starting integer.
+  //   * New year (no reports yet)       → start at 1.
+  //   * Baseline exists (maxUsed >= 1)  → start at maxUsed + 1.
+  // We deliberately DO NOT fill gaps below maxUsed. A law-report series such
+  // as [501..1180] means 1..500 were reserved / intentionally unused by the
+  // publisher; inserting a new citation at Helar-2026-1 after Helar-2026-1180
+  // would confuse every downstream consumer that relies on strict citation
+  // order. Gaps stay gaps.
+  let chosenInteger = maxUsed === 0 ? 1 : maxUsed + 1;
 
-  // Step 4: up to 16 short race-guard probes. Our findMany above is against a
-  // snapshot (or global client point-in-time); another admin may have saved
-  // between that read and this write. So we verify the chosen integer is free
-  // right NOW, and if it's just been taken we increment and try the next one
-  // up to a small race-window burst (16 attempts = matches
-  // runSerializableWrite's count). If none of these are free, we fall back to
-  // stepping through more gaps from the usedIntegers set (which will be found
-  // on the next iteration of the outer while loop).
-  let chosenInteger = candidateInteger;
+  // Step 4: up to 16 short race-guard probes. Another admin may have saved
+  // between our bulk findMany and this write, or a previously caught P2002
+  // means we're re-entering on runSerializableWrite retry. We verify the
+  // chosen integer is free right NOW, and if it was just taken we increment
+  // and try the next one (16 attempts = matches runSerializableWrite's count).
   let raceProbes = 0;
   while (raceProbes < 16) {
+    // Fast path: if we already saw this integer committed in our bulk scan
+    // (shouldn't happen, but keeps us honest) skip DB round-trip.
+    while (usedIntegers.has(chosenInteger)) {
+      chosenInteger += 1;
+    }
     const candidate = `${prefix}${chosenInteger}`;
     const existing = await db.studyMaterial.findFirst({
       where: { reportNumber: candidate },
@@ -630,10 +626,11 @@ async function buildNextLawReportNumber(
             hypothesisIds: ["H2", "H5"],
             timestamp: new Date().toISOString(),
             level: "info",
-            message: "buildNextLawReportNumber chose candidate (gap-fill)",
+            message: "buildNextLawReportNumber chose candidate (strict monotonic)",
             data: {
               categoryId,
               prefix,
+              maxUsed,
               chosenInteger,
               chosenCandidate: candidate,
               raceProbes,
@@ -646,9 +643,10 @@ async function buildNextLawReportNumber(
       } catch {
         /* debug-only; never block the request */
       }
-      console.debug("[debug-law-reports-save-failing][H2|H5] buildNextLawReportNumber chose candidate (gap-fill)", {
+      console.debug("[debug-law-reports-save-failing][H2|H5] buildNextLawReportNumber chose candidate (strict monotonic)", {
         categoryId,
         prefix,
+        maxUsed,
         chosenInteger,
         chosenCandidate: candidate,
         raceProbes,
@@ -660,23 +658,18 @@ async function buildNextLawReportNumber(
       return candidate;
     }
     // Lost a race: another admin committed this number between our bulk
-    // findMany and this probe. Add it to the used set so the next gap-search
-    // (after we exhaust the 16-probe race window) skips it too.
+    // findMany and this probe. Add it to usedIntegers so the next forward
+    // step skips it directly without a DB round-trip.
     usedIntegers.add(chosenInteger);
+    if (chosenInteger > maxUsed) maxUsed = chosenInteger;
     raceProbes += 1;
-    // Walk forward: after the lowest-gap pick, if we lose 16 races in a row
-    // (extremely high concurrent save burst), just keep taking the next
-    // integer in ascending order. Eventually one will be free.
-    while (usedIntegers.has(chosenInteger)) {
-      chosenInteger += 1;
-    }
+    // Always walk forward — law report numbers are strictly monotonic.
+    chosenInteger += 1;
   }
 
-  // If we exhausted the race-probe budget without finding a free number, just
-  // commit to the next unused integer — the calling runSerializableWrite will
-  // re-enter this function on P2002 and perform a fresh bulk scan with the
-  // new committed data, guaranteeing progress on retry. This line keeps TS
-  // happy; realistically we always return from inside the while loop above.
+  // If we exhausted the 16-probe race budget, the calling runSerializableWrite
+  // will re-enter this function on P2002 and perform a fresh bulk scan with
+  // the new committed data — guaranteed progress on retry.
   return `${prefix}${chosenInteger}`;
 }
 
