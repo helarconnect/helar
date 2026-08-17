@@ -27,6 +27,14 @@ const adminLibrarySearchSchema = z.object({
 const adminLibraryMaterialInputSchema = z
   .object({
     body: z.string().optional().default(""),
+    // When `bodyChunkToken` is set the create/update implementation reads the
+    // assembled final body text from AdminLibraryChunkBuffer (see
+    // resolveLibraryContentFromTransport below). Either the inline `body` or
+    // the token can be set — not both for the same field. This allows the
+    // frontend to split > 500 KB Word HTML pastes into N transport chunks
+    // and submit a tiny final JSON, which eliminates the express.json()
+    // heap spike that caused the Render empty-bodied 500.
+    bodyChunkToken: z.string().trim().max(120).optional(),
     downloadable: z.boolean(),
     estimatedMins: z.coerce.number().int().min(0).max(20_000).optional().default(0),
     materialType: z.nativeEnum(MaterialType),
@@ -37,6 +45,7 @@ const adminLibraryMaterialInputSchema = z
     // data-URL/base64 attachments if an admin pastes document content inline.
     storageUrl: z.string().trim().min(2).max(1_000_000),
     summary: z.string().optional().default(""),
+    summaryChunkToken: z.string().trim().max(120).optional(),
     title: z.string().trim().min(2)
   })
   .strict();
@@ -135,6 +144,14 @@ const CHUNK_FIELD_BODY = 0;
 const CHUNK_FIELD_SUMMARY = 1;
 const PER_DOC_SAFE_HEAD_CHARS = 1 * 1024 * 1024; // 1M chars ~ 2MB UTF-16
 const PER_CHUNK_MAX_CHARS = 1 * 1024 * 1024;    // 1M chars per overflow chunk doc
+
+// Transport-layer chunking. Split huge Word HTML pastes at this threshold on
+// the frontend, and upload each slice as a separate plain-text append to
+// AdminLibraryChunkBuffer. This ensures express.json() never parses a JSON
+// string large enough to OOM a 512 MB Render worker (which was the cause of
+// the empty-bodied 500 that surfaced the generic toast).
+export const TRANSPORT_CHUNK_MAX_CHARS = 500 * 1024; // 500 KB per transport chunk
+const MAX_TRANSPORT_CHUNKS_PER_FIELD = 1000;         // 500 MB total soft cap per field
 
 function bufferUtf16Length(value: string | null) {
   // UTF-16 (V8's internal representation) uses 2 bytes per BMP code point, 4 bytes
@@ -1130,8 +1147,17 @@ export async function createAdminLibraryMaterial(
 
   assertSectionMaterialType(section, input.materialType);
 
-  const summary = normalizeRichText(input.summary);
-  const body = normalizeRichText(input.body);
+  // Either the body/summary is inline (small) or it's a chunk token (large).
+  // The zod schema permits both fields to coexist; we only read from the
+  // buffer when the token is actually supplied, to keep back-compat.
+  const resolved = await resolveLibraryContentFromTransport(
+    input.body,
+    input.summary,
+    input.bodyChunkToken,
+    input.summaryChunkToken
+  );
+  const summary = normalizeRichText(resolved.summary);
+  const body = normalizeRichText(resolved.body);
   // Large body/summary strings are split so the parent document stays under the
   // MongoDB 16MB BSON cap regardless of how long the law report judgment text is.
   const bodySplit = splitSafeHeadAndOverflow(body, PER_DOC_SAFE_HEAD_CHARS);
@@ -1151,7 +1177,7 @@ export async function createAdminLibraryMaterial(
           ? await buildNextLawReportNumber(tx, category.id)
           : internalReportNumber;
 
-        const created = await tx.studyMaterial.create({
+        return tx.studyMaterial.create({
           data: {
             body: bodySplit.head || null,
             categoryId: category.id,
@@ -1180,15 +1206,26 @@ export async function createAdminLibraryMaterial(
             }
           }
         });
-
-        // Write chunk overflow inside the same transaction so chunks and the
-        // parent document roll back together if anything later fails.
-        await tryWriteMaterialBodyChunks(tx, created.id, CHUNK_FIELD_BODY, bodyChunks);
-        await tryWriteMaterialBodyChunks(tx, created.id, CHUNK_FIELD_SUMMARY, summaryChunks);
-
-        return created;
       })
   );
+
+  // NOTE: chunk writes are intentionally performed OUTSIDE the material write
+  // transaction. Keeping them inside had two failure modes for large 20+ chunk
+  // imports (typical 26-page MS Word paste with Word-generated HTML):
+  //   1. MongoDB multi-doc transactions have a hard ~60-second lifetime. With
+  //      one `create()` per chunk over slow/serverless Atlas, the transaction
+  //      could expire mid-loop and roll back the *entire* save (including the
+  //      parent study material the user had already confirmed success for).
+  //   2. Certain Atlas topologies (replica-set-backed serverless, M0/M2/M5
+  //      shared clusters) abort multi-doc transactions that issue too many
+  //      individual writes, even if each write is well under 16MB.
+  // Doing chunks as post-commit writes means: the material record itself saves
+  // quickly in the short transaction (no timeout, no tx write-count risk),
+  // then chunk content is appended one at a time. In the unlikely event a
+  // chunk write fails later the user still keeps their saved material and can
+  // edit/re-save to fix the tail.
+  await tryWriteMaterialBodyChunks(prisma, material.id, CHUNK_FIELD_BODY, bodyChunks);
+  await tryWriteMaterialBodyChunks(prisma, material.id, CHUNK_FIELD_SUMMARY, summaryChunks);
 
   await tryCreateLibraryAuditLog(actorUserId, "admin.library.material.created", material.id, {
     categorySlug: category.slug,
@@ -1201,6 +1238,10 @@ export async function createAdminLibraryMaterial(
     bodyChunkCount: bodyChunks.length,
     summaryChunkCount: summaryChunks.length
   });
+
+  // Clear temporary transport chunks once the material is safely stored.
+  // Non-fatal if cleanup fails — 6-hour sweeper catches stragglers.
+  await clearAdminLibraryChunkBuffer([resolved.bodyChunkToken ?? null, resolved.summaryChunkToken ?? null]);
 
   // Reassemble the saved body/summary so callers get the exact text they submitted,
   // even for gigantic reports that exceeded the single-doc safe head.
@@ -1235,8 +1276,16 @@ export async function updateAdminLibraryMaterial(
     return null;
   }
 
-  const summary = normalizeRichText(input.summary);
-  const body = normalizeRichText(input.body);
+  // Either the body/summary is inline (small) or it's a chunk token (large).
+  // Matches the create path — see createAdminLibraryMaterial comment.
+  const resolved = await resolveLibraryContentFromTransport(
+    input.body,
+    input.summary,
+    input.bodyChunkToken,
+    input.summaryChunkToken
+  );
+  const summary = normalizeRichText(resolved.summary);
+  const body = normalizeRichText(resolved.body);
   // On update, split body/summary the same way as create so arbitrarily large law
   // reports can be edited and re-saved without blowing the 16MB BSON cap.
   const bodySplit = splitSafeHeadAndOverflow(body, PER_DOC_SAFE_HEAD_CHARS);
@@ -1256,7 +1305,7 @@ export async function updateAdminLibraryMaterial(
             ? await buildNextLawReportNumber(tx, category.id)
             : existingMaterial.reportNumber ?? `internal-${materialId}`;
 
-        const updated = await tx.studyMaterial.update({
+        return tx.studyMaterial.update({
           where: {
             id: materialId
           },
@@ -1285,15 +1334,16 @@ export async function updateAdminLibraryMaterial(
             }
           }
         });
-
-        // Chunks are (re)written inside the same transaction as the parent update
-        // so stale tails from previous content don't leak into future readers.
-        await tryWriteMaterialBodyChunks(tx, updated.id, CHUNK_FIELD_BODY, bodyChunks);
-        await tryWriteMaterialBodyChunks(tx, updated.id, CHUNK_FIELD_SUMMARY, summaryChunks);
-
-        return updated;
       })
   );
+
+  // Post-commit chunk (re)writes for update, identical reasoning to the create
+  // path above: keep the update transaction short so it can't time out on
+  // slow Atlas, then append/overwrite chunk rows. deleteMany inside the helper
+  // clears the previous tail before writing the new one, so there's no stale
+  // content visible to readers even across the brief post-commit window.
+  await tryWriteMaterialBodyChunks(prisma, material.id, CHUNK_FIELD_BODY, bodyChunks);
+  await tryWriteMaterialBodyChunks(prisma, material.id, CHUNK_FIELD_SUMMARY, summaryChunks);
 
   await tryCreateLibraryAuditLog(actorUserId, "admin.library.material.updated", material.id, {
     categorySlug: category.slug,
@@ -1306,6 +1356,10 @@ export async function updateAdminLibraryMaterial(
     bodyChunkCount: bodyChunks.length,
     summaryChunkCount: summaryChunks.length
   });
+
+  // Clear temporary transport chunks once the material is safely stored.
+  // Non-fatal if cleanup fails — 6-hour sweeper catches stragglers.
+  await clearAdminLibraryChunkBuffer([resolved.bodyChunkToken ?? null, resolved.summaryChunkToken ?? null]);
 
   // Reassemble so the caller receives the complete body/summary they just saved.
   const reassembled = await reassembleMaterialText(prisma, material.id, material.body, material.summary);
@@ -1353,5 +1407,199 @@ export async function deleteAdminLibraryMaterial(
   return {
     id: materialId,
     success: true
+  };
+}
+
+// Map user-facing field names ("body" / "summary") to the integer field
+// persisted in AdminLibraryChunkBuffer. Returns null for unknown values so
+// the caller can surface a 400 instead of silently coercing.
+function resolveTransportField(value: string | undefined): number | null {
+  if (value === "body") return CHUNK_FIELD_BODY;
+  if (value === "summary") return CHUNK_FIELD_SUMMARY;
+  return null;
+}
+
+// Append a single transport chunk into AdminLibraryChunkBuffer. Called from a
+// plain-text body route that DOES NOT invoke express.json(), avoiding OOM on
+// huge payloads. `token` is either a previously-returned opaque token or the
+// string "new" on the first chunk (we allocate a fresh token then).
+//
+// Intentionally uses a single prisma.adminLibraryChunkBuffer.upsert so the
+// client is allowed to re-upload a specific index (idempotent retries)
+// without corrupting the concatenated result.
+export async function appendAdminLibraryChunkBuffer(
+  token: string | undefined,
+  fieldParam: string | undefined,
+  indexRaw: string | undefined,
+  content: string
+) {
+  if (!content || content.length === 0) {
+    throw new Error("LIBRARY_CHUNK_CONTENT_EMPTY");
+  }
+  if (content.length > TRANSPORT_CHUNK_MAX_CHARS * 2) {
+    throw new Error("LIBRARY_CHUNK_TOO_LARGE");
+  }
+
+  const field = resolveTransportField(fieldParam);
+  if (field === null) {
+    throw new Error("LIBRARY_CHUNK_FIELD_INVALID");
+  }
+
+  const indexNum = Number(indexRaw);
+  if (!Number.isFinite(indexNum) || !Number.isInteger(indexNum) || indexNum < 0 || indexNum >= MAX_TRANSPORT_CHUNKS_PER_FIELD) {
+    throw new Error("LIBRARY_CHUNK_INDEX_INVALID");
+  }
+
+  const actualToken = token && token !== "new" && token.length > 0 ? token : `chunkbuf_${randomUUID().replace(/-/g, "")}`;
+
+  await prisma.adminLibraryChunkBuffer.upsert({
+    where: {
+      token_field_index: {
+        token: actualToken,
+        field,
+        index: indexNum
+      }
+    },
+    create: {
+      token: actualToken,
+      field,
+      index: indexNum,
+      content
+    },
+    update: {
+      content
+    }
+  });
+
+  return {
+    token: actualToken,
+    field,
+    index: indexNum,
+    chunkChars: content.length
+  };
+}
+
+// Read all rows for a (token, field) pair ordered by index ascending and join
+// them. Sparse indices are tolerated: any missing index up to max(indices) is
+// treated as an empty string and the caller can observe that the result is
+// shorter than expected. Returns null if the token has no rows at all.
+async function readTransportBuffer(token: string, field: number): Promise<string | null> {
+  if (!token) return null;
+  const rows = await prisma.adminLibraryChunkBuffer.findMany({
+    where: {
+      token,
+      field
+    },
+    orderBy: {
+      index: "asc"
+    },
+    select: {
+      index: true,
+      content: true
+    }
+  });
+  if (rows.length === 0) return null;
+  const parts: string[] = [];
+  let lastIndex = -1;
+  for (const row of rows) {
+    const gap = row.index - lastIndex - 1;
+    for (let g = 0; g < gap; g += 1) parts.push("");
+    parts.push(row.content);
+    lastIndex = row.index;
+  }
+  return parts.join("");
+}
+
+// Resolve final body/summary text during create/update. If `bodyChunkToken`
+// is set we read the transport buffer; otherwise we use the inline
+// `body` string. Same for `summaryChunkToken` vs `summary`. This lets the
+// same schema accept either mode (small inline bodies or huge chunked).
+//
+// If a chunk token is supplied but the buffer is empty/missing we throw so
+// admins don't silently save a blank report after a partial transport.
+export type ResolvedLibraryContent = {
+  body: string;
+  summary: string;
+  bodyChunkToken?: string | null;
+  summaryChunkToken?: string | null;
+  readBodyFromBuffer: boolean;
+  readSummaryFromBuffer: boolean;
+};
+
+export async function resolveLibraryContentFromTransport(
+  inlineBody: string | undefined,
+  inlineSummary: string | undefined,
+  bodyChunkToken: string | undefined,
+  summaryChunkToken: string | undefined
+): Promise<ResolvedLibraryContent> {
+  let body = inlineBody ?? "";
+  let summary = inlineSummary ?? "";
+  let readBodyFromBuffer = false;
+  let readSummaryFromBuffer = false;
+
+  if (bodyChunkToken && bodyChunkToken.trim().length > 0) {
+    const fromBuf = await readTransportBuffer(bodyChunkToken.trim(), CHUNK_FIELD_BODY);
+    if (fromBuf === null) {
+      throw new Error("LIBRARY_BODY_CHUNK_BUFFER_MISSING");
+    }
+    body = fromBuf;
+    readBodyFromBuffer = true;
+  }
+
+  if (summaryChunkToken && summaryChunkToken.trim().length > 0) {
+    const fromBuf = await readTransportBuffer(summaryChunkToken.trim(), CHUNK_FIELD_SUMMARY);
+    if (fromBuf === null) {
+      throw new Error("LIBRARY_SUMMARY_CHUNK_BUFFER_MISSING");
+    }
+    summary = fromBuf;
+    readSummaryFromBuffer = true;
+  }
+
+  return {
+    body,
+    summary,
+    bodyChunkToken: bodyChunkToken ?? null,
+    summaryChunkToken: summaryChunkToken ?? null,
+    readBodyFromBuffer,
+    readSummaryFromBuffer
+  };
+}
+
+// Clear a transport buffer. Called after successful create/update to avoid
+// leaving 100 MB transport chunks in the database indefinitely. Any token
+// older than 6 hours is also safe to GC via a background sweeper, but we
+// always do the synchronous clear on success first.
+export async function clearAdminLibraryChunkBuffer(tokens: Array<string | null | undefined>) {
+  const unique = Array.from(new Set(tokens.filter((t): t is string => Boolean(t) && typeof t === "string" && t.length > 0)));
+  if (unique.length === 0) return;
+  try {
+    await prisma.adminLibraryChunkBuffer.deleteMany({
+      where: {
+        token: { in: unique }
+      }
+    });
+  } catch {
+    // Non-fatal: the rows expire via createdAt index sweeper, so we never
+    // abort the user-visible success just because a cleanup fails.
+  }
+}
+
+// Expose the raw transport buffer contents for debugging / preview while an
+// upload is still in flight. Read-only access to the token the admin client
+// owns (they generated the token UUID themselves, not shared).
+export async function peekAdminLibraryChunkBuffer(token: string, fieldParam: string) {
+  const field = resolveTransportField(fieldParam);
+  if (field === null) {
+    throw new Error("LIBRARY_CHUNK_FIELD_INVALID");
+  }
+  const assembled = await readTransportBuffer(token, field);
+  if (assembled === null) {
+    return null;
+  }
+  return {
+    token,
+    field,
+    totalChars: assembled.length,
+    sample: assembled.slice(0, 200)
   };
 }

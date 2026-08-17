@@ -184,6 +184,13 @@ export type AdminPortalSearchResponse = {
 
 export type AdminLibraryMaterialInput = {
   body: string;
+  // Optional short-lived opaque transport chunk token. When set, the backend
+  // reads the final body text from AdminLibraryChunkBuffer (assembled from
+  // the N 500 KB chunks the client appended before this call), ignoring the
+  // inline `body` string. This lets us upload arbitrarily long Word-HTML
+  // pastes without putting them into one JSON request (which OOMs Render's
+  // workers and returns an empty-bodied 500 the frontend cannot surface).
+  bodyChunkToken?: string | null | undefined;
   downloadable: boolean;
   estimatedMins: number;
   materialType: AdminLibraryMaterialType;
@@ -192,6 +199,8 @@ export type AdminLibraryMaterialInput = {
   sharingEnabled: boolean;
   storageUrl: string;
   summary: string;
+  // Optional companion for summary. See `bodyChunkToken` rationale.
+  summaryChunkToken?: string | null | undefined;
   title: string;
 };
 
@@ -1471,7 +1480,25 @@ export type AdminDashboardOverview = {
 
 // Extracts the server's user-facing error message from an Axios/AuthError.
 // When undefined the caller should fall back to its own generic toast text.
+//
+// Search order (matches every envelope the API actually emits):
+//   1. Axios-style `error.response.data.error.message`  (admin routes, auth routes)
+//   2. Alternative `error.response.data.message`        (middlewares, older endpoints)
+//   3. Alternative `error.response.data` as a raw string (text/plain 5xx fallthrough)
+//   4. Axios-level `error.message`                      ("Network Error", timeouts, etc.)
+//
+// During local development we also dump the raw error object to the browser
+// console so admins chasing down the "could not create library material"
+// generic toast can inspect the actual Axios response shape in DevTools.
 export function extractServerErrorMessage(error: unknown): string | undefined {
+  if (typeof window !== "undefined") {
+    // NOTE: safe in production too (console.* is a no-op in many minifiers),
+    // but kept gated on window presence so we never emit during SSR / Node
+    // execution paths.
+    // eslint-disable-next-line no-console
+    console.debug("[admin-api] extractServerErrorMessage raw error", error);
+  }
+
   if (
     typeof error === "object" &&
     error !== null &&
@@ -1479,26 +1506,42 @@ export function extractServerErrorMessage(error: unknown): string | undefined {
     typeof (error as { response?: unknown }).response === "object" &&
     (error as { response?: { data?: unknown } }).response !== null
   ) {
-    const data = (error as { response: { data: unknown } }).response.data;
+    const response = (error as { response: Record<string, unknown> }).response;
+    const data = response.data;
 
-    if (
-      typeof data === "object" &&
-      data !== null &&
-      "error" in data &&
-      typeof (data as { error?: unknown }).error === "object" &&
-      (data as { error: unknown }).error !== null
-    ) {
-      const serverError = (data as { error: { message?: unknown } }).error;
-      const message = (serverError as { message?: unknown }).message;
+    if (typeof data === "string" && data.trim().length > 0) {
+      return data.trim();
+    }
 
-      if (typeof message === "string" && message.trim().length > 0) {
-        return message;
+    if (typeof data === "object" && data !== null) {
+      const dataObj = data as Record<string, unknown>;
+      if (
+        typeof dataObj.error === "object" &&
+        dataObj.error !== null &&
+        typeof (dataObj.error as Record<string, unknown>).message === "string" &&
+        String((dataObj.error as Record<string, unknown>).message).trim().length > 0
+      ) {
+        return String((dataObj.error as Record<string, unknown>).message).trim();
+      }
+
+      if (typeof dataObj.message === "string" && dataObj.message.trim().length > 0) {
+        return dataObj.message.trim();
       }
     }
   }
 
   if (error instanceof Error && typeof error.message === "string" && error.message.trim().length > 0) {
-    return error.message;
+    // If this is an Axios-level "Network Error" or timeout on very large
+    // uploads, surface a more user-friendly hint instead of the cryptic
+    // literal. The user sees actionable guidance instead of "Network Error".
+    const msg = error.message.trim();
+    if (/network error/i.test(msg)) {
+      return "The upload was interrupted by a network error. The report may be too large for your connection — please try with a smaller paste or remove embedded images.";
+    }
+    if (/timeout|exceeded.*timeout/i.test(msg)) {
+      return "The upload timed out. Please try again with a smaller paste or split the report into sections.";
+    }
+    return msg;
   }
 
   return undefined;
@@ -2081,6 +2124,146 @@ export async function fetchAdminLibraryMaterials(section: AdminLibrarySection, f
   );
 
   return response.data.data;
+}
+
+// Frontend threshold for chunked transport uploads. Above this, body/summary
+// strings are split into TRANSPORT_CHUNK_MAX_CHARS-sized pieces and uploaded
+// one at a time as plain text. At 500 KB per chunk, a 100 MB Word-HTML paste
+// spreads across ~200 individually tiny HTTP calls, each of which never
+// stresses V8's JSON.parse heap on the server.
+export const ADMIN_LIBRARY_TRANSPORT_CHUNK_MAX_CHARS = 500 * 1024;
+
+type AdminLibraryChunkField = "body" | "summary";
+
+type AdminLibraryTransportChunkAppendResult = {
+  token: string;
+  field: number;
+  index: number;
+  chunkChars: number;
+};
+
+// Split a potentially huge string into 500 KB transport chunks locally.
+// Intentionally simple (slice on char boundary, not code-point aware) because
+// Word HTML pastes are overwhelmingly BMP content and slicing is instantaneous.
+// Zero-length input returns [] so callers skip the upload entirely and use the
+// inline `body: ""` path.
+export function splitAdminLibraryTransportChunks(value: string | undefined): string[] {
+  if (!value || value.length === 0) return [];
+  if (value.length <= ADMIN_LIBRARY_TRANSPORT_CHUNK_MAX_CHARS) {
+    // Inline path — the field is short enough that the final JSON POST is
+    // still well under the 32 MB content-length guard, so no transport
+    // upload at all.
+    return [value];
+  }
+  const pieces: string[] = [];
+  for (let i = 0; i < value.length; i += ADMIN_LIBRARY_TRANSPORT_CHUNK_MAX_CHARS) {
+    pieces.push(value.slice(i, i + ADMIN_LIBRARY_TRANSPORT_CHUNK_MAX_CHARS));
+  }
+  return pieces;
+}
+
+// Upload a single transport chunk as a text/plain POST body, capped to ~1 MB.
+// On chunk index 0 the server allocates a fresh token. Subsequent chunks
+// include the same token query param so rows share the buffer.
+async function appendAdminLibraryTransportChunk(
+  section: AdminLibrarySection,
+  token: string | undefined,
+  field: AdminLibraryChunkField,
+  index: number,
+  chunk: string
+): Promise<string> {
+  const url = token
+    ? `/api/v1/admin/library/${section}/materials/_chunks/${encodeURIComponent(field)}/${encodeURIComponent(
+        String(index)
+      )}?token=${encodeURIComponent(token)}`
+    : `/api/v1/admin/library/${section}/materials/_chunks/${encodeURIComponent(field)}/${encodeURIComponent(String(index))}`;
+  const response = await authenticatedHttp.post<{ success: true; data: AdminLibraryTransportChunkAppendResult }>(
+    url,
+    chunk,
+    {
+      // NOTE: `express.text()` default type is `*/*`, so omitting Content-Type
+      // or sending text/plain both work. Explicitly set text/plain so Axios
+      // never JSON-serializes the huge HTML string.
+      headers: { "Content-Type": "text/plain;charset=UTF-8" },
+      // Chunks are one-way writes with a bounded 90s timeout — even a 1 MB
+      // chunk over slow Wi-Fi completes in this window.
+      timeout: 90_000
+    }
+  );
+  return response.data.data.token;
+}
+
+// Upload all transport chunks for one field sequentially to guarantee token
+// assignment order (index 0 first → allocates token; remaining chunks follow).
+// Sequential is fine because it keeps DB writes per-request small and never
+// queues >1 socket write into the shared authenticated axios instance.
+async function uploadFieldTransportChunks(
+  section: AdminLibrarySection,
+  field: AdminLibraryChunkField,
+  chunks: string[]
+): Promise<{ mode: "inline"; value: string } | { mode: "chunked"; token: string }> {
+  if (chunks.length === 0) return { mode: "inline", value: "" };
+  if (chunks.length === 1 && chunks[0]!.length <= ADMIN_LIBRARY_TRANSPORT_CHUNK_MAX_CHARS) {
+    // Fast path: content is at-or-below threshold, submit inline with the
+    // final JSON payload. No extra HTTP calls.
+    return { mode: "inline", value: chunks[0]! };
+  }
+  let token: string | undefined;
+  for (let i = 0; i < chunks.length; i += 1) {
+    token = await appendAdminLibraryTransportChunk(section, token, field, i, chunks[i]!);
+  }
+  if (!token) throw new Error("Transport chunk upload completed but did not return a token.");
+  return { mode: "chunked", token };
+}
+
+// Clear transport buffer tokens after a successful create/update (or after the
+// user cancels an upload). The backend also runs a time-based 6-hour sweeper
+// so any token we fail to clear explicitly is cleaned up safely.
+export async function clearAdminLibraryTransportChunks(
+  section: AdminLibrarySection,
+  tokens: Array<string | null | undefined>
+): Promise<void> {
+  const unique = Array.from(new Set(tokens.filter((t): t is string => Boolean(t) && typeof t === "string" && t.length > 0)));
+  if (unique.length === 0) return;
+  try {
+    const [first, ...rest] = unique;
+    await authenticatedHttp.post(`/api/v1/admin/library/${section}/materials/_chunks/${encodeURIComponent(first!)}/clear`, {
+      tokens: rest
+    });
+  } catch {
+    // Clearing is best-effort — the backend expires stragglers after a few
+    // hours, so we never surface cleanup failures to the user.
+  }
+}
+
+export async function prepareAdminLibraryTransport(
+  section: AdminLibrarySection,
+  body: string,
+  summary: string
+): Promise<
+  | {
+      body: string;
+      bodyChunkToken: null;
+      summary: string;
+      summaryChunkToken: null;
+    }
+  | {
+      body: string;
+      bodyChunkToken: string | null;
+      summary: string;
+      summaryChunkToken: string | null;
+    }
+> {
+  const bodyChunks = splitAdminLibraryTransportChunks(body);
+  const summaryChunks = splitAdminLibraryTransportChunks(summary);
+  const bodyResult = await uploadFieldTransportChunks(section, "body", bodyChunks);
+  const summaryResult = await uploadFieldTransportChunks(section, "summary", summaryChunks);
+  return {
+    body: bodyResult.mode === "inline" ? bodyResult.value : "",
+    bodyChunkToken: bodyResult.mode === "chunked" ? bodyResult.token : null,
+    summary: summaryResult.mode === "inline" ? summaryResult.value : "",
+    summaryChunkToken: summaryResult.mode === "chunked" ? summaryResult.token : null
+  };
 }
 
 export async function createAdminLibraryMaterial(section: AdminLibrarySection, payload: AdminLibraryMaterialInput) {

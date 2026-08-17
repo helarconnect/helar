@@ -29,10 +29,12 @@ import { Link, useLocation, useSearchParams } from "react-router-dom";
 
 import { useTheme } from "@/hooks/useTheme";
 import {
+  clearAdminLibraryTransportChunks,
   createAdminLibraryMaterial,
   deleteAdminLibraryMaterial,
   extractServerErrorMessage,
   fetchAdminLibraryMaterials,
+  prepareAdminLibraryTransport,
   type AdminLibraryFilters,
   type AdminLibraryMaterial,
   type AdminLibraryMaterialInput,
@@ -1034,7 +1036,22 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
   }, [isModalOpen, materialsQuery.data?.materials, searchParams, setSearchParams]);
 
   const createMutation = useMutation({
-    mutationFn: (payload: AdminLibraryMaterialInput) => createAdminLibraryMaterial(section, payload),
+    mutationFn: async (payload: AdminLibraryMaterialInput) => {
+      const transport = await prepareAdminLibraryTransport(section, payload.body, payload.summary);
+      try {
+        const finalPayload: AdminLibraryMaterialInput = {
+          ...payload,
+          body: transport.body,
+          bodyChunkToken: transport.bodyChunkToken ?? undefined,
+          summary: transport.summary,
+          summaryChunkToken: transport.summaryChunkToken ?? undefined
+        };
+        const material = await createAdminLibraryMaterial(section, finalPayload);
+        return material;
+      } finally {
+        await clearAdminLibraryTransportChunks(section, [transport.bodyChunkToken, transport.summaryChunkToken]);
+      }
+    },
     onSuccess: () => {
       showToast(
         isContentAdminWorkspace
@@ -1057,8 +1074,22 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ materialId, payload }: { materialId: string; payload: AdminLibraryMaterialInput }) =>
-      updateAdminLibraryMaterial(section, materialId, payload),
+    mutationFn: async ({ materialId, payload }: { materialId: string; payload: AdminLibraryMaterialInput }) => {
+      const transport = await prepareAdminLibraryTransport(section, payload.body, payload.summary);
+      try {
+        const finalPayload: AdminLibraryMaterialInput = {
+          ...payload,
+          body: transport.body,
+          bodyChunkToken: transport.bodyChunkToken ?? undefined,
+          summary: transport.summary,
+          summaryChunkToken: transport.summaryChunkToken ?? undefined
+        };
+        const material = await updateAdminLibraryMaterial(section, materialId, finalPayload);
+        return material;
+      } finally {
+        await clearAdminLibraryTransportChunks(section, [transport.bodyChunkToken, transport.summaryChunkToken]);
+      }
+    },
     onSuccess: () => {
       showToast(
         isContentAdminWorkspace

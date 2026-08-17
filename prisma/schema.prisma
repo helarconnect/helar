@@ -546,6 +546,34 @@ model StudyMaterialBodyChunk {
   @@index([materialId])
 }
 
+// Ephemeral transport buffer for admin library material chunked uploads.
+// Word HTML pastes can easily grow to 20–100 MB; sending that whole string
+// inside a single JSON POST body makes express.json() allocate several times
+// the raw text size for parsing + string escapes, which OOMs 512 MB Render
+// workers and returns an empty 500 from the proxy (no JSON envelope).
+//
+// To avoid that, the frontend splits body/summary into 500 KB chunks and
+// POSTs them as plain text to `/…/_chunks/:token/:index`. After all chunks
+// are uploaded, the final create/update call carries only `bodyChunkToken` /
+// `summaryChunkToken` (short string UUIDs). The backend reads rows from this
+// table, concatenates, splits into the storage chunks (StudyMaterialBodyChunk)
+// then clears this buffer. Rows older than 6 hours are safe to GC.
+model AdminLibraryChunkBuffer {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  // Opaque short token returned to the client after first chunk append.
+  token     String
+  // 0 = body buffer, 1 = summary buffer (same semantic as StudyMaterialBodyChunk.field)
+  field     Int
+  // 0-based chunk index as uploaded by the client.
+  index     Int
+  content   String
+  createdAt DateTime @default(now())
+
+  @@unique([token, field, index])
+  @@index([token])
+  @@index([createdAt])
+}
+
 model ReadingHistory {
   id               String        @id @default(auto()) @map("_id") @db.ObjectId
   userId           String        @db.ObjectId

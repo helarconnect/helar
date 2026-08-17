@@ -11,6 +11,8 @@ import { z } from "zod";
 
 import { sendContactEmail, sendPasswordResetEmail, sendRegistrationVerificationEmails } from "./lib/email.js";
 import {
+  appendAdminLibraryChunkBuffer,
+  clearAdminLibraryChunkBuffer,
   createLawReportReadingSession,
   createAdminLibraryMaterial,
   deleteAdminLibraryMaterial,
@@ -21,6 +23,7 @@ import {
   parseAdminLibraryMaterialInput,
   parseAdminLibrarySearchQuery,
   parseAdminLibrarySection,
+  peekAdminLibraryChunkBuffer,
   searchLibraryMaterialsForStudents,
   searchAdminLibraryMaterials,
   updateLawReportReadingSession,
@@ -692,6 +695,8 @@ type AdminLibraryFailureClassification =
   | "LIBRARY_MATERIAL_TYPE_MISMATCH"
   | "LIBRARY_BODY_TOO_LARGE"
   | "LIBRARY_PAYLOAD_TOO_LARGE"
+  | "CHUNK_BUFFER_MISSING"
+  | "CHUNK_TRANSPORT_FAILED"
   | "TRANSACTION_CONFLICT"
   | "DATABASE_UNAVAILABLE"
   | "UNKNOWN";
@@ -708,8 +713,51 @@ function classifyAdminLibraryWriteError(error: unknown): AdminLibraryFailureClas
       if (/reportNumber/i.test(target)) return "REPORT_NUMBER_COLLISION";
       return "TRANSACTION_CONFLICT";
     }
-    if (error.code === "P2034") return "TRANSACTION_CONFLICT";
-    if (error.code === "P2021" || error.code === "P2022" || error.code === "P1000") return "DATABASE_UNAVAILABLE";
+    // P2034: transaction conflict due to write/write races (stale snapshot).
+    // P2024: "Transaction API error" — tx lifecycle errors, which MongoDB Atlas
+    //        raises on multi-doc tx under high load (e.g. expired tx lifetime).
+    // P2028: "Transaction API error" alternate Prisma variant.
+    if (error.code === "P2034" || error.code === "P2024" || error.code === "P2028") return "TRANSACTION_CONFLICT";
+    // P1xxx: client/connection-level failures common on slow Atlas clusters.
+    if (
+      error.code === "P2021" ||
+      error.code === "P2022" ||
+      error.code === "P1000" ||
+      error.code === "P1001" ||
+      error.code === "P1002" ||
+      error.code === "P1008" ||
+      error.code === "P1010" ||
+      error.code === "P1011" ||
+      error.code === "P1012" ||
+      error.code === "P1013" ||
+      error.code === "P1014" ||
+      error.code === "P1015" ||
+      error.code === "P1016" ||
+      error.code === "P1017"
+    ) {
+      return "DATABASE_UNAVAILABLE";
+    }
+    // P2020: Value is out of range for the type / column too short.
+    // P2023: Inconsistent column data.
+    // P2000: Provided value is too long for the column. This typically means
+    //        a MongoDB string overflowed a 16MB BSON cap or a driver-level
+    //        buffer.
+    if (error.code === "P2000" || error.code === "P2020" || error.code === "P2023") return "LIBRARY_BODY_TOO_LARGE";
+  }
+
+  // Prisma also has a ValidationError + UnknownRequestError raised when the
+  // driver-level rejects a query. Any mention of size/bson/max-document maps
+  // to LIBRARY_BODY_TOO_LARGE so the admin sees the 413 guidance toast.
+  if (
+    error instanceof Prisma.PrismaClientValidationError ||
+    error instanceof Prisma.PrismaClientUnknownRequestError
+  ) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (
+      /BSONObj size|document is larger than|exceeds max bson size|16.?MB|BSON document too large|too long|exceeds the maximum/i.test(msg)
+    ) {
+      return "LIBRARY_BODY_TOO_LARGE";
+    }
   }
 
   if (error instanceof Error) {
@@ -720,7 +768,27 @@ function classifyAdminLibraryWriteError(error: unknown): AdminLibraryFailureClas
     if (/LIBRARY_MATERIAL_TYPE_INVALID|SECTION_MATERIAL_TYPE/i.test(msg)) return "LIBRARY_MATERIAL_TYPE_MISMATCH";
     if (/LIBRARY_BODY_EXCEEDS_MAX_SIZE/i.test(msg)) return "LIBRARY_BODY_TOO_LARGE";
     if (/LIBRARY_PAYLOAD_TOO_LARGE/i.test(msg)) return "LIBRARY_PAYLOAD_TOO_LARGE";
+    // Chunk transport buffer errors — explicit so the admin can retry without
+    // guessing which step failed (append, finalize, or missing transport step).
+    if (/LIBRARY_BODY_CHUNK_BUFFER_MISSING|LIBRARY_SUMMARY_CHUNK_BUFFER_MISSING/i.test(msg)) {
+      return "CHUNK_BUFFER_MISSING";
+    }
+    if (/LIBRARY_CHUNK_CONTENT_EMPTY|LIBRARY_CHUNK_TOO_LARGE|LIBRARY_CHUNK_FIELD_INVALID|LIBRARY_CHUNK_INDEX_INVALID/i.test(msg)) {
+      return "CHUNK_TRANSPORT_FAILED";
+    }
     if (/SERIALIZABLE_WRITE_FAILED/i.test(msg)) return "TRANSACTION_CONFLICT";
+    // MongoServer / native Node driver messages for tx-related failures —
+    // Prisma often re-wraps these as Error (not KnownRequestError) on slow tx.
+    if (
+      /Transaction .*? (aborted|expired|timed out|cancelled)|NoSuchTransaction|RetryableWriteError|WriteConflict/i.test(msg)
+    ) {
+      return "TRANSACTION_CONFLICT";
+    }
+    if (
+      /not authorized|requires authentication|AuthenticationFailed|connection closed|connection.*refused|socket hang up|ETIMEDOUT|ECONNREFUSED|ECONNRESET|ENOTFOUND/i.test(msg)
+    ) {
+      return "DATABASE_UNAVAILABLE";
+    }
   }
 
   const msg = String(error instanceof Error ? error.message : error);
@@ -790,6 +858,22 @@ function buildAdminLibraryFailureResponse(
         message:
           "The report you tried to upload is too large for a single request. Please reduce embedded images, remove base64 attachments, or split the report into smaller records, then try again."
       };
+    case "CHUNK_BUFFER_MISSING":
+      return {
+        status: 400,
+        code: "LIBRARY_CHUNK_BUFFER_MISSING",
+        message:
+          "The uploaded transport chunks could not be found for this material. Please re-paste the report (the browser may have navigated away mid-upload) and try again."
+      };
+    case "CHUNK_TRANSPORT_FAILED":
+      return {
+        status: 400,
+        code: "LIBRARY_CHUNK_TRANSPORT_FAILED",
+        message:
+          rawMessage && rawMessage.trim().length > 0
+            ? `One of the transport chunks failed to upload: ${rawMessage.trim().slice(0, 220)}`
+            : "One of the transport chunks failed to upload. Please retry."
+      };
     case "TRANSACTION_CONFLICT":
       return {
         status: 409,
@@ -803,12 +887,24 @@ function buildAdminLibraryFailureResponse(
         message: "Database connection lost. Please try again in a moment."
       };
     case "UNKNOWN":
-    default:
+    default: {
+      // We append the raw server error message to the safe fallback. Admins are
+      // trusted users and the Prisma/Mongo driver message often contains the
+      // fix they need (e.g. "Transaction 60s lifetime exceeded" vs a generic
+      // "could not create"). We also keep it short — max 280 chars — so the
+      // toast remains scannable.
+      const rawTail = rawMessage ? rawMessage.trim() : "";
+      const clippedTail = rawTail.length > 280 ? `${rawTail.slice(0, 280)}…` : rawTail;
       return {
         status: 500,
-        code: fallbackMessage.includes("update") ? "ADMIN_LIBRARY_UPDATE_FAILED" : fallbackMessage.includes("remove") ? "ADMIN_LIBRARY_DELETE_FAILED" : "ADMIN_LIBRARY_CREATE_FAILED",
-        message: fallbackMessage
+        code: fallbackMessage.includes("update")
+          ? "ADMIN_LIBRARY_UPDATE_FAILED"
+          : fallbackMessage.includes("remove")
+            ? "ADMIN_LIBRARY_DELETE_FAILED"
+            : "ADMIN_LIBRARY_CREATE_FAILED",
+        message: clippedTail ? `${fallbackMessage} (${clippedTail})` : fallbackMessage
       };
+    }
   }
 }
 
@@ -1607,6 +1703,212 @@ export function createApp(options: AppOptions = {}) {
 
   app.use(cors());
   app.use(helmet());
+
+  // Admin library material transport chunk endpoints. Huge Word-HTML pastes
+  // split at 500 KB on the frontend are uploaded here as individual plain-
+  // text chunks so express.json() never has to JSON.parse a multi-megabyte
+  // body string (which would allocate 3-5× the raw size and OOM 512 MB
+  // Render workers, returning an empty-bodied 500 the frontend cannot
+  // surface). These endpoints read the request with the plain-text body
+  // parser, capped to 1 MB per chunk (generous headroom vs 500 KB threshold).
+  // Authentication: admin-level only (same as material create/update).
+  const MAX_CHUNK_BODY_BYTES = 1024 * 1024;
+  const textBodyParser = express.text({ limit: MAX_CHUNK_BODY_BYTES, defaultCharset: "utf-8", type: "*/*" });
+
+  app.post(
+    "/api/v1/admin/library/:section/materials/_chunks/:field/:index",
+    authenticateRequest,
+    requireAdminRequest,
+    textBodyParser,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required for the admin library workspace."
+          }
+        });
+      }
+      try {
+        const result = await appendAdminLibraryChunkBuffer(
+          typeof request.query.token === "string" ? request.query.token : undefined,
+          String(request.params.field),
+          String(request.params.index),
+          typeof request.body === "string" ? request.body : ""
+        );
+        return response.status(200).json({ success: true, data: result });
+      } catch (error) {
+        if (error instanceof Error) {
+          const code = error.message;
+          if (code === "LIBRARY_CHUNK_CONTENT_EMPTY") {
+            return response.status(400).json({
+              success: false,
+              error: { code, message: "The transport chunk content was empty." }
+            });
+          }
+          if (code === "LIBRARY_CHUNK_TOO_LARGE") {
+            return response.status(413).json({
+              success: false,
+              error: {
+                code,
+                message: "The transport chunk exceeds the 1 MB per-chunk limit. Split the content and try again."
+              }
+            });
+          }
+          if (code === "LIBRARY_CHUNK_FIELD_INVALID") {
+            return response.status(400).json({
+              success: false,
+              error: { code, message: "The transport chunk field must be either 'body' or 'summary'." }
+            });
+          }
+          if (code === "LIBRARY_CHUNK_INDEX_INVALID") {
+            return response.status(400).json({
+              success: false,
+              error: { code, message: "The transport chunk index is out of range." }
+            });
+          }
+        }
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "ADMIN_LIBRARY_CHUNK_APPEND_FAILED",
+            message:
+              error instanceof Error && error.message.trim().length > 0
+                ? `Could not append the transport chunk. (${error.message.trim().slice(0, 240)})`
+                : "Could not append the transport chunk."
+          }
+        });
+      }
+    }
+  );
+
+  app.post(
+    "/api/v1/admin/library/:section/materials/_chunks/:token/clear",
+    authenticateRequest,
+    requireAdminRequest,
+    express.json({ limit: "32kb" }),
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required for the admin library workspace."
+          }
+        });
+      }
+      try {
+        const tokens: string[] = [String(request.params.token)];
+        const reqTokens =
+          request.body &&
+          typeof request.body === "object" &&
+          "tokens" in request.body &&
+          Array.isArray((request.body as { tokens?: unknown }).tokens)
+            ? ((request.body as { tokens: unknown[] }).tokens.filter((t): t is string => typeof t === "string" && t.length > 0))
+            : [];
+        for (const t of reqTokens) if (!tokens.includes(t)) tokens.push(t);
+        await clearAdminLibraryChunkBuffer(tokens);
+        return response.json({ success: true, data: { cleared: true, tokens: tokens.length } });
+      } catch (error) {
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "ADMIN_LIBRARY_CHUNK_CLEAR_FAILED",
+            message: "Could not clear the transport chunks."
+          }
+        });
+      }
+    }
+  );
+
+  app.get(
+    "/api/v1/admin/library/:section/materials/_chunks/:token/:field/peek",
+    authenticateRequest,
+    requireAdminRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required for the admin library workspace."
+          }
+        });
+      }
+      try {
+        const data = await peekAdminLibraryChunkBuffer(String(request.params.token), String(request.params.field));
+        if (!data) {
+          return response.status(404).json({
+            success: false,
+            error: {
+              code: "ADMIN_LIBRARY_CHUNK_PEEK_EMPTY",
+              message: "The transport chunk buffer has no rows for this token yet."
+            }
+          });
+        }
+        return response.json({ success: true, data });
+      } catch (error) {
+        if (error instanceof Error && error.message === "LIBRARY_CHUNK_FIELD_INVALID") {
+          return response.status(400).json({
+            success: false,
+            error: { code: "LIBRARY_CHUNK_FIELD_INVALID", message: "The transport chunk field must be either 'body' or 'summary'." }
+          });
+        }
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "ADMIN_LIBRARY_CHUNK_PEEK_FAILED",
+            message: "Could not read the transport chunk buffer."
+          }
+        });
+      }
+    }
+  );
+
+  // Content-length guard for admin library write routes. express.json() with a
+  // 200 MB limit still allocates ~3-5× the raw payload size during JSON.parse
+  // (buffer + string escapes + object graph). A 512 MB Render worker OOMs on
+  // ~40 MB+ JSON payloads and the Render proxy returns an empty-bodied 500
+  // with no JSON envelope the frontend can surface, leaving admins with only
+  // "could not create library material". Instead we short-circuit ANY admin
+  // library request over 32 MB BEFORE running the JSON parser with a proper
+  // JSON 413 response. The frontend now uploads body/summary > 500 KB via the
+  // chunked transport (AdminLibraryChunkBuffer) so this guard is a safety net,
+  // not the happy path.
+  const MAX_ADMIN_LIBRARY_JSON_BYTES = 32 * 1024 * 1024;
+  app.use("/api/v1/admin/", (request: Request, response: Response, next: NextFunction) => {
+    const isLibraryRoute = /^\/api\/v1\/admin\/[^/]+\/library($|\/)/.test(request.originalUrl || request.url || "");
+    if (!isLibraryRoute) {
+      next();
+      return;
+    }
+    const rawLen = request.headers["content-length"];
+    if (rawLen === undefined || rawLen === null) {
+      // If Content-Length is missing (chunked transfer) we still let it
+      // through — express.json() has its own 200 MB stream-size limit, and
+      // chunked streaming is much rarer here.
+      next();
+      return;
+    }
+    const n = Number(rawLen);
+    if (!Number.isFinite(n) || n > MAX_ADMIN_LIBRARY_JSON_BYTES) {
+      response.status(413).json({
+        success: false,
+        error: {
+          code: "LIBRARY_PAYLOAD_TOO_LARGE",
+          message:
+            "The library material is too large for a single upload. Please split the body into sections or remove embedded images, then try again."
+        }
+      });
+      return;
+    }
+    next();
+  });
+
   // Raised from 30mb → 200mb so admin library submissions (large law report HTML with
   // embedded tables / inline images / full judgment text pasted into the body editor)
   // survive JSON serialization. Each endpoint still enforces its own safe upper bound
@@ -8188,12 +8490,26 @@ export function createApp(options: AppOptions = {}) {
         });
       } catch (error) {
         if (error instanceof z.ZodError) {
+          // If the frontend submits fields the strict Zod schema doesn't know
+          // about, the default "payload invalid" message is useless for admins.
+          // Instead, serialize the actual flattened list of field problems so
+          // the toast surfaces a hint the admin can act on (e.g.
+          // "Unrecognized key: 'outlineItems' — expected one of body, title, …").
+          const flattened = error.flatten();
+          const fieldLines = Object.entries(flattened.fieldErrors)
+            .map(([field, errors]) => `${field}: ${(errors ?? []).join(", ")}`)
+            .concat(flattened.formErrors ?? []);
+          const humanMessage =
+            fieldLines.length > 0
+              ? `The library material payload is invalid: ${fieldLines.join("; ")}`
+              : "The library material payload is invalid.";
+
           return response.status(400).json({
             success: false,
             error: {
               code: "VALIDATION_ERROR",
-              message: "The library material payload is invalid.",
-              details: error.flatten()
+              message: humanMessage,
+              details: flattened
             }
           });
         }
@@ -8265,12 +8581,21 @@ export function createApp(options: AppOptions = {}) {
         });
       } catch (error) {
         if (error instanceof z.ZodError) {
+          const flattened = error.flatten();
+          const fieldLines = Object.entries(flattened.fieldErrors)
+            .map(([field, errors]) => `${field}: ${(errors ?? []).join(", ")}`)
+            .concat(flattened.formErrors ?? []);
+          const humanMessage =
+            fieldLines.length > 0
+              ? `The library material payload is invalid: ${fieldLines.join("; ")}`
+              : "The library material payload is invalid.";
+
           return response.status(400).json({
             success: false,
             error: {
               code: "VALIDATION_ERROR",
-              message: "The library material payload is invalid.",
-              details: error.flatten()
+              message: humanMessage,
+              details: flattened
             }
           });
         }
