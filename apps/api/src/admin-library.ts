@@ -563,7 +563,13 @@ async function buildNextLawReportNumber(
   // Guarantee uniqueness by probing the DB for the next N candidates.
   // Covers race conditions even when the calling transaction reads an older
   // snapshot under MongoDB's multi-document transaction isolation.
-  const probeLimit = 50;
+  //
+  // Raised from 50 → 200 candidates: if two admins save at nearly the same
+  // moment and both see the same highestSequence, the probe loop must have
+  // enough "next" candidates to find an unused slot even after the first
+  // admin has committed their row. This is much cheaper than contention on a
+  // dedicated counter document.
+  const probeLimit = 200;
   for (let offset = 1; offset <= probeLimit; offset += 1) {
     const candidate = `${prefix}${highestSequence + offset}`;
     const existing = await db.studyMaterial.findFirst({
@@ -609,10 +615,13 @@ async function tryCreateLibraryAuditLog(
 }
 
 async function runSerializableWrite<T>(operation: () => Promise<T>) {
-  // Bump to 8 attempts because report-number collisions are common when the
-  // sequence scanner starts from a stale snapshot, and each retry re-reads
-  // the highest existing number inside the transaction before writing.
-  const maxAttempts = 8;
+  // Raised to 16 attempts with exponential backoff + jitter because the
+  // typical 409 failure on create is a transient report-number P2002 where
+  // two admins' transactions both saw the same highest-sequence snapshot.
+  // After 200 ms × 2^n (capped at 1500 ms) gaps, one writer commits first,
+  // the other's re-scan sees the new highest and slots cleanly into the
+  // next-available report number.
+  const maxAttempts = 16;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
@@ -626,13 +635,16 @@ async function runSerializableWrite<T>(operation: () => Promise<T>) {
         throw error;
       }
 
-      // Add a small linear+random delay between retries so concurrent writers
-      // don't re-collide on the same newly-computed sequence number.
-      const delayMs = 25 + attempt * 15 + Math.floor(Math.random() * 30);
+      // Exponential backoff + random jitter so two colliding writers don't
+      // keep waking up at the same instant. Cap at 1500 ms so admins never
+      // wait longer than ~20s wall-clock total for all 16 attempts.
+      const baseMs = 200 * Math.pow(2, attempt);
+      const delayMs = Math.min(1500, baseMs + Math.floor(Math.random() * 160));
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }
-
+  // TypeScript can't prove the loop returns or throws, so this line is
+  // unreachable at runtime but keeps the type-checker happy.
   throw new Error("SERIALIZABLE_WRITE_FAILED");
 }
 

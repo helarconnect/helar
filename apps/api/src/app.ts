@@ -824,7 +824,8 @@ function buildAdminLibraryFailureResponse(
       return {
         status: 409,
         code: "LAW_REPORT_NUMBER_COLLISION",
-        message: "The generated law report number collided with an existing record. Please try again."
+        message:
+          "The generated law report number collided with an existing record. This usually happens when another admin saves at nearly the same moment. Wait 3–5 seconds, then click Save again — the server will assign the next available Helar-{year}-N number automatically."
       };
     case "REPORT_SEQUENCE_EXHAUSTED":
       return {
@@ -1739,12 +1740,35 @@ export function createApp(options: AppOptions = {}) {
         );
         return response.status(200).json({ success: true, data: result });
       } catch (error) {
+        // Log the full error + request identity so admins can chase 400s in
+        // Render service logs. On chunk routes, the request is small (< 1 MB),
+        // so we can afford a bit of structured logging.
+        console.error(
+          "[admin-library-chunk-append] failure",
+          {
+            actorUserId: (request as { auth?: { userId?: unknown } }).auth?.userId ?? null,
+            field: request.params.field,
+            index: request.params.index,
+            hasToken: Boolean(typeof request.query.token === "string" && request.query.token.length > 0),
+            contentLength: typeof request.body === "string" ? request.body.length : typeof request.body,
+            errorName: error instanceof Error ? error.name : typeof error,
+            errorCode:
+              error instanceof Prisma.PrismaClientKnownRequestError
+                ? error.code
+                : null,
+            rawMessage: error instanceof Error ? error.message : String(error)
+          }
+        );
         if (error instanceof Error) {
           const code = error.message;
           if (code === "LIBRARY_CHUNK_CONTENT_EMPTY") {
             return response.status(400).json({
               success: false,
-              error: { code, message: "The transport chunk content was empty." }
+              error: {
+                code,
+                message:
+                  "The transport chunk content was empty. This can happen if your Word paste included unsupported embedded content — please paste as plain text or remove images, then try again."
+              }
             });
           }
           if (code === "LIBRARY_CHUNK_TOO_LARGE") {
@@ -1769,15 +1793,39 @@ export function createApp(options: AppOptions = {}) {
             });
           }
         }
-        console.error(error);
+        // Prisma-specific classification for chunk writes — Atlas-specific errors
+        // (P1001/P1002, transient network) surface directly to the user instead of
+        // "Could not append". These match the classifyAdminLibraryWriteError mappings
+        // used by create/update.
+        if (error instanceof Prisma.PrismaClientKnownRequestError) {
+          const c = error.code;
+          if (/^P1/.test(c)) {
+            return response.status(503).json({
+              success: false,
+              error: {
+                code: "DATABASE_UNAVAILABLE",
+                message: "Database connection lost mid-upload. Please try the upload again in a moment."
+              }
+            });
+          }
+          if (c === "P2024" || c === "P2028" || c === "P2034") {
+            return response.status(409).json({
+              success: false,
+              error: {
+                code: "LIBRARY_TRANSACTION_CONFLICT",
+                message: "This chunk write conflicted with a concurrent save. Please wait 2 seconds and try the upload again."
+              }
+            });
+          }
+        }
+        const rawTail = error instanceof Error && error.message.trim().length > 0 ? error.message.trim().slice(0, 240) : "";
         return response.status(500).json({
           success: false,
           error: {
             code: "ADMIN_LIBRARY_CHUNK_APPEND_FAILED",
-            message:
-              error instanceof Error && error.message.trim().length > 0
-                ? `Could not append the transport chunk. (${error.message.trim().slice(0, 240)})`
-                : "Could not append the transport chunk."
+            message: rawTail
+              ? `Could not append the transport chunk. (${rawTail})`
+              : "Could not append the transport chunk. Please wait a moment and retry."
           }
         });
       }
@@ -1879,10 +1927,25 @@ export function createApp(options: AppOptions = {}) {
   // JSON 413 response. The frontend now uploads body/summary > 500 KB via the
   // chunked transport (AdminLibraryChunkBuffer) so this guard is a safety net,
   // not the happy path.
+  //
+  // NOTE: Route shape is /api/v1/admin/library/{section}/... — library is the
+  // IMMEDIATE child of /admin/ with no category in between. The previous regex
+  // required one unrelated segment between /admin/ and /library/ and therefore
+  // never fired, letting huge payloads reach express.json() and OOM the worker.
   const MAX_ADMIN_LIBRARY_JSON_BYTES = 32 * 1024 * 1024;
   app.use("/api/v1/admin/", (request: Request, response: Response, next: NextFunction) => {
-    const isLibraryRoute = /^\/api\/v1\/admin\/[^/]+\/library($|\/)/.test(request.originalUrl || request.url || "");
+    const target = request.originalUrl || request.url || "";
+    const isLibraryRoute = /^\/api\/v1\/admin\/library(\/|$)/.test(target);
     if (!isLibraryRoute) {
+      next();
+      return;
+    }
+    // Chunk endpoints read the body with express.text() (1 MB cap per chunk)
+    // and never enter JSON parsing. Let them bypass the JSON-size guard so
+    // retried 1 MB text/plain appends are not falsely rejected by a JSON
+    // payload heuristic.
+    const isChunkSubRoute = /\/_chunks(\/|$)/.test(target);
+    if (isChunkSubRoute) {
       next();
       return;
     }
