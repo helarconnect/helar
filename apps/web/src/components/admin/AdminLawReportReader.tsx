@@ -10,7 +10,8 @@ import {
   fetchLibraryMaterial,
   fetchStudentStudyProgress,
   saveStudentStudyProgress,
-  updateLawReportReadingSession
+  updateLawReportReadingSession,
+  type AdminLibrarySection
 } from "@/lib/admin-api";
 import { queryKeys } from "@/lib/query-keys";
 import { cn, hasAdminAccess } from "@/lib/utils";
@@ -232,13 +233,22 @@ function buildSearchResults(query: string, report: {
   storageUrl: string;
   summary: string;
   title: string;
-}) {
+}, options: { isHelarpedia: boolean } = { isHelarpedia: false }) {
+  const materialTypeLabel = options.isHelarpedia ? "Entry type" : "Court";
+  const serialLabel = options.isHelarpedia ? "Serial no." : "Case Number";
+  const storageLabel = options.isHelarpedia ? "Cross-reference" : "Suit Number";
+  const prettifyType = (value: string) => {
+    if (options.isHelarpedia) {
+      return value === "REFERENCE_ENTRY" ? "Helarpedia entry" : value.replace(/_/g, " ");
+    }
+    return prettifyCourt(value);
+  };
   return [
     ...findSectionMatches("title", "Title", report.title, query),
-    ...findSectionMatches("court", "Court", prettifyCourt(report.materialType), query),
+    ...findSectionMatches("court", materialTypeLabel, prettifyType(report.materialType), query),
     ...findSectionMatches("date", "Date", formatDate(report.reportDate), query),
-    ...findSectionMatches("report-number", "Case Number", report.reportNumber ?? "Pending assignment", query),
-    ...findSectionMatches("suit-number", "Suit Number", report.storageUrl, query),
+    ...findSectionMatches("report-number", serialLabel, report.reportNumber ?? "Pending assignment", query),
+    ...findSectionMatches("suit-number", storageLabel, report.storageUrl, query),
     ...findSectionMatches("summary", "Summary", stripHtml(report.summary), query),
     ...findSectionMatches("body", "Body", stripHtml(report.body), query)
   ];
@@ -406,8 +416,28 @@ export function AdminLawReportReader() {
   const roleCodes = useAuthStore((state) => state.session?.user.roleCodes ?? []);
   const isStudentReader = location.pathname.startsWith("/app/library/");
   const canUseAdminLibraryEndpoint = hasAdminAccess(roleCodes);
-  const backPath = isStudentReader ? "/app/library" : "/app/admin/library/law-reports";
-  const backLabel = isStudentReader ? "Back to library" : "Back to law reports";
+
+  // Derive numbered-section from the URL path — the same reader powers both
+  // law reports (/app/*/library/law-reports/:id) and Helarpedia
+  // (/app/*/library/helarpedia/:id). Copy (labels, back link, bookmark keys,
+  // API section param, summary search captions) is all switched through these
+  // two predicates so the shared body/summary/deeplink/search engine stays
+  // identical for both citation series.
+  const isHelarpedia = /\/library\/helarpedia\//.test(location.pathname);
+  const section: AdminLibrarySection = isHelarpedia ? "helarpedia" : "law-reports";
+  const studyContentTypeKey = isHelarpedia ? "HELARPEDIA" : "LAW_REPORT";
+  const backPath = isStudentReader
+    ? isHelarpedia
+      ? "/app/library/helarpedia"
+      : "/app/library/law-reports"
+    : isHelarpedia
+      ? "/app/admin/library/helarpedia"
+      : "/app/admin/library/law-reports";
+  const backLabel = isHelarpedia ? "Back to Helarpedia" : isStudentReader ? "Back to library" : "Back to law reports";
+  const singularNoun = isHelarpedia ? "Helarpedia entry" : "law report";
+  const singularNounCapitalized = isHelarpedia ? "Helarpedia Entry" : "Law Report";
+  const crossReferenceLabel = isHelarpedia ? "Cross-reference" : "Suit Number";
+  const serialNumberLabel = isHelarpedia ? "Serial no." : "Case Number";
   const [searchTerm, setSearchTerm] = useState("");
   const [shareNotice, setShareNotice] = useState<null | { message: string; tone: "green" | "red" }>(null);
   const skipNextDeepLinkEffectRef = useRef(false);
@@ -432,13 +462,13 @@ export function AdminLawReportReader() {
   const reportQuery = useQuery({
     enabled: Boolean(materialId),
     queryFn: () =>
-      canUseAdminLibraryEndpoint ? fetchAdminLibraryMaterial("law-reports", materialId) : fetchLibraryMaterial("law-reports", materialId),
-    queryKey: queryKeys.adminLibraryDetail("law-reports", materialId)
+      canUseAdminLibraryEndpoint ? fetchAdminLibraryMaterial(section, materialId) : fetchLibraryMaterial(section, materialId),
+    queryKey: queryKeys.adminLibraryDetail(section, materialId)
   });
   const studyProgressQuery = useQuery({
     enabled: isStudentReader && Boolean(materialId),
-    queryFn: () => fetchStudentStudyProgress(`LAW_REPORT:${materialId}`),
-    queryKey: queryKeys.studentStudyProgress(`LAW_REPORT:${materialId}`)
+    queryFn: () => fetchStudentStudyProgress(`${studyContentTypeKey}:${materialId}`),
+    queryKey: queryKeys.studentStudyProgress(`${studyContentTypeKey}:${materialId}`)
   });
 
   const report = reportQuery.data?.material;
@@ -452,8 +482,8 @@ export function AdminLawReportReader() {
       return [];
     }
 
-    return buildSearchResults(searchTerm, report);
-  }, [report, searchTerm]);
+    return buildSearchResults(searchTerm, report, { isHelarpedia });
+  }, [report, searchTerm, isHelarpedia]);
   const highlightedSummary = useMemo(
     () => highlightHtmlContent(report?.summary ?? "", searchTerm, highlightClassName, "summary"),
     [highlightClassName, report?.summary, searchTerm]
@@ -830,10 +860,10 @@ export function AdminLawReportReader() {
 
           if (isStudentReader) {
             void saveStudentStudyProgress({
-              contentKey: `LAW_REPORT:${materialId}`,
-              contentType: "LAW_REPORT",
-              lastPositionLabel: `${Math.round(computeReadingProgress())}% through report`,
-              path: `/app/library/law-reports/${materialId}`,
+              contentKey: `${studyContentTypeKey}:${materialId}`,
+              contentType: studyContentTypeKey as "LAW_REPORT" | "HELARPEDIA",
+              lastPositionLabel: `${Math.round(computeReadingProgress())}% through ${singularNoun}`,
+              path: isHelarpedia ? `/app/library/helarpedia/${materialId}` : `/app/library/law-reports/${materialId}`,
               readingProgressPct: computeReadingProgress(),
               scrollProgressPct: computeReadingProgress(),
               timeSpentSeconds: Math.round(trackedVisibleMsRef.current / 1000),
@@ -903,7 +933,7 @@ export function AdminLawReportReader() {
           <ArrowLeft className="h-4 w-4" />
           {backLabel}
         </Link>
-        <EmptyState isDark={isDark} message="Could not load this law report. Return to the law reports page and open it again." />
+        <EmptyState isDark={isDark} message={`Could not load this ${singularNoun}. Return to the ${isHelarpedia ? "Helarpedia" : "law reports"} page and open it again.`} />
       </div>
     );
   }
@@ -973,10 +1003,15 @@ export function AdminLawReportReader() {
             <section className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 min-w-0" ref={overviewRef}>
               {(
                 [
-                  { icon: Scale, id: "court", label: "Court", value: prettifyCourt(report.materialType) },
+                  {
+                    icon: Scale,
+                    id: "court",
+                    label: isHelarpedia ? "Entry type" : "Court",
+                    value: isHelarpedia ? (report.materialType === "REFERENCE_ENTRY" ? "Helarpedia entry" : report.materialType.replace(/_/g, " ")) : prettifyCourt(report.materialType)
+                  },
                   { icon: CalendarDays, id: "date", label: "Date", value: formatDate(report.reportDate) },
-                  { icon: FileSearch, id: "report-number", label: "Case Number", value: report.reportNumber ?? "Pending assignment" },
-                  { icon: FileSearch, id: "suit-number", label: "Suit Number", value: report.storageUrl }
+                  { icon: FileSearch, id: "report-number", label: serialNumberLabel, value: report.reportNumber ?? "Pending assignment" },
+                  { icon: FileSearch, id: "suit-number", label: crossReferenceLabel, value: report.storageUrl || "—" }
                 ] as const
               ).map((item) => {
                 const Icon = item.icon;
@@ -1035,7 +1070,7 @@ export function AdminLawReportReader() {
                   dangerouslySetInnerHTML={{ __html: highlightedSummary }}
                 />
               ) : (
-                <EmptyState isDark={isDark} message="No summary has been added to this report yet." />
+                <EmptyState isDark={isDark} message={`No summary has been added to this ${singularNoun} yet.`} />
               )}
             </section>
           </Surface>
@@ -1119,8 +1154,8 @@ export function AdminLawReportReader() {
                   isDark={isDark}
                   message={
                     isStudentReader && contentAccess?.isPreview
-                      ? "Subscribe to unlock the full law report body after the preview."
-                      : "This law report does not have a full body yet."
+                      ? `Subscribe to unlock the full ${singularNoun} body after the preview.`
+                      : `This ${singularNoun} does not have a full body yet.`
                   }
                 />
               )}
@@ -1159,7 +1194,7 @@ export function AdminLawReportReader() {
             >
               {!searchTerm.trim() ? (
                 <p className={cn("text-sm leading-7", isDark ? "text-slate-400" : "text-slate-600")}>
-                  Search across the overview, summary, and full body of this law report.
+                  Search across the overview, summary, and full body of this {singularNoun}.
                 </p>
               ) : searchResults.length ? (
                 <div className="space-y-3">

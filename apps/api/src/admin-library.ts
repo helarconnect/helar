@@ -72,7 +72,8 @@ const standardMaterialTypes = [
   MaterialType.PPT,
   MaterialType.VIDEO,
   MaterialType.AUDIO,
-  MaterialType.IMAGE
+  MaterialType.IMAGE,
+  MaterialType.REFERENCE_ENTRY
 ] as const;
 
 const lawReportCourtTypes = [
@@ -82,6 +83,8 @@ const lawReportCourtTypes = [
   MaterialType.SUPREME_COURT,
   MaterialType.TRIBUNAL
 ] as const;
+
+const helarpediaMaterialTypes = [MaterialType.REFERENCE_ENTRY] as const;
 
 const adminLibrarySectionConfig: Record<
   AdminLibrarySection,
@@ -138,7 +141,9 @@ function isReportNumberedSection(section: AdminLibrarySection) {
 }
 
 function getAllowedMaterialTypes(section: AdminLibrarySection) {
-  return isLawReportsSection(section) ? [...lawReportCourtTypes] : [...standardMaterialTypes];
+  if (isLawReportsSection(section)) return [...lawReportCourtTypes];
+  if (isHelarpediaSection(section)) return [...helarpediaMaterialTypes];
+  return [...standardMaterialTypes];
 }
 
 function isLawReportMaterialType(materialType: MaterialType) {
@@ -433,28 +438,34 @@ function createLibraryMaterialWhere(
   };
 }
 
-function mapLibraryMaterial(material: {
-  _count: {
-    bookmarks: number;
-    readingHistory: number;
-  };
-  body: string | null;
-  createdAt: Date;
-  downloadable: boolean;
-  estimatedMins: number;
-  id: string;
-  materialType: MaterialType;
-  publicationStatus: ContentPublicationStatus;
-  approvedAt: Date | null;
-  reviewFeedback: string | null;
-  reportNumber: string | null;
-  reportDate: Date | null;
-  sharingEnabled: boolean | null;
-  storageUrl: string;
-  summary: string | null;
-  title: string;
-  updatedAt: Date;
-}) {
+function mapLibraryMaterial(
+  material: {
+    _count: {
+      bookmarks: number;
+      readingHistory: number;
+    };
+    body: string | null;
+    createdAt: Date;
+    downloadable: boolean;
+    estimatedMins: number;
+    id: string;
+    materialType: MaterialType;
+    publicationStatus: ContentPublicationStatus;
+    approvedAt: Date | null;
+    reviewFeedback: string | null;
+    reportNumber: string | null;
+    reportDate: Date | null;
+    sharingEnabled: boolean | null;
+    storageUrl: string;
+    summary: string | null;
+    title: string;
+    updatedAt: Date;
+  },
+  section: AdminLibrarySection
+) {
+  // Preserve serial numbers for law reports and Helarpedia. Generic library
+  // uploads retain `null` since they use the opaque internal-<id> fallback.
+  const retainReportNumber = isReportNumberedSection(section);
   return {
     bookmarkCount: material._count.bookmarks,
     body: material.body ?? "",
@@ -469,7 +480,7 @@ function mapLibraryMaterial(material: {
     reviewFeedback: material.reviewFeedback ?? "",
     readerCount: material._count.readingHistory,
     reportDate: material.reportDate?.toISOString() ?? null,
-    reportNumber: isLawReportMaterialType(material.materialType) ? material.reportNumber : null,
+    reportNumber: retainReportNumber ? material.reportNumber : null,
     sharingEnabled: material.sharingEnabled ?? false,
     storageUrl: material.storageUrl,
     summary: material.summary ?? "",
@@ -814,6 +825,43 @@ async function buildNextHelarpediaNumber(
 // Law reports use Helar-{year}-N. Helarpedia uses Helarpedia-{1000+N}. Other
 // generic library sections (cases-and-ratios, subject-summaries) do not have
 // dedicated citation numbers; they use internal-{uuid} instead.
+// For legacy rows saved before serial-number assignment was wired end-to-end,
+// lazily backfill the next number the first time the row is read so admins see
+// a stable citation instead of "Pending assignment" and readers load without
+// errors. Returns the input material, potentially mutated with the new number
+// and timestamp bumps.
+async function ensureReportNumberBackfill<T extends { id: string; reportNumber: string | null }>(
+  section: AdminLibrarySection,
+  material: T,
+  categoryId: string
+): Promise<T> {
+  if (!isReportNumberedSection(section)) return material;
+  if (material.reportNumber && material.reportNumber.trim().length > 0) return material;
+
+  try {
+    const assigned = await buildNextReportNumberForSection(section, prisma, categoryId);
+    if (!assigned) return material;
+
+    await prisma.studyMaterial.update({
+      data: {
+        reportNumber: assigned,
+        updatedAt: new Date()
+      },
+      select: { id: true },
+      where: { id: material.id }
+    });
+
+    (material as T & { reportNumber: string }).reportNumber = assigned;
+    return material;
+  } catch (error) {
+    // Best-effort: don't fail the read if a concurrent write or unique collision
+    // defeats the backfill. The admin will see "Pending assignment" and can
+    // open the modal to save it explicitly.
+    console.warn("[admin-library] serial backfill skipped", material.id, error instanceof Error ? error.message : error);
+    return material;
+  }
+}
+
 async function buildNextReportNumberForSection(
   section: AdminLibrarySection,
   db: Prisma.TransactionClient | typeof prisma,
@@ -1179,7 +1227,11 @@ export async function listAdminLibraryMaterials(
     filters: {
       ...filters
     },
-    materials: materials.map((material) => mapLibraryMaterial(material)),
+    materials: (
+      await Promise.all(
+        materials.map((material) => ensureReportNumberBackfill(section, material, category.id))
+      )
+    ).map((material) => mapLibraryMaterial(material, section)),
     nextReportNumber,
     pagination: {
       page: filters.page,
@@ -1224,9 +1276,14 @@ export async function getAdminLibraryMaterial(section: AdminLibrarySection, mate
     return null;
   }
 
+  // Legacy rows may have been saved before serial assignment was active; ensure
+  // the detail fetch returns a populated citation so the shared reader has the
+  // stable serial number it uses for bookmark/progress keys.
+  const materialWithSerial = await ensureReportNumberBackfill(section, material, category.id);
+
   // Reattach body/summary overflow chunks so the reader sees the full, coherent
   // law report text no matter how large it is.
-  const reassembled = await reassembleMaterialText(prisma, material.id, material.body, material.summary);
+  const reassembled = await reassembleMaterialText(prisma, materialWithSerial.id, materialWithSerial.body, materialWithSerial.summary);
 
   return {
     category: {
@@ -1235,7 +1292,7 @@ export async function getAdminLibraryMaterial(section: AdminLibrarySection, mate
       name: category.name,
       slug: category.slug
     },
-    material: mapLibraryMaterial({ ...material, body: reassembled.body, summary: reassembled.summary })
+    material: mapLibraryMaterial({ ...materialWithSerial, body: reassembled.body, summary: reassembled.summary }, section)
   };
 }
 
@@ -1267,10 +1324,14 @@ export async function getLibraryMaterial(section: AdminLibrarySection, materialI
     return null;
   }
 
+  // Ensure legacy student-visible rows always have a serial number before the
+  // reader builds progress/bookmark keys on it.
+  const materialWithSerial = await ensureReportNumberBackfill(section, material, category.id);
+
   // Student reader also needs the full body/summary text for huge law reports, not
   // just the first 6 MB chunk stored on the parent row.
-  const reassembled = await reassembleMaterialText(prisma, material.id, material.body, material.summary);
-  const mappedMaterial = mapLibraryMaterial({ ...material, body: reassembled.body, summary: reassembled.summary });
+  const reassembled = await reassembleMaterialText(prisma, materialWithSerial.id, materialWithSerial.body, materialWithSerial.summary);
+  const mappedMaterial = mapLibraryMaterial({ ...materialWithSerial, body: reassembled.body, summary: reassembled.summary }, section);
   const contentAccess = userId
     ? await getPremiumContentAccess(userId)
     : {
@@ -1432,15 +1493,14 @@ async function searchLibraryMaterials({ limit, query }: AdminLibrarySearchQuery,
         id: material.id,
         materialType: material.materialType,
         matchedIn: searchPreview.matchedIn,
-        path:
-          section === "law-reports"
-            ? audience === "admin"
-              ? `/app/admin/library/law-reports/${material.id}`
-              : `/app/library/law-reports/${material.id}`
-            : audience === "admin"
-              ? `/app/admin/library/${section}`
-              : `/app/library/${section}`,
-        reportNumber: isLawReportMaterialType(material.materialType) ? material.reportNumber : null,
+        path: isReportNumberedSection(section)
+          ? audience === "admin"
+            ? `/app/admin/library/${section}/${material.id}`
+            : `/app/library/${section}/${material.id}`
+          : audience === "admin"
+            ? `/app/admin/library/${section}`
+            : `/app/library/${section}`,
+        reportNumber: isReportNumberedSection(section) ? material.reportNumber : null,
         section,
         sectionLabel: category.name,
         snippet: searchPreview.snippet,
@@ -1509,8 +1569,9 @@ export async function createAdminLibraryMaterial(
   //   (c) buildNextReportNumberForSection dispatches law-reports → Helar-{year}-N
   //       and helarpedia → Helarpedia-{1000+N}; generic sections keep internal-{uuid}.
   const material = await runSerializableWrite(async () => {
+    const manualReportNumber = input.reportNumber.trim();
     const computedReportNumber = isReportNumberedSection(section)
-      ? await buildNextReportNumberForSection(section, prisma, category.id)
+      ? manualReportNumber || (await buildNextReportNumberForSection(section, prisma, category.id))
       : internalReportNumber;
     return prisma.studyMaterial.create({
       data: {
@@ -1580,7 +1641,7 @@ export async function createAdminLibraryMaterial(
   // Reassemble the saved body/summary so callers get the exact text they submitted,
   // even for gigantic reports that exceeded the single-doc safe head.
   const reassembled = await reassembleMaterialText(prisma, material.id, material.body, material.summary);
-  return mapLibraryMaterial({ ...material, body: reassembled.body, summary: reassembled.summary });
+  return mapLibraryMaterial({ ...material, body: reassembled.body, summary: reassembled.summary }, section);
 }
 
 export async function updateAdminLibraryMaterial(
@@ -1644,10 +1705,12 @@ export async function updateAdminLibraryMaterial(
   //       multi-doc tx wrapper; eliminates spurious P2024/P2034 on Atlas shared
   //       clusters as a false "another admin may be uploading" toast.
   const material = await runSerializableWrite(async () => {
-    const reportNumber =
-      isReportNumberedSection(section) && !existingMaterial.reportNumber
-        ? await buildNextReportNumberForSection(section, prisma, category.id)
-        : existingMaterial.reportNumber ?? `internal-${materialId}`;
+    const manualReportNumber = input.reportNumber.trim();
+    const reportNumber = isReportNumberedSection(section)
+      ? manualReportNumber ||
+        existingMaterial.reportNumber ||
+        (await buildNextReportNumberForSection(section, prisma, category.id))
+      : manualReportNumber || (existingMaterial.reportNumber ?? `internal-${materialId}`);
     return prisma.studyMaterial.update({
       where: {
         id: materialId
@@ -1705,7 +1768,7 @@ export async function updateAdminLibraryMaterial(
 
   // Reassemble so the caller receives the complete body/summary they just saved.
   const reassembled = await reassembleMaterialText(prisma, material.id, material.body, material.summary);
-  return mapLibraryMaterial({ ...material, body: reassembled.body, summary: reassembled.summary });
+  return mapLibraryMaterial({ ...material, body: reassembled.body, summary: reassembled.summary }, section);
 }
 
 export async function deleteAdminLibraryMaterial(

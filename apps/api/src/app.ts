@@ -7627,6 +7627,50 @@ export function createApp(options: AppOptions = {}) {
     }
   );
 
+  app.get(
+    "/api/v1/library/helarpedia/:materialId",
+    authenticateRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required for the Helarpedia reader."
+          }
+        });
+      }
+
+      try {
+        const data = await getLibraryMaterial("helarpedia", String(request.params.materialId), request.auth!.userId);
+
+        if (!data) {
+          return response.status(404).json({
+            success: false,
+            error: {
+              code: "LIBRARY_MATERIAL_NOT_FOUND",
+              message: "The requested Helarpedia entry could not be found."
+            }
+          });
+        }
+
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "LIBRARY_MATERIAL_FETCH_FAILED",
+            message: "Could not load the Helarpedia entry."
+          }
+        });
+      }
+    }
+  );
+
   app.post(
     "/api/v1/library/law-reports/:materialId/reading-sessions",
     authenticateRequest,

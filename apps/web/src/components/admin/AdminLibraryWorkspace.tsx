@@ -89,7 +89,7 @@ const sectionCopy: Record<
   }
 };
 
-const standardMaterialTypeOptions: AdminLibraryMaterialType[] = ["PDF", "DOCX", "EPUB", "PPT", "VIDEO", "AUDIO", "IMAGE"];
+const standardMaterialTypeOptions: AdminLibraryMaterialType[] = ["PDF", "DOCX", "EPUB", "PPT", "VIDEO", "AUDIO", "IMAGE", "REFERENCE_ENTRY"];
 const lawReportCourtOptions: AdminLibraryMaterialType[] = [
   "COURT_OF_APPEAL",
   "FEDERAL_HIGH_COURT",
@@ -97,6 +97,7 @@ const lawReportCourtOptions: AdminLibraryMaterialType[] = [
   "SUPREME_COURT",
   "TRIBUNAL"
 ];
+const helarpediaMaterialTypeOptions: AdminLibraryMaterialType[] = ["REFERENCE_ENTRY"];
 
 function isLawReportsSection(section: AdminLibrarySection) {
   return section === "law-reports";
@@ -111,7 +112,9 @@ function isReportNumberedSection(section: AdminLibrarySection) {
 }
 
 function getMaterialTypeOptions(section: AdminLibrarySection) {
-  return isLawReportsSection(section) ? lawReportCourtOptions : standardMaterialTypeOptions;
+  if (isLawReportsSection(section)) return lawReportCourtOptions;
+  if (isHelarpediaSection(section)) return helarpediaMaterialTypeOptions;
+  return standardMaterialTypeOptions;
 }
 
 function getDefaultReportNumber() {
@@ -141,6 +144,7 @@ function prettifyMaterialType(value: string) {
     IMAGE: "Image",
     PDF: "PDF",
     PPT: "PPT",
+    REFERENCE_ENTRY: "Helarpedia entry",
     SUPREME_COURT: "Supreme Court",
     TRIBUNAL: "Tribunal",
     VIDEO: "Video"
@@ -175,7 +179,11 @@ function createDraft(section: AdminLibrarySection, nextReportNumber?: string | n
     body: "",
     downloadable: true,
     estimatedMins: 0,
-    materialType: isLawReportsSection(section) ? "COURT_OF_APPEAL" : "PDF",
+    materialType: isLawReportsSection(section)
+      ? "COURT_OF_APPEAL"
+      : isHelarpediaSection(section)
+        ? "REFERENCE_ENTRY"
+        : "PDF",
     reportDate: isLawReportsSection(section) ? new Date().toISOString().slice(0, 10) : "",
     reportNumber: isReportNumberedSection(section)
       ? nextReportNumber ?? (isLawReportsSection(section) ? getDefaultReportNumber() : getDefaultHelarpediaNumber())
@@ -619,10 +627,11 @@ function LibraryMaterialModal({
                         className={cn(
                           "w-full rounded-2xl border px-3 py-2 text-sm outline-none transition",
                           isDark
-                            ? "border-slate-700 bg-slate-900 text-slate-300"
-                            : "border-slate-200 bg-slate-100 text-slate-700"
+                            ? "border-slate-700 bg-slate-900 text-white placeholder:text-slate-500"
+                            : "border-slate-200 bg-white text-slate-950 placeholder:text-slate-400"
                         )}
-                        readOnly
+                        onChange={(event) => onChange("reportNumber", event.target.value)}
+                        placeholder={getDefaultReportNumber() + " (auto-filled if left blank)"}
                         value={draft.reportNumber ?? ""}
                       />
                     </label>
@@ -685,10 +694,11 @@ function LibraryMaterialModal({
                         className={cn(
                           "w-full rounded-2xl border px-3 py-2 text-sm outline-none transition",
                           isDark
-                            ? "border-slate-700 bg-slate-900 text-slate-300"
-                            : "border-slate-200 bg-slate-100 text-slate-700"
+                            ? "border-slate-700 bg-slate-900 text-white placeholder:text-slate-500"
+                            : "border-slate-200 bg-white text-slate-950 placeholder:text-slate-400"
                         )}
-                        readOnly
+                        onChange={(event) => onChange("reportNumber", event.target.value)}
+                        placeholder="Helarpedia-1000 (auto-filled if left blank)"
                         value={draft.reportNumber ?? ""}
                       />
                     </label>
@@ -1638,11 +1648,19 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
 
   function openEditModal(material: AdminLibraryMaterial) {
     setEditingMaterial(material);
+    // Avoid carrying legacy materialType (e.g. PDF saved before REFERENCE_ENTRY
+    // existed) into the draft — sections like Helarpedia or Law Reports have a
+    // strict allowed-types list and reject anything else on submit.
+    const sectionAllowedTypes = getMaterialTypeOptions(section);
+    const sanitizedMaterialType = sectionAllowedTypes.includes(material.materialType as never)
+      ? material.materialType
+      : sectionAllowedTypes[0] ?? material.materialType;
+
     setDraft({
       body: material.body,
       downloadable: material.downloadable,
       estimatedMins: material.estimatedMins,
-      materialType: material.materialType,
+      materialType: sanitizedMaterialType,
       reportDate: material.reportDate ? material.reportDate.slice(0, 10) : "",
       reportNumber: material.reportNumber ?? "",
         sharingEnabled: material.sharingEnabled,
@@ -1932,10 +1950,10 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
                                 {material.title}
                               </Link>
                               <p className={cn("mt-2 text-xs", isDark ? "text-slate-400" : "text-slate-500")}>
-                                {isLawReports ? "Case Number" : "Serial no."}: {material.reportNumber ?? "Pending assignment"}
+                                {isLawReports ? "Case Number" : "Serial no."}: {material.reportNumber ?? "Pending assignment (auto-assigns on next save)"}
                               </p>
                               <p className={cn("mt-1 text-xs", isDark ? "text-slate-400" : "text-slate-500")}>
-                                {isLawReports ? "Suit Number" : "Cross-reference"}: {material.storageUrl}
+                                {isLawReports ? "Suit Number" : "Cross-reference"}: {material.storageUrl?.trim() ? material.storageUrl : "—"}
                               </p>
                               {stripHtml(material.summary) ? (
                                 <p className={cn("mt-3 line-clamp-2 text-sm leading-6", isDark ? "text-slate-300" : "text-slate-600")}>{stripHtml(material.summary)}</p>
@@ -1999,7 +2017,11 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
                       </td>
                       <td className="px-4 py-4 align-top">
                         <span className={cn("rounded-full border px-3 py-1 text-xs", isDark ? "border-slate-700 bg-slate-900 text-slate-300" : "border-slate-200 bg-white text-slate-700")}>
-                          {prettifyMaterialType(material.materialType)}
+                          {isHelarpedia
+                            ? "Helarpedia entry"
+                            : isLawReports
+                              ? prettifyMaterialType(material.materialType)
+                              : prettifyMaterialType(material.materialType)}
                         </span>
                       </td>
                       <td className="px-4 py-4 align-top text-sm">

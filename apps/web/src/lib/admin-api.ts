@@ -15,7 +15,8 @@ export type AdminLibraryMaterialType =
   | "FEDERAL_HIGH_COURT"
   | "HIGH_COURT"
   | "SUPREME_COURT"
-  | "TRIBUNAL";
+  | "TRIBUNAL"
+  | "REFERENCE_ENTRY";
 
 export type PremiumContentAccess = {
   activeSubscriptionEndsAt: string | null;
@@ -2453,7 +2454,7 @@ export async function fetchAdminLibraryMaterial(section: AdminLibrarySection, ma
   return response.data.data;
 }
 
-export async function fetchLibraryMaterial(section: "law-reports", materialId: string) {
+export async function fetchLibraryMaterial(section: "law-reports" | "helarpedia", materialId: string) {
   const response = await authenticatedHttp.get<{ success: true; data: AdminLibraryMaterialDetail }>(
     `/api/v1/library/${section}/${materialId}`
   );
