@@ -150,7 +150,13 @@ const PER_CHUNK_MAX_CHARS = 1 * 1024 * 1024;    // 1M chars per overflow chunk d
 // AdminLibraryChunkBuffer. This ensures express.json() never parses a JSON
 // string large enough to OOM a 512 MB Render worker (which was the cause of
 // the empty-bodied 500 that surfaced the generic toast).
-export const TRANSPORT_CHUNK_MAX_CHARS = 500 * 1024; // 500 KB per transport chunk
+//
+// NOTE: 2 MB per transport chunk. A 100 MB Word-HTML paste therefore spreads
+// across ~50 HTTP calls. 2 MB is well below the 32 MB JSON content-length
+// guard and well below the express.text() 4 MB per-chunk cap on the route.
+// This keeps the per-request heap spike tiny while cutting total HTTP call
+// count by 4× vs the previous 500 KB slice.
+export const TRANSPORT_CHUNK_MAX_CHARS = 2 * 1024 * 1024;
 const MAX_TRANSPORT_CHUNKS_PER_FIELD = 1000;         // 500 MB total soft cap per field
 
 function bufferUtf16Length(value: string | null) {

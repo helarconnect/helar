@@ -1713,7 +1713,7 @@ export function createApp(options: AppOptions = {}) {
   // surface). These endpoints read the request with the plain-text body
   // parser, capped to 1 MB per chunk (generous headroom vs 500 KB threshold).
   // Authentication: admin-level only (same as material create/update).
-  const MAX_CHUNK_BODY_BYTES = 1024 * 1024;
+  const MAX_CHUNK_BODY_BYTES = 4 * 1024 * 1024;
   const textBodyParser = express.text({ limit: MAX_CHUNK_BODY_BYTES, defaultCharset: "utf-8", type: "*/*" });
 
   app.post(

@@ -29,6 +29,7 @@ import { Link, useLocation, useSearchParams } from "react-router-dom";
 
 import { useTheme } from "@/hooks/useTheme";
 import {
+  ADMIN_LIBRARY_TRANSPORT_CHUNK_MAX_CHARS,
   clearAdminLibraryTransportChunks,
   createAdminLibraryMaterial,
   deleteAdminLibraryMaterial,
@@ -40,6 +41,7 @@ import {
   type AdminLibraryMaterialInput,
   type AdminLibraryMaterialType,
   type AdminLibrarySection,
+  type AdminLibraryTransportProgressStep,
   updateAdminLibraryMaterial
 } from "@/lib/admin-api";
 import { queryKeys } from "@/lib/query-keys";
@@ -467,7 +469,8 @@ function LibraryMaterialModal({
   onSubmit,
   section,
   submitLabel,
-  title
+  title,
+  saveProgress
 }: {
   draft: AdminLibraryMaterialInput;
   isDark: boolean;
@@ -478,6 +481,10 @@ function LibraryMaterialModal({
   section: AdminLibrarySection;
   submitLabel: string;
   title: string;
+  saveProgress:
+    | { kind: "idle" }
+    | { kind: "uploading"; bodyCompleted: number; bodyTotal: number; summaryCompleted: number; summaryTotal: number }
+    | { kind: "finalizing" };
 }) {
   if (typeof document === "undefined") {
     return null;
@@ -783,13 +790,75 @@ function LibraryMaterialModal({
               <ChevronDown className="h-4 w-4" />
             </button>
           </div>
-          <div className="flex items-center gap-3">
-            <button className="button-secondary !px-4 !py-3" onClick={onClose} type="button">
-              Cancel
-            </button>
-            <button className="button-primary !px-5 !py-3" disabled={isSaving} onClick={onSubmit} type="button">
-              {isSaving ? "Saving..." : submitLabel}
-            </button>
+          <div className="flex flex-col gap-2">
+            {saveProgress.kind === "uploading" ? (
+              <>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                  {saveProgress.bodyTotal > 0 ? (
+                    <span className={isDark ? "text-slate-300" : "text-slate-600"}>
+                      Body&nbsp;
+                      <span className="font-semibold tabular-nums">
+                        {Math.min(saveProgress.bodyCompleted, saveProgress.bodyTotal)} / {saveProgress.bodyTotal}
+                      </span>
+                      &nbsp;chunks
+                    </span>
+                  ) : null}
+                  {saveProgress.summaryTotal > 0 ? (
+                    <span className={isDark ? "text-slate-300" : "text-slate-600"}>
+                      Summary&nbsp;
+                      <span className="font-semibold tabular-nums">
+                        {Math.min(saveProgress.summaryCompleted, saveProgress.summaryTotal)} / {saveProgress.summaryTotal}
+                      </span>
+                      &nbsp;chunks
+                    </span>
+                  ) : null}
+                  {saveProgress.bodyTotal === 0 && saveProgress.summaryTotal === 0 ? (
+                    <span className={isDark ? "text-slate-400" : "text-slate-500"}>Preparing upload…</span>
+                  ) : null}
+                </div>
+                <div
+                  className={cn(
+                    "h-2 w-full overflow-hidden rounded-full",
+                    isDark ? "bg-slate-800" : "bg-slate-200"
+                  )}
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={(() => {
+                    const totalWork = Math.max(1, saveProgress.bodyTotal + saveProgress.summaryTotal);
+                    const done = Math.min(totalWork, saveProgress.bodyCompleted + saveProgress.summaryCompleted);
+                    return Math.round((done / totalWork) * 100);
+                  })()}
+                >
+                  <div
+                    className="h-full bg-gradient-to-r from-indigo-500 to-violet-500 transition-[width] duration-200 ease-out"
+                    style={{
+                      width: `${(() => {
+                        const totalWork = Math.max(1, saveProgress.bodyTotal + saveProgress.summaryTotal);
+                        const done = Math.min(totalWork, saveProgress.bodyCompleted + saveProgress.summaryCompleted);
+                        return Math.round((done / totalWork) * 100);
+                      })()}%`
+                    }}
+                  />
+                </div>
+              </>
+            ) : saveProgress.kind === "finalizing" ? (
+              <p className={cn("text-sm", isDark ? "text-slate-300" : "text-slate-600")}>
+                Finalizing save and storing overflow chunks… please keep this tab open for just a moment longer.
+              </p>
+            ) : isSaving ? (
+              <p className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-500")}>
+                Saving in progress — this should complete shortly.
+              </p>
+            ) : null}
+            <div className="flex items-center gap-3">
+              <button className="button-secondary !px-4 !py-3" onClick={onClose} type="button">
+                Cancel
+              </button>
+              <button className="button-primary !px-5 !py-3" disabled={isSaving} onClick={onSubmit} type="button">
+                {isSaving ? "Saving..." : submitLabel}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -979,6 +1048,14 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
   const [editingMaterial, setEditingMaterial] = useState<AdminLibraryMaterial | null>(null);
   const [draft, setDraft] = useState<AdminLibraryMaterialInput>(() => createDraft(section));
   const [toasts, setToasts] = useState<Array<{ id: number; message: string; tone: ToastTone }>>([]);
+  // Tracks the last N transport-upload steps during save so we can render a
+  // live progress bar instead of leaving the user staring at a disabled
+  // button wondering if the save is still running.
+  const [saveProgress, setSaveProgress] = useState<
+    | { kind: "idle" }
+    | { kind: "uploading"; bodyCompleted: number; bodyTotal: number; summaryCompleted: number; summaryTotal: number }
+    | { kind: "finalizing" }
+  >({ kind: "idle" });
   const recordsSectionRef = useRef<HTMLElement | null>(null);
   const incomingSearchState = location.state as
     | {
@@ -1035,10 +1112,53 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
     setSearchParams(nextParams, { replace: true });
   }, [isModalOpen, materialsQuery.data?.materials, searchParams, setSearchParams]);
 
+  function applySaveProgressStep(step: AdminLibraryTransportProgressStep) {
+    if (step.kind === "finalize") {
+      setSaveProgress({ kind: "finalizing" });
+      return;
+    }
+    setSaveProgress((current) => {
+      if (current.kind === "uploading") {
+        if (step.kind === "body") {
+          return {
+            ...current,
+            bodyCompleted: Math.max(current.bodyCompleted, step.completed),
+            bodyTotal: Math.max(current.bodyTotal, step.total)
+          };
+        }
+        return {
+          ...current,
+          summaryCompleted: Math.max(current.summaryCompleted, step.completed),
+          summaryTotal: Math.max(current.summaryTotal, step.total)
+        };
+      }
+      return {
+        kind: "uploading",
+        bodyCompleted: step.kind === "body" ? step.completed : 0,
+        bodyTotal: step.kind === "body" ? step.total : 0,
+        summaryCompleted: step.kind === "summary" ? step.completed : 0,
+        summaryTotal: step.kind === "summary" ? step.total : 0
+      };
+    });
+  }
+
   const createMutation = useMutation({
     mutationFn: async (payload: AdminLibraryMaterialInput) => {
-      const transport = await prepareAdminLibraryTransport(section, payload.body, payload.summary);
+      setSaveProgress({
+        kind: "uploading",
+        bodyCompleted: 0,
+        bodyTotal: 0,
+        summaryCompleted: 0,
+        summaryTotal: 0
+      });
+      const transport = await prepareAdminLibraryTransport(
+        section,
+        payload.body,
+        payload.summary,
+        (step) => applySaveProgressStep(step)
+      );
       try {
+        setSaveProgress({ kind: "finalizing" });
         const finalPayload: AdminLibraryMaterialInput = {
           ...payload,
           body: transport.body,
@@ -1064,19 +1184,34 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
         "success"
       );
       setIsModalOpen(false);
+      setSaveProgress({ kind: "idle" });
       void queryClient.invalidateQueries({ queryKey: ["admin-library", section] });
     },
     onError: (error) => {
       const serverMessage = extractServerErrorMessage(error);
       const fallback = isLawReports ? "Could not create the law report right now." : "Could not create the library material right now.";
       showToast(serverMessage ?? fallback, "error");
+      setSaveProgress({ kind: "idle" });
     }
   });
 
   const updateMutation = useMutation({
     mutationFn: async ({ materialId, payload }: { materialId: string; payload: AdminLibraryMaterialInput }) => {
-      const transport = await prepareAdminLibraryTransport(section, payload.body, payload.summary);
+      setSaveProgress({
+        kind: "uploading",
+        bodyCompleted: 0,
+        bodyTotal: 0,
+        summaryCompleted: 0,
+        summaryTotal: 0
+      });
+      const transport = await prepareAdminLibraryTransport(
+        section,
+        payload.body,
+        payload.summary,
+        (step) => applySaveProgressStep(step)
+      );
       try {
+        setSaveProgress({ kind: "finalizing" });
         const finalPayload: AdminLibraryMaterialInput = {
           ...payload,
           body: transport.body,
@@ -1102,12 +1237,14 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
         "success"
       );
       setIsModalOpen(false);
+      setSaveProgress({ kind: "idle" });
       void queryClient.invalidateQueries({ queryKey: ["admin-library", section] });
     },
     onError: (error) => {
       const serverMessage = extractServerErrorMessage(error);
       const fallback = isLawReports ? "Could not update the law report right now." : "Could not update the library material right now.";
       showToast(serverMessage ?? fallback, "error");
+      setSaveProgress({ kind: "idle" });
     }
   });
 
@@ -1596,6 +1733,7 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
           onChange={handleDraftChange}
           onClose={() => setIsModalOpen(false)}
           onSubmit={() => void handleSubmit()}
+          saveProgress={saveProgress}
           section={section}
           submitLabel={
             isContentAdminWorkspace
