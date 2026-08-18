@@ -78,7 +78,7 @@ export type AdminLibraryFilters = {
   page?: number;
   pageSize?: number;
   search?: string;
-  sortBy?: "createdAt" | "estimatedMins" | "title" | "updatedAt";
+  sortBy?: "createdAt" | "estimatedMins" | "reportNumber" | "title" | "updatedAt";
   sortOrder?: "asc" | "desc";
 };
 

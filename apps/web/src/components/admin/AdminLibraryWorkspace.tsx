@@ -55,7 +55,7 @@ const defaultFilters: Required<AdminLibraryFilters> = {
   page: 1,
   pageSize: 12,
   search: "",
-  sortBy: "updatedAt",
+  sortBy: "reportNumber",
   sortOrder: "desc"
 };
 

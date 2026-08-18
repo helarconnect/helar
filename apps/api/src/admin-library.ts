@@ -15,7 +15,7 @@ const adminLibraryFiltersSchema = z.object({
   // Raised to 500 for consistency with other admin list endpoints.
   pageSize: z.coerce.number().int().min(1).max(500).default(12),
   search: z.string().trim().max(120).optional().default(""),
-  sortBy: z.enum(["createdAt", "estimatedMins", "title", "updatedAt"]).default("updatedAt"),
+  sortBy: z.enum(["createdAt", "estimatedMins", "reportNumber", "title", "updatedAt"]).default("updatedAt"),
   sortOrder: z.enum(["asc", "desc"]).default("desc")
 });
 
@@ -1106,40 +1106,35 @@ export async function listAdminLibraryMaterials(
 
   // Auxiliary/summary queries - isolated with safe fallbacks to avoid 500s on
   // metrics-only regressions (e.g., readingHistory include issues, aggregate errors).
-  const [nextReportNumber, engagementMaterials, averageReadTimeAggregate] = await Promise.all([
+  //
+  // NOTE: For performance, we NEVER do findMany() with nested 1:N includes of
+  // readingHistory on the full material set (that scales with O(N·history) and
+  // caused multi-second load times once the library reached 1000+ reports).
+  // Instead we aggregate on the readingHistory table itself with groupBy, then
+  // resolve material metadata only for the top-5 leaders.
+  const [nextReportNumber, readingMetrics, averageReadTimeAggregate] = await Promise.all([
     reportNumberedSection
       ? safely(buildNextReportNumberForSection(section, prisma, category.id), null as string | null)
       : Promise.resolve(null),
     reportNumberedSection
       ? safely(
-          prisma.studyMaterial.findMany({
+          prisma.readingHistory.groupBy({
+            by: ["materialId"],
+            _count: { _all: true },
+            _sum: { timeSpentSeconds: true },
             where: {
-              categoryId: category.id,
               deletedAt: null,
-              ...(audience === "student" ? { publicationStatus: ContentPublicationStatus.PUBLISHED } : {})
-            },
-            select: {
-              estimatedMins: true,
-              id: true,
-              reportNumber: true,
-              title: true,
-              readingHistory: {
-                where: {
-                  deletedAt: null
-                },
-                select: {
-                  progressPct: true,
-                  timeSpentSeconds: true
-                }
+              material: {
+                categoryId: category.id,
+                deletedAt: null,
+                ...(audience === "student" ? { publicationStatus: ContentPublicationStatus.PUBLISHED } : {})
               }
             }
           }),
           [] as Array<{
-            estimatedMins: number;
-            id: string;
-            reportNumber: string | null;
-            title: string;
-            readingHistory: Array<{ progressPct: number; timeSpentSeconds: number }>;
+            materialId: string;
+            _count: { _all: number };
+            _sum: { timeSpentSeconds: number | null };
           }>
         )
       : Promise.resolve([]),
@@ -1160,10 +1155,6 @@ export async function listAdminLibraryMaterials(
 
   // Law-report & Helarpedia engagement reduction is computed in-process but still
   // wrapped defensively in case of unexpected data shape inconsistencies.
-  //
-  // Helarpedia uses the EXACT same metrics as law reports (top 5 most-read entries
-  // entries, total hours, total visits) so admin gets the same "reports about
-  // uploaded items" dashboard for both numbered sections.
   let lawReportEngagement: {
     topReports: Array<{
       id: string;
@@ -1178,31 +1169,91 @@ export async function listAdminLibraryMaterials(
 
   if (reportNumberedSection) {
     try {
-      const reportMetrics = engagementMaterials.map((material) => {
-        const readingHistoryEntries = material.readingHistory ?? [];
-        const visits = readingHistoryEntries.length;
-        const totalTimeSpentSeconds = readingHistoryEntries.reduce((sum, history) => {
-          if (history.timeSpentSeconds > 0) {
-            return sum + history.timeSpentSeconds;
-          }
+      const materialMetrics = new Map<string, { visits: number; totalSeconds: number }>();
 
-          return sum + estimateMinutesFromReadingProgress(material.estimatedMins ?? 0, history.progressPct ?? 0) * 60;
-        }, 0);
-
-        return {
-          id: material.id,
-          reportNumber: material.reportNumber,
-          title: material.title,
-          totalHoursSpent: toRoundedHoursFromSeconds(totalTimeSpentSeconds),
+      for (const row of readingMetrics) {
+        const seconds = row._sum.timeSpentSeconds ?? 0;
+        const visits = row._count._all ?? 0;
+        materialMetrics.set(row.materialId, {
+          totalSeconds: seconds,
           visits
-        };
-      });
+        });
+      }
 
-      const totalVisits = reportMetrics.reduce((sum, report) => sum + report.visits, 0);
-      const totalHoursSpent = Number(reportMetrics.reduce((sum, report) => sum + report.totalHoursSpent, 0).toFixed(1));
+      const totalVisits = readingMetrics.reduce((sum, row) => sum + (row._count._all ?? 0), 0);
+      const totalSeconds = readingMetrics.reduce((sum, row) => sum + (row._sum.timeSpentSeconds ?? 0), 0);
+      const totalHoursSpent = Number(toRoundedHoursFromSeconds(totalSeconds).toFixed(1));
+
+      // Top-5 most popular: sort aggregates, take the 5 material IDs with most
+      // visits, then resolve metadata (title, citation, estimated minutes) only
+      // for that tiny subset — avoids fetching 1000+ rows on a 1000-report library.
+      const topIds = [...readingMetrics]
+        .sort((left, right) => {
+          const visitsLeft = left._count._all ?? 0;
+          const visitsRight = right._count._all ?? 0;
+          if (visitsLeft !== visitsRight) return visitsRight - visitsLeft;
+          const secondsLeft = left._sum.timeSpentSeconds ?? 0;
+          const secondsRight = right._sum.timeSpentSeconds ?? 0;
+          return secondsRight - secondsLeft;
+        })
+        .slice(0, 5)
+        .map((row) => row.materialId);
+
+      // If we have fewer than 5 candidates with history, fill with highest-id
+      // (most recently created) materials so the engagement widget never looks
+      // empty on a freshly-seeded section.
+      let topMaterials: Array<{ id: string; reportNumber: string | null; title: string; estimatedMins: number }> = [];
+      if (topIds.length > 0) {
+        const found = await prisma.studyMaterial.findMany({
+          select: { id: true, reportNumber: true, title: true, estimatedMins: true },
+          where: {
+            id: { in: topIds },
+            categoryId: category.id,
+            deletedAt: null,
+            ...(audience === "student" ? { publicationStatus: ContentPublicationStatus.PUBLISHED } : {})
+          }
+        });
+
+        topMaterials = topIds
+          .map((id) => found.find((m) => m.id === id))
+          .filter((item): item is NonNullable<typeof item> => Boolean(item));
+      }
+
+      if (topMaterials.length < 5) {
+        const fillCount = 5 - topMaterials.length;
+        const filled = await prisma.studyMaterial.findMany({
+          orderBy: { createdAt: "desc" },
+          select: { id: true, reportNumber: true, title: true, estimatedMins: true },
+          take: fillCount,
+          where: {
+            categoryId: category.id,
+            deletedAt: null,
+            ...(audience === "student" ? { publicationStatus: ContentPublicationStatus.PUBLISHED } : {}),
+            NOT: { id: { in: topMaterials.map((m) => m.id) } }
+          }
+        });
+        topMaterials = [...topMaterials, ...filled];
+      }
+
+      const topCandidates = topMaterials
+        .map((material) => {
+          const metrics = materialMetrics.get(material.id) ?? { visits: 0, totalSeconds: 0 };
+          const estimatedSecondsFallback = material.estimatedMins
+            ? Math.round(material.estimatedMins * 60 * Math.min(1, metrics.visits))
+            : 0;
+          const effectiveSeconds = metrics.totalSeconds > 0 ? metrics.totalSeconds : estimatedSecondsFallback;
+          return {
+            id: material.id,
+            reportNumber: material.reportNumber,
+            title: material.title,
+            totalHoursSpent: Number(toRoundedHoursFromSeconds(effectiveSeconds).toFixed(2)),
+            visits: metrics.visits
+          };
+        })
+        .sort((left, right) => right.visits - left.visits || right.totalHoursSpent - left.totalHoursSpent);
 
       lawReportEngagement = {
-        topReports: reportMetrics.sort((left, right) => right.visits - left.visits || right.totalHoursSpent - left.totalHoursSpent).slice(0, 5),
+        topReports: topCandidates,
         totalHoursSpent,
         totalVisits
       };
@@ -1227,11 +1278,7 @@ export async function listAdminLibraryMaterials(
     filters: {
       ...filters
     },
-    materials: (
-      await Promise.all(
-        materials.map((material) => ensureReportNumberBackfill(section, material, category.id))
-      )
-    ).map((material) => mapLibraryMaterial(material, section)),
+    materials: materials.map((material) => mapLibraryMaterial(material, section)),
     nextReportNumber,
     pagination: {
       page: filters.page,

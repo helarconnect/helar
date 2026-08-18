@@ -26,7 +26,7 @@ const defaultFilters: Required<AdminLibraryFilters> = {
   page: 1,
   pageSize: 12,
   search: "",
-  sortBy: "updatedAt",
+  sortBy: "reportNumber",
   sortOrder: "desc"
 };
 
@@ -318,15 +318,15 @@ export function StudentLawReportsPage() {
       </section>
 
       {reportsQuery.isLoading ? (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {Array.from({ length: 6 }).map((_, index) => (
-            <div className={cn("h-64 animate-pulse rounded-[28px]", isDark ? "bg-slate-800" : "bg-slate-100")} key={index} />
+        <div className="space-y-4">
+          {Array.from({ length: 5 }).map((_, index) => (
+            <div className={cn("h-56 animate-pulse rounded-[22px]", isDark ? "bg-slate-800" : "bg-slate-100")} key={index} />
           ))}
         </div>
       ) : reportsQuery.isError ? (
         <div
           className={cn(
-            "rounded-[28px] border px-6 py-8 text-sm leading-7",
+            "rounded-[22px] border px-6 py-8 text-sm leading-7",
             isDark ? "border-slate-800 bg-slate-900 text-slate-300" : "border-slate-200 bg-white text-slate-600"
           )}
         >
@@ -334,98 +334,184 @@ export function StudentLawReportsPage() {
         </div>
       ) : materials.length ? (
         <>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {materials.map((material) => (
-              <article
-                className={cn(
-                  "rounded-[28px] border p-5 shadow-[0_20px_60px_rgba(15,23,42,0.06)]",
-                  isDark ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-white"
-                )}
-                key={material.id}
-              >
-                {(() => {
-                  const contentKey = `LAW_REPORT:${material.id}`;
-                  const activeBookmark = bookmarks.find((bookmark) => bookmark.contentKey === contentKey);
+          <ol className="space-y-4">
+            {materials.map((material, index) => {
+              const contentKey = `LAW_REPORT:${material.id}`;
+              const activeBookmark = bookmarks.find((bookmark) => bookmark.contentKey === contentKey);
+              const isRecent = material.createdAt
+                ? Date.now() - new Date(material.createdAt).getTime() < 1000 * 60 * 60 * 24 * 14
+                : false;
 
-                  return (
-                    <>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className={cn("inline-flex rounded-full border px-3 py-1 text-xs uppercase tracking-[0.16em]", isDark ? "border-slate-700 bg-slate-950 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600")}>
-                    {material.reportNumber ? `Case No: ${material.reportNumber}` : "Case number pending"}
-                  </span>
-                  <span className={cn("inline-flex rounded-full border px-3 py-1 text-xs", isDark ? "border-slate-700 bg-slate-950 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600")}>
-                    {material.estimatedMins ? `${material.estimatedMins} min read` : "Read time pending"}
-                  </span>
-                </div>
-
-                <h3 className={cn("mt-4 font-heading text-2xl leading-tight", isDark ? "text-white" : "text-slate-950")}>{material.title}</h3>
-
-                <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  <div className={cn("rounded-[20px] border p-3", isDark ? "border-slate-800 bg-slate-950" : "border-slate-200 bg-slate-50")}>
-                    <div className="flex items-center gap-2">
-                      <Scale className={cn("h-4 w-4", isDark ? "text-slate-500" : "text-slate-400")} />
-                      <p className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-400")}>Court</p>
-                    </div>
-                    <p className={cn("mt-2 text-sm font-medium", isDark ? "text-white" : "text-slate-950")}>
-                      {prettifyCourt(material.materialType)}
-                    </p>
-                  </div>
-
-                  <div className={cn("rounded-[20px] border p-3", isDark ? "border-slate-800 bg-slate-950" : "border-slate-200 bg-slate-50")}>
-                    <div className="flex items-center gap-2">
-                      <CalendarDays className={cn("h-4 w-4", isDark ? "text-slate-500" : "text-slate-400")} />
-                      <p className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-400")}>Date</p>
-                    </div>
-                    <p className={cn("mt-2 text-sm font-medium", isDark ? "text-white" : "text-slate-950")}>{formatDate(material.reportDate)}</p>
-                  </div>
-                </div>
-
-                <p className={cn("mt-4 line-clamp-4 text-sm leading-7", isDark ? "text-slate-300" : "text-slate-600")}>
-                  {stripHtml(material.summary) || "No summary has been added for this law report yet."}
-                </p>
-
-                <div className="mt-5 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <BookmarkButton
-                      active={Boolean(activeBookmark)}
-                      isDark={isDark}
-                      onClick={() => {
-                        if (activeBookmark) {
-                          deleteBookmarkMutation.mutate(activeBookmark.id);
-                          return;
-                        }
-
-                        createBookmarkMutation.mutate({
-                          contentKey,
-                          contentType: "LAW_REPORT",
-                          path: `/app/library/law-reports/${material.id}`,
-                          title: material.title
-                        });
-                      }}
-                    />
-                    <span className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-400")}>
-                      Suit Number: {material.storageUrl}
-                    </span>
-                  </div>
-                  <Link
+              return (
+                <li
+                  className={cn(
+                    "group relative overflow-hidden rounded-[22px] border bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)] transition hover:shadow-[0_16px_40px_rgba(15,23,42,0.08)]",
+                    isDark ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-white"
+                  )}
+                  key={material.id}
+                >
+                  {/* Citation ribbon */}
+                  <div
                     className={cn(
-                      "inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium transition",
-                      isDark
-                        ? "border-slate-700 bg-slate-950 text-white hover:border-slate-600"
-                        : "border-slate-300 bg-white text-slate-950 shadow-sm hover:border-slate-400 hover:bg-slate-50"
+                      "flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3",
+                      isDark ? "border-slate-800 bg-slate-950/70" : "border-slate-100 bg-slate-50/80"
                     )}
-                    to={`/app/library/law-reports/${material.id}`}
                   >
-                    Open
-                    <ExternalLink className="h-4 w-4" />
-                  </Link>
-                </div>
-                    </>
-                  );
-                })()}
-              </article>
-            ))}
-          </div>
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-mono text-[11px] font-semibold tracking-[0.06em]",
+                          isDark
+                            ? "border border-amber-500/30 bg-amber-500/10 text-amber-200"
+                            : "border border-amber-200 bg-amber-50 text-amber-800"
+                        )}
+                      >
+                        <BookOpenText className="h-3 w-3" />
+                        {material.reportNumber ? material.reportNumber : "Citation pending"}
+                      </span>
+                      {isRecent ? (
+                        <span
+                          className={cn(
+                            "inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em]",
+                            isDark
+                              ? "border border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                              : "border border-emerald-200 bg-emerald-50 text-emerald-800"
+                          )}
+                        >
+                          New
+                        </span>
+                      ) : null}
+                      <span
+                        className={cn(
+                          "inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium",
+                          isDark ? "border border-slate-700 bg-slate-900 text-slate-300" : "border border-slate-200 bg-white text-slate-700"
+                        )}
+                      >
+                        #{index + 1} of {totalItems}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1",
+                          isDark ? "border-slate-700 bg-slate-900 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"
+                        )}
+                      >
+                        <Scale className="h-3 w-3" />
+                        {prettifyCourt(material.materialType)}
+                      </span>
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1",
+                          isDark ? "border-slate-700 bg-slate-900 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"
+                        )}
+                      >
+                        <CalendarDays className="h-3 w-3" />
+                        {formatDate(material.reportDate)}
+                      </span>
+                      {material.estimatedMins ? (
+                        <span
+                          className={cn(
+                            "inline-flex items-center rounded-full border px-2.5 py-1",
+                            isDark ? "border-slate-700 bg-slate-900 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"
+                          )}
+                        >
+                          ⏱ {material.estimatedMins} min read
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  {/* Main content area */}
+                  <div className="grid gap-5 px-5 py-5 lg:grid-cols-[1fr_220px]">
+                    <div className="min-w-0 space-y-3">
+                      <Link
+                        className={cn(
+                          "block font-heading text-[1.35rem] font-semibold leading-snug transition hover:underline decoration-slate-400 underline-offset-4",
+                          isDark ? "text-white" : "text-slate-950"
+                        )}
+                        to={`/app/library/law-reports/${material.id}`}
+                      >
+                        {material.title}
+                      </Link>
+                      {material.storageUrl?.trim() ? (
+                        <div
+                          className={cn(
+                            "inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-xs font-medium",
+                            isDark ? "border-slate-700 bg-slate-950 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-700"
+                          )}
+                        >
+                          Suit / case file number:
+                          <span className={cn("font-mono tracking-[0.02em]", isDark ? "text-white" : "text-slate-950")}>
+                            {material.storageUrl}
+                          </span>
+                        </div>
+                      ) : null}
+                      <p
+                        className={cn(
+                          "line-clamp-3 text-[0.92rem] leading-7",
+                          isDark ? "text-slate-300" : "text-slate-600"
+                        )}
+                      >
+                        {stripHtml(material.summary) ||
+                          "The full headnote, summary and judgment text is available inside the reader — open the report to read the complete citation, ratio decidendi and commentary."}
+                      </p>
+                    </div>
+
+                    {/* Action column */}
+                    <div className="flex flex-col items-stretch justify-end gap-2.5 lg:items-end">
+                      <div className="flex flex-wrap gap-2.5 lg:flex-col lg:items-stretch">
+                        <BookmarkButton
+                          active={Boolean(activeBookmark)}
+                          isDark={isDark}
+                          onClick={() => {
+                            if (activeBookmark) {
+                              deleteBookmarkMutation.mutate(activeBookmark.id);
+                              return;
+                            }
+
+                            createBookmarkMutation.mutate({
+                              contentKey,
+                              contentType: "LAW_REPORT",
+                              path: `/app/library/law-reports/${material.id}`,
+                              title: material.title
+                            });
+                          }}
+                        />
+                        <Link
+                          className={cn(
+                            "inline-flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-semibold transition",
+                            isDark
+                              ? "border-white/20 bg-white text-slate-950 hover:bg-slate-100"
+                              : "border-slate-950 bg-slate-950 text-white shadow-sm hover:bg-slate-800"
+                          )}
+                          to={`/app/library/law-reports/${material.id}`}
+                        >
+                          Read report
+                          <ExternalLink className="h-4 w-4" />
+                        </Link>
+                        {material.downloadable ? (
+                          <a
+                            className={cn(
+                              "inline-flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium transition",
+                              isDark
+                                ? "border-slate-700 bg-slate-950 text-slate-200 hover:border-slate-600"
+                                : "border-slate-200 bg-white text-slate-950 shadow-sm hover:bg-slate-50"
+                            )}
+                            href={material.storageUrl}
+                            rel="noreferrer"
+                            target="_blank"
+                          >
+                            Download PDF
+                          </a>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
 
           <div className="flex items-center justify-between gap-3">
             <p className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-500")}>
@@ -467,7 +553,7 @@ export function StudentLawReportsPage() {
       ) : (
         <div
           className={cn(
-            "rounded-[28px] border px-6 py-8 text-sm leading-7",
+            "rounded-[22px] border px-6 py-8 text-sm leading-7",
             isDark ? "border-slate-800 bg-slate-900 text-slate-300" : "border-slate-200 bg-white text-slate-600"
           )}
         >
