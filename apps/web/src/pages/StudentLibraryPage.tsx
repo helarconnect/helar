@@ -271,45 +271,6 @@ export function StudentLawReportsPage() {
     queryKey: queryKeys.adminLibrary("student-law-reports", filters),
     staleTime: 30_000
   });
-  useEffect(() => {
-    const error = reportsQuery.error;
-    if (!error) return;
-    // #region debug-point A:student-query-error
-    fetch("http://127.0.0.1:7777/event", {
-      method: "POST",
-      body: JSON.stringify({
-        sessionId: "law-reports-not-loading",
-        runId: "pre",
-        hypothesisId: "A",
-        location: "StudentLibraryPage.tsx:StudentLawReportsPage:reportsQuery-error-useEffect",
-        msg: "[DEBUG] Student law reports useQuery error detected",
-        data: {
-          errorClass: error instanceof Error ? error.constructor.name : typeof error,
-          httpStatus:
-            error && typeof error === "object" && "response" in error
-              ? ((error as { response?: { status?: number } }).response?.status ?? null)
-              : null,
-          serverErrorCode:
-            (error &&
-              typeof error === "object" &&
-              "response" in error &&
-              (error as { response?: { data?: { error?: { code?: unknown } } } }).response?.data?.error
-                ?.code) ??
-            null,
-          serverErrorMessage:
-            (error &&
-              typeof error === "object" &&
-              "response" in error &&
-              (error as { response?: { data?: { error?: { message?: unknown } } } }).response?.data
-                ?.error?.message) ??
-            null,
-          rawErrorString: String(error)
-        },
-        ts: Date.now()
-      })
-    }).catch(() => {});
-    // #endregion
-  }, [reportsQuery.error]);
   const bookmarksQuery = useQuery({
     gcTime: 60_000,
     queryFn: () => fetchStudentStudyBookmarks({}),

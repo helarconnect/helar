@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import fs from "node:fs";
 import { ContentPublicationStatus, MaterialType, Prisma } from "@prisma/client";
 import { z } from "zod";
 
@@ -1113,40 +1112,6 @@ export async function listAdminLibraryMaterials(
   filters: AdminLibraryFilters,
   audience: LibrarySearchAudience = "admin"
 ) {
-  try {
-  // #region debug-point A:list-entry
-  (() => {
-    const p = ".dbg/law-reports-not-loading.env";
-    let u = "http://127.0.0.1:7777/event",
-      s = "law-reports-not-loading";
-    try {
-      const e = fs.readFileSync(p, "utf8");
-      u = e.match(/DEBUG_SERVER_URL=(.+)/)?.[1] || u;
-      s = e.match(/DEBUG_SESSION_ID=(.+)/)?.[1] || s;
-    } catch {}
-    void fetch(u, {
-      method: "POST",
-      body: JSON.stringify({
-        sessionId: s,
-        runId: "pre",
-        hypothesisId: "A",
-        location: "admin-library.ts:listAdminLibraryMaterials:entry",
-        msg: "[DEBUG] listAdminLibraryMaterials entry",
-        data: {
-          section,
-          audience,
-          sortBy: filters.sortBy,
-          sortOrder: filters.sortOrder,
-          page: filters.page,
-          pageSize: filters.pageSize,
-          materialType: filters.materialType,
-          search: filters.search
-        },
-        ts: Date.now()
-      })
-    }).catch(() => {});
-  })();
-  // #endregion
   const category = await getSectionCategory(section);
 
   if (!category) {
@@ -1197,35 +1162,6 @@ export async function listAdminLibraryMaterials(
       { id: "asc" as const }
     ] as Array<Prisma.StudyMaterialOrderByWithRelationInput>;
   })();
-
-  // #region debug-point A:orderby-shape
-  (() => {
-    const p = ".dbg/law-reports-not-loading.env";
-    let u = "http://127.0.0.1:7777/event",
-      s = "law-reports-not-loading";
-    try {
-      const e = fs.readFileSync(p, "utf8");
-      u = e.match(/DEBUG_SERVER_URL=(.+)/)?.[1] || u;
-      s = e.match(/DEBUG_SESSION_ID=(.+)/)?.[1] || s;
-    } catch {}
-    void fetch(u, {
-      method: "POST",
-      body: JSON.stringify({
-        sessionId: s,
-        runId: "pre",
-        hypothesisId: "A",
-        location: "admin-library.ts:listAdminLibraryMaterials:orderby-shape",
-        msg: "[DEBUG] orderBy shape constructed for findMany",
-        data: {
-          orderBy: JSON.parse(JSON.stringify(orderBy)),
-          orderByCount: orderBy.length,
-          isAdminAudience
-        },
-        ts: Date.now()
-      })
-    }).catch(() => {});
-  })();
-  // #endregion
 
   // Student/portal list pages only need pagination plus the current page of
   // materials. Every auxiliary query we skip on this hot path shaves another
@@ -1527,45 +1463,6 @@ export async function listAdminLibraryMaterials(
       totalMaterials: totalInSection
     }
   };
-  } catch (error) {
-    // #region debug-point A:catch-list-error
-    (() => {
-      const p = ".dbg/law-reports-not-loading.env";
-      let u = "http://127.0.0.1:7777/event",
-        s = "law-reports-not-loading";
-      try {
-        const e = fs.readFileSync(p, "utf8");
-        u = e.match(/DEBUG_SERVER_URL=(.+)/)?.[1] || u;
-        s = e.match(/DEBUG_SESSION_ID=(.+)/)?.[1] || s;
-      } catch {}
-      void fetch(u, {
-        method: "POST",
-        body: JSON.stringify({
-          sessionId: s,
-          runId: "pre",
-          hypothesisId: "A",
-          location: "admin-library.ts:listAdminLibraryMaterials:catch",
-          msg: "[DEBUG] listAdminLibraryMaterials threw error",
-          data: {
-            errorClass: error instanceof Error ? error.constructor.name : typeof error,
-            errorMessage: error instanceof Error ? error.message : String(error),
-            errorStack: error instanceof Error ? (error.stack ?? null) : null,
-            prismaCode:
-              error && typeof error === "object" && "code" in error
-                ? (error as { code?: unknown }).code ?? null
-                : null,
-            prismaMeta:
-              error && typeof error === "object" && "meta" in error
-                ? JSON.stringify((error as { meta?: unknown }).meta ?? {})
-                : null
-          },
-          ts: Date.now()
-        })
-      }).catch(() => {});
-    })();
-    // #endregion
-    throw error;
-  }
 }
 
 export async function getAdminLibraryMaterial(section: AdminLibrarySection, materialId: string) {

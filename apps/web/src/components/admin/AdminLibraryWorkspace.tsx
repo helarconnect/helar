@@ -1204,52 +1204,6 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
     queryFn: () => fetchAdminLibraryMaterials(section, filters),
     staleTime: 20_000
   });
-  useEffect(() => {
-    const error = materialsQuery.error;
-    if (!error) return;
-    // #region debug-point A:admin-materials-query-error
-    fetch("http://127.0.0.1:7777/event", {
-      method: "POST",
-      body: JSON.stringify({
-        sessionId: "law-reports-not-loading",
-        runId: "pre",
-        hypothesisId: "A",
-        location: "AdminLibraryWorkspace.tsx:materialsQuery-error-useEffect",
-        msg: "[DEBUG] Admin library workspace materialsQuery error detected",
-        data: {
-          section,
-          filters: {
-            sortBy: filters.sortBy,
-            sortOrder: filters.sortOrder,
-            page: filters.page,
-            pageSize: filters.pageSize
-          },
-          errorClass: error instanceof Error ? error.constructor.name : typeof error,
-          httpStatus:
-            error && typeof error === "object" && "response" in error
-              ? ((error as { response?: { status?: number } }).response?.status ?? null)
-              : null,
-          serverErrorCode:
-            (error &&
-              typeof error === "object" &&
-              "response" in error &&
-              (error as { response?: { data?: { error?: { code?: unknown } } } }).response?.data
-                ?.error?.code) ??
-            null,
-          serverErrorMessage:
-            (error &&
-              typeof error === "object" &&
-              "response" in error &&
-              (error as { response?: { data?: { error?: { message?: unknown } } } }).response?.data
-                ?.error?.message) ??
-            null,
-          rawErrorString: String(error)
-        },
-        ts: Date.now()
-      })
-    }).catch(() => {});
-    // #endregion
-  }, [materialsQuery.error, section, filters.sortBy, filters.sortOrder, filters.page, filters.pageSize]);
 
   useEffect(() => {
     if (!numberedSection || editingMaterial || !isModalOpen) {
@@ -1346,54 +1300,6 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
         };
         if (finalPayload.bodyChunkToken === undefined) delete finalPayload.bodyChunkToken;
         if (finalPayload.summaryChunkToken === undefined) delete finalPayload.summaryChunkToken;
-        // #region debug-point frontend-final-payload-create
-        try {
-          void fetch("http://127.0.0.1:7777/event", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              sessionId: "law-reports-save-failing",
-              runId: "pre",
-              hypothesisIds: ["H1", "H3"],
-              timestamp: new Date().toISOString(),
-              level: "info",
-              message: "frontend submitting final create payload",
-              data: {
-                keys: Object.keys(finalPayload).sort(),
-                title: String(finalPayload.title ?? "").slice(0, 80),
-                reportNumber: finalPayload.reportNumber ?? null,
-                reportDate: finalPayload.reportDate ?? null,
-                estimatedMins: finalPayload.estimatedMins,
-                storageUrlLen: String(finalPayload.storageUrl ?? "").length,
-                materialType: finalPayload.materialType,
-                bodyLen: String(finalPayload.body ?? "").length,
-                summaryLen: String(finalPayload.summary ?? "").length,
-                bodyChunkToken: finalPayload.bodyChunkToken ?? null,
-                summaryChunkToken: finalPayload.summaryChunkToken ?? null,
-                sharingEnabled: finalPayload.sharingEnabled,
-                downloadable: finalPayload.downloadable
-              }
-            })
-          }).catch(() => {});
-        } catch {
-          /* debug-only */
-        }
-        console.debug("[debug-law-reports-save-failing][H1|H3] frontend submitting final create payload", {
-          keys: Object.keys(finalPayload).sort(),
-          title: String(finalPayload.title ?? "").slice(0, 80),
-          reportNumber: finalPayload.reportNumber ?? null,
-          reportDate: finalPayload.reportDate ?? null,
-          estimatedMins: finalPayload.estimatedMins,
-          storageUrlLen: String(finalPayload.storageUrl ?? "").length,
-          materialType: finalPayload.materialType,
-          bodyLen: String(finalPayload.body ?? "").length,
-          summaryLen: String(finalPayload.summary ?? "").length,
-          bodyChunkToken: finalPayload.bodyChunkToken ?? null,
-          summaryChunkToken: finalPayload.summaryChunkToken ?? null,
-          sharingEnabled: finalPayload.sharingEnabled,
-          downloadable: finalPayload.downloadable
-        });
-        // #endregion debug-point frontend-final-payload-create
         const material = await createAdminLibraryMaterial(section, finalPayload);
         return material;
       } finally {
@@ -1420,84 +1326,6 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
       void queryClient.invalidateQueries({ queryKey: ["admin-library", section] });
     },
     onError: (error) => {
-      // #region debug-point frontend-create-onerror
-      try {
-        void fetch("http://127.0.0.1:7777/event", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: "law-reports-save-failing",
-            runId: "pre",
-            hypothesisIds: ["H1", "H2", "H3", "H4", "H5", "H6"],
-            timestamp: new Date().toISOString(),
-            level: "error",
-            message: "frontend create mutation onError fired",
-            data: {
-              errorClass: error instanceof Error ? error.constructor.name : typeof error,
-              httpStatus: error && typeof error === "object" && "response" in error ? (error as { response?: { status?: number } }).response?.status ?? null : null,
-              serverErrorCode:
-                (error &&
-                  typeof error === "object" &&
-                  "response" in error &&
-                  (error as { response?: { data?: { error?: { code?: unknown } } } }).response?.data?.error?.code) ??
-                null,
-              serverErrorMessage:
-                (error &&
-                  typeof error === "object" &&
-                  "response" in error &&
-                  (error as { response?: { data?: { error?: { message?: unknown } } } }).response?.data?.error?.message) ??
-                null,
-              extractedMessage: extractServerErrorMessage(error),
-              rawErrorString: String(error)
-            }
-          })
-        }).catch(() => {});
-      } catch {
-        /* debug-only */
-      }
-      // console.error with the same shape so the extracted server error code
-      // + message shows up even with Chrome DevTools default "Errors only"
-      // filter (which hides console.debug/verbose). This lets admins paste a
-      // single Console screenshot and instantly know whether the 409 is
-      // REPORT_NUMBER_COLLISION, TRANSACTION_CONFLICT, or SEQUENCE_EXHAUSTED
-      // without flipping Console filter dropdowns.
-      console.error("[debug-law-reports-save-failing][H1-H6] frontend create mutation onError fired", {
-        errorClass: error instanceof Error ? error.constructor.name : typeof error,
-        httpStatus: error && typeof error === "object" && "response" in error ? (error as { response?: { status?: number } }).response?.status ?? null : null,
-        serverErrorCode:
-          (error &&
-            typeof error === "object" &&
-            "response" in error &&
-            (error as { response?: { data?: { error?: { code?: unknown } } } }).response?.data?.error?.code) ??
-          null,
-        serverErrorMessage:
-          (error &&
-            typeof error === "object" &&
-            "response" in error &&
-            (error as { response?: { data?: { error?: { message?: unknown } } } }).response?.data?.error?.message) ??
-          null,
-        extractedMessage: extractServerErrorMessage(error),
-        rawErrorString: String(error)
-      });
-      console.debug("[debug-law-reports-save-failing][H1-H6] frontend create mutation onError fired", {
-        errorClass: error instanceof Error ? error.constructor.name : typeof error,
-        httpStatus: error && typeof error === "object" && "response" in error ? (error as { response?: { status?: number } }).response?.status ?? null : null,
-        serverErrorCode:
-          (error &&
-            typeof error === "object" &&
-            "response" in error &&
-            (error as { response?: { data?: { error?: { code?: unknown } } } }).response?.data?.error?.code) ??
-          null,
-        serverErrorMessage:
-          (error &&
-            typeof error === "object" &&
-            "response" in error &&
-            (error as { response?: { data?: { error?: { message?: unknown } } } }).response?.data?.error?.message) ??
-          null,
-        extractedMessage: extractServerErrorMessage(error),
-        rawErrorString: String(error)
-      });
-      // #endregion debug-point frontend-create-onerror
       const serverMessage = extractServerErrorMessage(error);
       const fallback = isLawReports
         ? "Could not create the law report right now."
@@ -1535,50 +1363,6 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
         };
         if (finalPayload.bodyChunkToken === undefined) delete finalPayload.bodyChunkToken;
         if (finalPayload.summaryChunkToken === undefined) delete finalPayload.summaryChunkToken;
-        // #region debug-point frontend-final-payload-update
-        try {
-          void fetch("http://127.0.0.1:7777/event", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              sessionId: "law-reports-save-failing",
-              runId: "pre",
-              hypothesisIds: ["H1", "H3"],
-              timestamp: new Date().toISOString(),
-              level: "info",
-              message: "frontend submitting final update payload",
-              data: {
-                materialId,
-                keys: Object.keys(finalPayload).sort(),
-                title: String(finalPayload.title ?? "").slice(0, 80),
-                reportNumber: finalPayload.reportNumber ?? null,
-                estimatedMins: finalPayload.estimatedMins,
-                storageUrlLen: String(finalPayload.storageUrl ?? "").length,
-                materialType: finalPayload.materialType,
-                bodyLen: String(finalPayload.body ?? "").length,
-                summaryLen: String(finalPayload.summary ?? "").length,
-                bodyChunkToken: finalPayload.bodyChunkToken ?? null,
-                summaryChunkToken: finalPayload.summaryChunkToken ?? null
-              }
-            })
-          }).catch(() => {});
-        } catch {
-          /* debug-only */
-        }
-        console.debug("[debug-law-reports-save-failing][H1|H3] frontend submitting final update payload", {
-          materialId,
-          keys: Object.keys(finalPayload).sort(),
-          title: String(finalPayload.title ?? "").slice(0, 80),
-          reportNumber: finalPayload.reportNumber ?? null,
-          estimatedMins: finalPayload.estimatedMins,
-          storageUrlLen: String(finalPayload.storageUrl ?? "").length,
-          materialType: finalPayload.materialType,
-          bodyLen: String(finalPayload.body ?? "").length,
-          summaryLen: String(finalPayload.summary ?? "").length,
-          bodyChunkToken: finalPayload.bodyChunkToken ?? null,
-          summaryChunkToken: finalPayload.summaryChunkToken ?? null
-        });
-        // #endregion debug-point frontend-final-payload-update
         const material = await updateAdminLibraryMaterial(section, materialId, finalPayload);
         return material;
       } finally {
@@ -1605,28 +1389,6 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
       void queryClient.invalidateQueries({ queryKey: ["admin-library", section] });
     },
     onError: (error) => {
-      // Mirror the create-mutation onError error-level logging. Chrome DevTools
-      // default to "Errors only" — console.debug lines about serverErrorCode
-      // are invisible unless the admin manually flips the dropdown, so every
-      // mutation failure also emits console.error for fast forensics.
-      console.error("[debug-law-reports-save-failing][H1-H6] frontend update mutation onError fired", {
-        errorClass: error instanceof Error ? error.constructor.name : typeof error,
-        httpStatus: error && typeof error === "object" && "response" in error ? (error as { response?: { status?: number } }).response?.status ?? null : null,
-        serverErrorCode:
-          (error &&
-            typeof error === "object" &&
-            "response" in error &&
-            (error as { response?: { data?: { error?: { code?: unknown } } } }).response?.data?.error?.code) ??
-          null,
-        serverErrorMessage:
-          (error &&
-            typeof error === "object" &&
-            "response" in error &&
-            (error as { response?: { data?: { error?: { message?: unknown } } } }).response?.data?.error?.message) ??
-          null,
-        extractedMessage: extractServerErrorMessage(error),
-        rawErrorString: String(error)
-      });
       const serverMessage = extractServerErrorMessage(error);
       const fallback = isLawReports
         ? "Could not update the law report right now."
