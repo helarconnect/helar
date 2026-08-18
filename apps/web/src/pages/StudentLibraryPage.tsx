@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BookOpenText, Bookmark, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Scale, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -259,13 +259,23 @@ export function StudentLawReportsPage() {
   const { isDark } = useTheme();
   const queryClient = useQueryClient();
   const [filters, setFilters] = useState(defaultFilters);
+  // Caching: the list endpoint was already heavily optimized on the server, but
+  // the fastest request is the one we never make. Keep responses fresh for 30s
+  // (enough to cover quick back/next navigation, filter debounces, clicks in
+  // and out of a reader then back) and preserve the previous page of data while
+  // a pagination request is in-flight so the list never jolts to a skeleton.
   const reportsQuery = useQuery({
+    gcTime: 60_000,
+    placeholderData: keepPreviousData,
     queryFn: () => fetchLibraryLawReports(filters),
-    queryKey: queryKeys.adminLibrary("student-law-reports", filters)
+    queryKey: queryKeys.adminLibrary("student-law-reports", filters),
+    staleTime: 30_000
   });
   const bookmarksQuery = useQuery({
+    gcTime: 60_000,
     queryFn: () => fetchStudentStudyBookmarks({}),
-    queryKey: queryKeys.studentStudyBookmarks({})
+    queryKey: queryKeys.studentStudyBookmarks({}),
+    staleTime: 30_000
   });
   const createBookmarkMutation = useMutation({
     mutationFn: createStudentStudyBookmark,
@@ -569,12 +579,17 @@ export function StudentHelarpediaPage() {
   const queryClient = useQueryClient();
   const [filters, setFilters] = useState(defaultFilters);
   const reportsQuery = useQuery({
+    gcTime: 60_000,
+    placeholderData: keepPreviousData,
     queryFn: () => fetchLibraryHelarpedia(filters),
-    queryKey: queryKeys.adminLibrary("student-helarpedia", filters)
+    queryKey: queryKeys.adminLibrary("student-helarpedia", filters),
+    staleTime: 30_000
   });
   const bookmarksQuery = useQuery({
+    gcTime: 60_000,
     queryFn: () => fetchStudentStudyBookmarks({}),
-    queryKey: queryKeys.studentStudyBookmarks({})
+    queryKey: queryKeys.studentStudyBookmarks({}),
+    staleTime: 30_000
   });
   const createBookmarkMutation = useMutation({
     mutationFn: createStudentStudyBookmark,

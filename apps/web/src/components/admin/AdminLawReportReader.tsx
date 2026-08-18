@@ -461,14 +461,18 @@ export function AdminLawReportReader() {
 
   const reportQuery = useQuery({
     enabled: Boolean(materialId),
+    gcTime: 120_000,
     queryFn: () =>
       canUseAdminLibraryEndpoint ? fetchAdminLibraryMaterial(section, materialId) : fetchLibraryMaterial(section, materialId),
-    queryKey: queryKeys.adminLibraryDetail(section, materialId)
+    queryKey: queryKeys.adminLibraryDetail(section, materialId),
+    staleTime: 45_000
   });
   const studyProgressQuery = useQuery({
     enabled: isStudentReader && Boolean(materialId),
+    gcTime: 120_000,
     queryFn: () => fetchStudentStudyProgress(`${studyContentTypeKey}:${materialId}`),
-    queryKey: queryKeys.studentStudyProgress(`${studyContentTypeKey}:${materialId}`)
+    queryKey: queryKeys.studentStudyProgress(`${studyContentTypeKey}:${materialId}`),
+    staleTime: 45_000
   });
 
   const report = reportQuery.data?.material;

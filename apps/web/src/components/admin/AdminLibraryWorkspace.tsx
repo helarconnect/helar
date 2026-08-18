@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlignCenter,
   AlignLeft,
@@ -1198,8 +1198,11 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
   }
 
   const materialsQuery = useQuery({
+    gcTime: 60_000,
+    placeholderData: keepPreviousData,
     queryKey: queryKeys.adminLibrary(section, filters),
-    queryFn: () => fetchAdminLibraryMaterials(section, filters)
+    queryFn: () => fetchAdminLibraryMaterials(section, filters),
+    staleTime: 20_000
   });
 
   useEffect(() => {

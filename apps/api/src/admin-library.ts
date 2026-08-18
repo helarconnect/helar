@@ -1055,217 +1055,254 @@ export async function listAdminLibraryMaterials(
 
   const where = createLibraryMaterialWhere(category.id, filters, audience);
   const reportNumberedSection = isReportNumberedSection(section);
-  const lawReports = isLawReportsSection(section);
-  const helarpedia = isHelarpediaSection(section);
+  const isAdminAudience = audience === "admin";
 
-  // Primary pagination queries - failures here are surfaced to the caller.
-  const [totalItems, materials, totalInSection, downloadableCount, recentUploadsCount] = await Promise.all([
+  // Student/portal list pages only need pagination plus the current page of
+  // materials. Every auxiliary query we skip on this hot path shaves another
+  // 50-200ms off a cold page load, which matters when a reader is deciding
+  // whether to stay. The admin dashboard renders 6 summary cards and needs
+  // the full picture — those queries only run when audience === "admin".
+  const [totalItems, materials] = await Promise.all([
     prisma.studyMaterial.count({ where }),
-    prisma.studyMaterial.findMany({
-      where,
-      orderBy: {
-        [filters.sortBy]: filters.sortOrder
-      },
-      skip: (filters.page - 1) * filters.pageSize,
-      take: filters.pageSize,
-      include: {
-        _count: {
-          select: {
-            bookmarks: true,
-            readingHistory: true
-          }
-        }
-      }
-    }),
-    prisma.studyMaterial.count({
-      where: {
-        categoryId: category.id,
-        deletedAt: null,
-        ...(audience === "student" ? { publicationStatus: ContentPublicationStatus.PUBLISHED } : {})
-      }
-    }),
-    prisma.studyMaterial.count({
-      where: {
-        categoryId: category.id,
-        deletedAt: null,
-        ...(audience === "student" ? { publicationStatus: ContentPublicationStatus.PUBLISHED } : {}),
-        downloadable: true
-      }
-    }),
-    prisma.studyMaterial.count({
-      where: {
-        categoryId: category.id,
-        createdAt: {
-          gte: new Date(Date.now() - 1000 * 60 * 60 * 24 * 30)
-        },
-        deletedAt: null,
-        ...(audience === "student" ? { publicationStatus: ContentPublicationStatus.PUBLISHED } : {})
-      }
-    })
-  ]);
-
-  // Auxiliary/summary queries - isolated with safe fallbacks to avoid 500s on
-  // metrics-only regressions (e.g., readingHistory include issues, aggregate errors).
-  //
-  // NOTE: For performance, we NEVER do findMany() with nested 1:N includes of
-  // readingHistory on the full material set (that scales with O(N·history) and
-  // caused multi-second load times once the library reached 1000+ reports).
-  // Instead we aggregate on the readingHistory table itself with groupBy, then
-  // resolve material metadata only for the top-5 leaders.
-  const [nextReportNumber, readingMetrics, averageReadTimeAggregate] = await Promise.all([
-    reportNumberedSection
-      ? safely(buildNextReportNumberForSection(section, prisma, category.id), null as string | null)
-      : Promise.resolve(null),
-    reportNumberedSection
-      ? safely(
-          prisma.readingHistory.groupBy({
-            by: ["materialId"],
-            _count: { _all: true },
-            _sum: { timeSpentSeconds: true },
-            where: {
-              deletedAt: null,
-              material: {
-                categoryId: category.id,
-                deletedAt: null,
-                ...(audience === "student" ? { publicationStatus: ContentPublicationStatus.PUBLISHED } : {})
+    prisma.studyMaterial.findMany(
+      (() => {
+        const base = {
+          where,
+          orderBy: {
+            [filters.sortBy]: filters.sortOrder
+          } as const,
+          skip: (filters.page - 1) * filters.pageSize,
+          take: filters.pageSize
+        } as const;
+        if (isAdminAudience) {
+          return {
+            ...base,
+            include: {
+              _count: {
+                select: {
+                  bookmarks: true,
+                  readingHistory: true
+                }
               }
             }
-          }),
-          [] as Array<{
-            materialId: string;
-            _count: { _all: number };
-            _sum: { timeSpentSeconds: number | null };
-          }>
-        )
-      : Promise.resolve([]),
-    safely(
-      prisma.studyMaterial.aggregate({
-        where: {
-          categoryId: category.id,
-          deletedAt: null,
-          ...(audience === "student" ? { publicationStatus: ContentPublicationStatus.PUBLISHED } : {})
-        },
-        _avg: {
-          estimatedMins: true
+          };
         }
-      }),
-      { _avg: { estimatedMins: null } }
+        return {
+          ...base,
+          select: {
+            approvedAt: true,
+            body: true,
+            createdAt: true,
+            downloadable: true,
+            estimatedMins: true,
+            id: true,
+            materialType: true,
+            publicationStatus: true,
+            reportDate: true,
+            reportNumber: true,
+            reviewFeedback: true,
+            sharingEnabled: true,
+            storageUrl: true,
+            summary: true,
+            title: true,
+            updatedAt: true
+          }
+        };
+      })() as never
     )
   ]);
 
-  // Law-report & Helarpedia engagement reduction is computed in-process but still
-  // wrapped defensively in case of unexpected data shape inconsistencies.
-  let lawReportEngagement: {
-    topReports: Array<{
-      id: string;
-      reportNumber: string | null;
-      title: string;
-      totalHoursSpent: number;
-      visits: number;
-    }>;
-    totalHoursSpent: number;
-    totalVisits: number;
-  } | null = null;
-
-  if (reportNumberedSection) {
-    try {
-      const materialMetrics = new Map<string, { visits: number; totalSeconds: number }>();
-
-      for (const row of readingMetrics) {
-        const seconds = row._sum.timeSpentSeconds ?? 0;
-        const visits = row._count._all ?? 0;
-        materialMetrics.set(row.materialId, {
-          totalSeconds: seconds,
-          visits
-        });
+  // ---- Admin-only engagement counters -------------------------------------------------
+  let nextReportNumber: string | null = null;
+  let totalInSection: number = totalItems;
+  let downloadableCount: number = 0;
+  let recentUploadsCount: number = 0;
+  let averageReadTimeMins: number = 0;
+  let lawReportEngagement:
+    | {
+        topReports: Array<{
+          id: string;
+          reportNumber: string | null;
+          title: string;
+          totalHoursSpent: number;
+          visits: number;
+        }>;
+        totalHoursSpent: number;
+        totalVisits: number;
       }
+    | null = null;
 
-      const totalVisits = readingMetrics.reduce((sum, row) => sum + (row._count._all ?? 0), 0);
-      const totalSeconds = readingMetrics.reduce((sum, row) => sum + (row._sum.timeSpentSeconds ?? 0), 0);
-      const totalHoursSpent = Number(toRoundedHoursFromSeconds(totalSeconds).toFixed(1));
+  if (isAdminAudience) {
+    const baseSectionWhere = {
+      categoryId: category.id,
+      deletedAt: null
+    } as const;
 
-      // Top-5 most popular: sort aggregates, take the 5 material IDs with most
-      // visits, then resolve metadata (title, citation, estimated minutes) only
-      // for that tiny subset — avoids fetching 1000+ rows on a 1000-report library.
-      const topIds = [...readingMetrics]
-        .sort((left, right) => {
-          const visitsLeft = left._count._all ?? 0;
-          const visitsRight = right._count._all ?? 0;
-          if (visitsLeft !== visitsRight) return visitsRight - visitsLeft;
-          const secondsLeft = left._sum.timeSpentSeconds ?? 0;
-          const secondsRight = right._sum.timeSpentSeconds ?? 0;
-          return secondsRight - secondsLeft;
-        })
-        .slice(0, 5)
-        .map((row) => row.materialId);
-
-      // If we have fewer than 5 candidates with history, fill with highest-id
-      // (most recently created) materials so the engagement widget never looks
-      // empty on a freshly-seeded section.
-      let topMaterials: Array<{ id: string; reportNumber: string | null; title: string; estimatedMins: number }> = [];
-      if (topIds.length > 0) {
-        const found = await prisma.studyMaterial.findMany({
-          select: { id: true, reportNumber: true, title: true, estimatedMins: true },
+    const [counters, readingMetrics] = await Promise.all([
+      Promise.all([
+        reportNumberedSection
+          ? safely(buildNextReportNumberForSection(section, prisma, category.id), null as string | null)
+          : Promise.resolve(null),
+        prisma.studyMaterial.count({ where: baseSectionWhere }),
+        prisma.studyMaterial.count({ where: { ...baseSectionWhere, downloadable: true } }),
+        prisma.studyMaterial.count({
           where: {
-            id: { in: topIds },
-            categoryId: category.id,
-            deletedAt: null,
-            ...(audience === "student" ? { publicationStatus: ContentPublicationStatus.PUBLISHED } : {})
+            ...baseSectionWhere,
+            createdAt: {
+              gte: new Date(Date.now() - 1000 * 60 * 60 * 24 * 30)
+            }
           }
-        });
+        }),
+        safely(
+          prisma.studyMaterial.aggregate({
+            _avg: { estimatedMins: true },
+            where: baseSectionWhere
+          }),
+          { _avg: { estimatedMins: null } } as { _avg: { estimatedMins: number | null } }
+        )
+      ]),
+      reportNumberedSection
+        ? safely(
+            prisma.readingHistory.groupBy({
+              by: ["materialId"],
+              _count: { _all: true },
+              _sum: { timeSpentSeconds: true },
+              where: {
+                deletedAt: null,
+                material: baseSectionWhere
+              }
+            }),
+            [] as Array<{
+              materialId: string;
+              _count: { _all: number };
+              _sum: { timeSpentSeconds: number | null };
+            }>
+          )
+        : Promise.resolve([])
+    ]);
 
-        topMaterials = topIds
-          .map((id) => found.find((m) => m.id === id))
-          .filter((item): item is NonNullable<typeof item> => Boolean(item));
+    [nextReportNumber, totalInSection, downloadableCount, recentUploadsCount] = [
+      counters[0],
+      counters[1],
+      counters[2],
+      counters[3]
+    ];
+    averageReadTimeMins = Math.round(counters[4]._avg.estimatedMins ?? 0);
+
+    if (reportNumberedSection && readingMetrics.length) {
+      try {
+        const materialMetrics = new Map<string, { visits: number; totalSeconds: number }>();
+        for (const row of readingMetrics) {
+          materialMetrics.set(row.materialId, {
+            totalSeconds: row._sum.timeSpentSeconds ?? 0,
+            visits: row._count._all ?? 0
+          });
+        }
+
+        const totalVisits = readingMetrics.reduce((sum, row) => sum + (row._count._all ?? 0), 0);
+        const totalSeconds = readingMetrics.reduce((sum, row) => sum + (row._sum.timeSpentSeconds ?? 0), 0);
+        const totalHoursSpent = Number(toRoundedHoursFromSeconds(totalSeconds).toFixed(1));
+
+        const topIds = [...readingMetrics]
+          .sort((left, right) => {
+            const vl = left._count._all ?? 0;
+            const vr = right._count._all ?? 0;
+            if (vl !== vr) return vr - vl;
+            return (right._sum.timeSpentSeconds ?? 0) - (left._sum.timeSpentSeconds ?? 0);
+          })
+          .slice(0, 5)
+          .map((row) => row.materialId);
+
+        let topMaterials: Array<{ id: string; reportNumber: string | null; title: string; estimatedMins: number }> = [];
+        if (topIds.length > 0) {
+          const found = await prisma.studyMaterial.findMany({
+            select: { id: true, reportNumber: true, title: true, estimatedMins: true },
+            where: {
+              id: { in: topIds },
+              ...baseSectionWhere
+            }
+          });
+          topMaterials = topIds
+            .map((id) => found.find((m) => m.id === id))
+            .filter((item): item is NonNullable<typeof item> => Boolean(item));
+        }
+
+        if (topMaterials.length < 5) {
+          const fillCount = 5 - topMaterials.length;
+          const filled = await prisma.studyMaterial.findMany({
+            orderBy: { createdAt: "desc" },
+            select: { id: true, reportNumber: true, title: true, estimatedMins: true },
+            take: fillCount,
+            where: {
+              ...baseSectionWhere,
+              NOT: { id: { in: topMaterials.map((m) => m.id) } }
+            }
+          });
+          topMaterials = [...topMaterials, ...filled];
+        }
+
+        lawReportEngagement = {
+          topReports: topMaterials
+            .map((material) => {
+              const metrics = materialMetrics.get(material.id) ?? { visits: 0, totalSeconds: 0 };
+              const fallbackSeconds = material.estimatedMins
+                ? Math.round(material.estimatedMins * 60 * Math.min(1, metrics.visits))
+                : 0;
+              const effective = metrics.totalSeconds > 0 ? metrics.totalSeconds : fallbackSeconds;
+              return {
+                id: material.id,
+                reportNumber: material.reportNumber,
+                title: material.title,
+                totalHoursSpent: Number(toRoundedHoursFromSeconds(effective).toFixed(2)),
+                visits: metrics.visits
+              };
+            })
+            .sort((l, r) => r.visits - l.visits || r.totalHoursSpent - l.totalHoursSpent),
+          totalHoursSpent,
+          totalVisits
+        };
+      } catch (error) {
+        console.error(
+          "[admin-library] law report engagement reduction failed",
+          error instanceof Error ? error.message : error
+        );
+        lawReportEngagement = { topReports: [], totalHoursSpent: 0, totalVisits: 0 };
       }
-
-      if (topMaterials.length < 5) {
-        const fillCount = 5 - topMaterials.length;
-        const filled = await prisma.studyMaterial.findMany({
-          orderBy: { createdAt: "desc" },
-          select: { id: true, reportNumber: true, title: true, estimatedMins: true },
-          take: fillCount,
-          where: {
-            categoryId: category.id,
-            deletedAt: null,
-            ...(audience === "student" ? { publicationStatus: ContentPublicationStatus.PUBLISHED } : {}),
-            NOT: { id: { in: topMaterials.map((m) => m.id) } }
-          }
-        });
-        topMaterials = [...topMaterials, ...filled];
-      }
-
-      const topCandidates = topMaterials
-        .map((material) => {
-          const metrics = materialMetrics.get(material.id) ?? { visits: 0, totalSeconds: 0 };
-          const estimatedSecondsFallback = material.estimatedMins
-            ? Math.round(material.estimatedMins * 60 * Math.min(1, metrics.visits))
-            : 0;
-          const effectiveSeconds = metrics.totalSeconds > 0 ? metrics.totalSeconds : estimatedSecondsFallback;
-          return {
-            id: material.id,
-            reportNumber: material.reportNumber,
-            title: material.title,
-            totalHoursSpent: Number(toRoundedHoursFromSeconds(effectiveSeconds).toFixed(2)),
-            visits: metrics.visits
-          };
-        })
-        .sort((left, right) => right.visits - left.visits || right.totalHoursSpent - left.totalHoursSpent);
-
+    } else if (reportNumberedSection) {
+      // No reading history yet (fresh section) — still prefill top-5 with the
+      // latest materials so the admin dashboard never has an empty leaderboard.
+      const latest = await prisma.studyMaterial.findMany({
+        orderBy: { createdAt: "desc" },
+        select: { id: true, reportNumber: true, title: true, estimatedMins: true },
+        take: 5,
+        where: { categoryId: category.id, deletedAt: null }
+      });
       lawReportEngagement = {
-        topReports: topCandidates,
-        totalHoursSpent,
-        totalVisits
-      };
-    } catch (error) {
-      console.error("[admin-library] law report engagement reduction failed", error instanceof Error ? error.message : error);
-      lawReportEngagement = {
-        topReports: [],
+        topReports: latest.map((material) => ({
+          id: material.id,
+          reportNumber: material.reportNumber,
+          title: material.title,
+          totalHoursSpent: 0,
+          visits: 0
+        })),
         totalHoursSpent: 0,
         totalVisits: 0
       };
     }
   }
+
+  // Student path used `select:` which drops the `_count` field expected by
+  // mapLibraryMaterial. Attach zero-value counts so the response shape stays
+  // identical regardless of audience.
+  const mappedMaterials = (materials as Array<Record<string, unknown>>).map((rawMaterial) => {
+    const withCounts = Object.assign({}, rawMaterial, {
+      _count:
+        typeof rawMaterial._count === "object" && rawMaterial._count
+          ? rawMaterial._count
+          : { bookmarks: 0, readingHistory: 0 }
+    });
+    return mapLibraryMaterial(withCounts as never, section);
+  });
 
   return {
     availableMaterialTypes: getAllowedMaterialTypes(section),
@@ -1278,7 +1315,7 @@ export async function listAdminLibraryMaterials(
     filters: {
       ...filters
     },
-    materials: materials.map((material) => mapLibraryMaterial(material, section)),
+    materials: mappedMaterials,
     nextReportNumber,
     pagination: {
       page: filters.page,
@@ -1287,7 +1324,7 @@ export async function listAdminLibraryMaterials(
       totalPages: Math.max(1, Math.ceil(totalItems / filters.pageSize))
     },
     summary: {
-      averageReadTimeMins: Math.round(averageReadTimeAggregate._avg.estimatedMins ?? 0),
+      averageReadTimeMins,
       downloadableCount,
       lawReportEngagement,
       recentUploadsCount,
