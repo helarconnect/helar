@@ -12,10 +12,9 @@ const adminLibrarySectionSchema = z.enum(["law-reports", "subject-summaries", "c
 const adminLibraryFiltersSchema = z.object({
   materialType: z.union([z.nativeEnum(MaterialType), z.literal("all")]).default("all"),
   page: z.coerce.number().int().min(1).max(10_000).default(1),
-  // Raised to 500 for consistency with other admin list endpoints.
   pageSize: z.coerce.number().int().min(1).max(500).default(12),
   search: z.string().trim().max(120).optional().default(""),
-  sortBy: z.enum(["createdAt", "estimatedMins", "reportNumber", "title", "updatedAt"]).default("updatedAt"),
+  sortBy: z.enum(["createdAt", "estimatedMins", "reportNumber", "title", "updatedAt"]).default("reportNumber"),
   sortOrder: z.enum(["asc", "desc"]).default("desc")
 });
 
@@ -384,11 +383,14 @@ function assertStorageUrlFilledForSection(section: AdminLibrarySection, storageU
   ]);
 }
 
-// Caching guard so `ensureAdminLibraryCategories` — which does 4 category
-// upserts into Postgres — runs at MOST once every 5 minutes per process.
-// Without this cache every law-reports list/detail + helarpedia list/detail
-// request triggered 4 writes on the hot path and added 40-120ms of latency.
-let cachedEnsureCategoriesPromise: Promise<unknown> | null = null;
+// ---------- Admin-library per-process caches (TTL 5 minutes) ------------------
+// (A) ensureAdminLibraryCategories — 4 DB upserts per request → once / 5 min
+// (B) admin list summaries — 7 DB queries per list call → once / 5 min per section
+// These caches are intentionally process-singleton (not redis / external):
+//   - aggregates are read-only + safe to be slightly stale
+//   - losing them on process restart is fine
+//   - they save 80-300ms per page-change / sort-change / filter-change
+let cachedEnsureCategoriesPromise: Promise<Array<SectionCategory>> | null = null;
 let cachedEnsureCategoriesAt = 0;
 const CATEGORY_CACHE_MS = 5 * 60 * 1000;
 
@@ -402,10 +404,48 @@ type SectionCategory = {
   deletedAt: Date | null;
 };
 
+type AdminListSummaryCacheKey = `${AdminLibrarySection}:${LibrarySearchAudience}`;
+interface CachedAdminListSummary {
+  readonly averageReadTimeMins: number;
+  readonly downloadableCount: number;
+  readonly engagement:
+    | {
+        topReports: Array<{
+          id: string;
+          reportNumber: string | null;
+          title: string;
+          totalHoursSpent: number;
+          visits: number;
+        }>;
+        totalHoursSpent: number;
+        totalVisits: number;
+      }
+    | null;
+  readonly nextReportNumber: string | null;
+  readonly recentUploadsCount: number;
+  readonly refreshedAt: number;
+  readonly totalInSection: number;
+}
+const adminListSummaryCache = new Map<AdminListSummaryCacheKey, CachedAdminListSummary>();
+const ADMIN_SUMMARY_CACHE_MS = 5 * 60 * 1000;
+
+/**
+ * Invalidate list-summary + next-report-number caches for a given section.
+ * Called from create / update / delete write paths so admin dashboard cards
+ * never show stale totals for longer than the in-flight cache window + the
+ * Prisma write-watch latency (the admin list invalidates on the frontend too
+ * but clearing server-side caches keeps the next paginated fetch accurate).
+ */
+export function invalidateAdminListSummaryCachesForSection(section: AdminLibrarySection): void {
+  for (const audience of ["admin", "student"] as const) {
+    adminListSummaryCache.delete(`${section}:${audience}`);
+  }
+}
+
 async function ensureAdminLibraryCategories(): Promise<Array<SectionCategory>> {
   const now = Date.now();
   if (cachedEnsureCategoriesPromise && now - cachedEnsureCategoriesAt < CATEGORY_CACHE_MS) {
-    return cachedEnsureCategoriesPromise as Promise<Array<SectionCategory>>;
+    return cachedEnsureCategoriesPromise;
   }
 
   cachedEnsureCategoriesAt = now;
@@ -427,7 +467,7 @@ async function ensureAdminLibraryCategories(): Promise<Array<SectionCategory>> {
       })
     )
   );
-  return cachedEnsureCategoriesPromise as Promise<Array<SectionCategory>>;
+  return cachedEnsureCategoriesPromise;
 }
 
 async function getSectionCategory(section: AdminLibrarySection) {
@@ -1082,6 +1122,43 @@ export async function listAdminLibraryMaterials(
   const reportNumberedSection = isReportNumberedSection(section);
   const isAdminAudience = audience === "admin";
 
+  // Deterministic, audience-safe sort builder:
+  //   - For `reportNumber` sorted sections we use NULLS LAST so legacy PDFs
+  //     without a serial never float to the top of DESC order (default in
+  //     Postgres is NULLS FIRST for DESC, which puts newly uploaded
+  //     Helar-2026-1181 at position 2+ behind a single pre-refactor legacy
+  //     entry with no reportNumber).
+  //   - Always append `createdAt desc, id asc` as a tiebreaker so two
+  //     materials with identical sort values never re-order across pages.
+  const orderBy: Array<Prisma.StudyMaterialOrderByWithRelationInput> = (() => {
+    const direction: Prisma.SortOrder = filters.sortOrder;
+    if (filters.sortBy === "reportNumber") {
+      return [
+        { reportNumber: { sort: direction, nulls: "last" as const } },
+        { createdAt: "desc" as const },
+        { id: "asc" as const }
+      ] as Array<Prisma.StudyMaterialOrderByWithRelationInput>;
+    }
+    if (filters.sortBy === "title") {
+      return [
+        { title: direction },
+        { createdAt: "desc" as const },
+        { id: "asc" as const }
+      ] as Array<Prisma.StudyMaterialOrderByWithRelationInput>;
+    }
+    if (filters.sortBy === "estimatedMins") {
+      return [
+        { estimatedMins: { sort: direction, nulls: "last" as const } },
+        { createdAt: "desc" as const },
+        { id: "asc" as const }
+      ] as Array<Prisma.StudyMaterialOrderByWithRelationInput>;
+    }
+    return [
+      { [filters.sortBy]: direction },
+      { id: "asc" as const }
+    ] as Array<Prisma.StudyMaterialOrderByWithRelationInput>;
+  })();
+
   // Student/portal list pages only need pagination plus the current page of
   // materials. Every auxiliary query we skip on this hot path shaves another
   // 50-200ms off a cold page load, which matters when a reader is deciding
@@ -1093,9 +1170,7 @@ export async function listAdminLibraryMaterials(
       (() => {
         const base = {
           where,
-          orderBy: {
-            [filters.sortBy]: filters.sortOrder
-          } as const,
+          orderBy,
           skip: (filters.page - 1) * filters.pageSize,
           take: filters.pageSize
         } as const;
@@ -1137,182 +1212,194 @@ export async function listAdminLibraryMaterials(
     )
   ]);
 
-  // ---- Admin-only engagement counters -------------------------------------------------
+  // ---- Admin-only engagement counters (read-through process cache) --------
   let nextReportNumber: string | null = null;
   let totalInSection: number = totalItems;
   let downloadableCount: number = 0;
   let recentUploadsCount: number = 0;
   let averageReadTimeMins: number = 0;
-  let lawReportEngagement:
-    | {
-        topReports: Array<{
-          id: string;
-          reportNumber: string | null;
-          title: string;
-          totalHoursSpent: number;
-          visits: number;
-        }>;
-        totalHoursSpent: number;
-        totalVisits: number;
-      }
-    | null = null;
+  let lawReportEngagement: CachedAdminListSummary["engagement"] = null;
 
   if (isAdminAudience) {
-    const baseSectionWhere = {
-      categoryId: category.id,
-      deletedAt: null
-    } as const;
+    const cacheKey: AdminListSummaryCacheKey = `${section}:${audience}`;
+    const cached = adminListSummaryCache.get(cacheKey);
+    const now = Date.now();
+    if (cached && now - cached.refreshedAt < ADMIN_SUMMARY_CACHE_MS) {
+      nextReportNumber = cached.nextReportNumber;
+      totalInSection = cached.totalInSection;
+      downloadableCount = cached.downloadableCount;
+      recentUploadsCount = cached.recentUploadsCount;
+      averageReadTimeMins = cached.averageReadTimeMins;
+      lawReportEngagement = cached.engagement;
+    } else {
+      const baseSectionWhere = {
+        categoryId: category.id,
+        deletedAt: null
+      } as const;
 
-    const [counters, readingMetrics] = await Promise.all([
-      Promise.all([
-        reportNumberedSection
-          ? safely(buildNextReportNumberForSection(section, prisma, category.id), null as string | null)
-          : Promise.resolve(null),
-        prisma.studyMaterial.count({ where: baseSectionWhere }),
-        prisma.studyMaterial.count({ where: { ...baseSectionWhere, downloadable: true } }),
-        prisma.studyMaterial.count({
-          where: {
-            ...baseSectionWhere,
-            createdAt: {
-              gte: new Date(Date.now() - 1000 * 60 * 60 * 24 * 30)
-            }
-          }
-        }),
-        safely(
-          prisma.studyMaterial.aggregate({
-            _avg: { estimatedMins: true },
-            where: baseSectionWhere
-          }),
-          { _avg: { estimatedMins: null } } as { _avg: { estimatedMins: number | null } }
-        )
-      ]),
-      reportNumberedSection
-        ? safely(
-            prisma.readingHistory.groupBy({
-              by: ["materialId"],
-              _count: { _all: true },
-              _sum: { timeSpentSeconds: true },
-              where: {
-                deletedAt: null,
-                material: baseSectionWhere
-              }
-            }),
-            [] as Array<{
-              materialId: string;
-              _count: { _all: number };
-              _sum: { timeSpentSeconds: number | null };
-            }>
-          )
-        : Promise.resolve([])
-    ]);
-
-    [nextReportNumber, totalInSection, downloadableCount, recentUploadsCount] = [
-      counters[0],
-      counters[1],
-      counters[2],
-      counters[3]
-    ];
-    averageReadTimeMins = Math.round(counters[4]._avg.estimatedMins ?? 0);
-
-    if (reportNumberedSection && readingMetrics.length) {
-      try {
-        const materialMetrics = new Map<string, { visits: number; totalSeconds: number }>();
-        for (const row of readingMetrics) {
-          materialMetrics.set(row.materialId, {
-            totalSeconds: row._sum.timeSpentSeconds ?? 0,
-            visits: row._count._all ?? 0
-          });
-        }
-
-        const totalVisits = readingMetrics.reduce((sum, row) => sum + (row._count._all ?? 0), 0);
-        const totalSeconds = readingMetrics.reduce((sum, row) => sum + (row._sum.timeSpentSeconds ?? 0), 0);
-        const totalHoursSpent = Number(toRoundedHoursFromSeconds(totalSeconds).toFixed(1));
-
-        const topIds = [...readingMetrics]
-          .sort((left, right) => {
-            const vl = left._count._all ?? 0;
-            const vr = right._count._all ?? 0;
-            if (vl !== vr) return vr - vl;
-            return (right._sum.timeSpentSeconds ?? 0) - (left._sum.timeSpentSeconds ?? 0);
-          })
-          .slice(0, 5)
-          .map((row) => row.materialId);
-
-        let topMaterials: Array<{ id: string; reportNumber: string | null; title: string; estimatedMins: number }> = [];
-        if (topIds.length > 0) {
-          const found = await prisma.studyMaterial.findMany({
-            select: { id: true, reportNumber: true, title: true, estimatedMins: true },
-            where: {
-              id: { in: topIds },
-              ...baseSectionWhere
-            }
-          });
-          topMaterials = topIds
-            .map((id) => found.find((m) => m.id === id))
-            .filter((item): item is NonNullable<typeof item> => Boolean(item));
-        }
-
-        if (topMaterials.length < 5) {
-          const fillCount = 5 - topMaterials.length;
-          const filled = await prisma.studyMaterial.findMany({
-            orderBy: { createdAt: "desc" },
-            select: { id: true, reportNumber: true, title: true, estimatedMins: true },
-            take: fillCount,
+      const [counters, readingMetrics] = await Promise.all([
+        Promise.all([
+          reportNumberedSection
+            ? safely(buildNextReportNumberForSection(section, prisma, category.id), null as string | null)
+            : Promise.resolve(null),
+          prisma.studyMaterial.count({ where: baseSectionWhere }),
+          prisma.studyMaterial.count({ where: { ...baseSectionWhere, downloadable: true } }),
+          prisma.studyMaterial.count({
             where: {
               ...baseSectionWhere,
-              NOT: { id: { in: topMaterials.map((m) => m.id) } }
+              createdAt: {
+                gte: new Date(Date.now() - 1000 * 60 * 60 * 24 * 30)
+              }
             }
-          });
-          topMaterials = [...topMaterials, ...filled];
-        }
+          }),
+          safely(
+            prisma.studyMaterial.aggregate({
+              _avg: { estimatedMins: true },
+              where: baseSectionWhere
+            }),
+            { _avg: { estimatedMins: null } } as { _avg: { estimatedMins: number | null } }
+          )
+        ]),
+        reportNumberedSection
+          ? safely(
+              prisma.readingHistory.groupBy({
+                by: ["materialId"],
+                _count: { _all: true },
+                _sum: { timeSpentSeconds: true },
+                where: {
+                  deletedAt: null,
+                  material: baseSectionWhere
+                }
+              }),
+              [] as Array<{
+                materialId: string;
+                _count: { _all: number };
+                _sum: { timeSpentSeconds: number | null };
+              }>
+            )
+          : Promise.resolve([])
+      ]);
 
-        lawReportEngagement = {
-          topReports: topMaterials
-            .map((material) => {
-              const metrics = materialMetrics.get(material.id) ?? { visits: 0, totalSeconds: 0 };
-              const fallbackSeconds = material.estimatedMins
-                ? Math.round(material.estimatedMins * 60 * Math.min(1, metrics.visits))
-                : 0;
-              const effective = metrics.totalSeconds > 0 ? metrics.totalSeconds : fallbackSeconds;
-              return {
-                id: material.id,
-                reportNumber: material.reportNumber,
-                title: material.title,
-                totalHoursSpent: Number(toRoundedHoursFromSeconds(effective).toFixed(2)),
-                visits: metrics.visits
-              };
+      [nextReportNumber, totalInSection, downloadableCount, recentUploadsCount] = [
+        counters[0],
+        counters[1],
+        counters[2],
+        counters[3]
+      ];
+      averageReadTimeMins = Math.round(counters[4]._avg.estimatedMins ?? 0);
+
+      if (reportNumberedSection && readingMetrics.length) {
+        try {
+          const materialMetrics = new Map<string, { visits: number; totalSeconds: number }>();
+          for (const row of readingMetrics) {
+            materialMetrics.set(row.materialId, {
+              totalSeconds: row._sum.timeSpentSeconds ?? 0,
+              visits: row._count._all ?? 0
+            });
+          }
+
+          const totalVisits = readingMetrics.reduce((sum, row) => sum + (row._count._all ?? 0), 0);
+          const totalSeconds = readingMetrics.reduce((sum, row) => sum + (row._sum.timeSpentSeconds ?? 0), 0);
+          const totalHoursSpent = Number(toRoundedHoursFromSeconds(totalSeconds).toFixed(1));
+
+          const topIds = [...readingMetrics]
+            .sort((left, right) => {
+              const vl = left._count._all ?? 0;
+              const vr = right._count._all ?? 0;
+              if (vl !== vr) return vr - vl;
+              return (right._sum.timeSpentSeconds ?? 0) - (left._sum.timeSpentSeconds ?? 0);
             })
-            .sort((l, r) => r.visits - l.visits || r.totalHoursSpent - l.totalHoursSpent),
-          totalHoursSpent,
-          totalVisits
-        };
-      } catch (error) {
-        console.error(
-          "[admin-library] law report engagement reduction failed",
-          error instanceof Error ? error.message : error
-        );
-        lawReportEngagement = { topReports: [], totalHoursSpent: 0, totalVisits: 0 };
-      }
-    } else if (reportNumberedSection) {
-      // No reading history yet (fresh section) — still prefill top-5 with the
-      // latest materials so the admin dashboard never has an empty leaderboard.
-      const latest = await prisma.studyMaterial.findMany({
-        orderBy: { createdAt: "desc" },
-        select: { id: true, reportNumber: true, title: true, estimatedMins: true },
-        take: 5,
-        where: { categoryId: category.id, deletedAt: null }
-      });
-      lawReportEngagement = {
-        topReports: latest.map((material) => ({
-          id: material.id,
-          reportNumber: material.reportNumber,
-          title: material.title,
+            .slice(0, 5)
+            .map((row) => row.materialId);
+
+          let topMaterials: Array<{ id: string; reportNumber: string | null; title: string; estimatedMins: number }> = [];
+          if (topIds.length > 0) {
+            const found = await prisma.studyMaterial.findMany({
+              select: { id: true, reportNumber: true, title: true, estimatedMins: true },
+              where: {
+                id: { in: topIds },
+                ...baseSectionWhere
+              }
+            });
+            topMaterials = topIds
+              .map((id) => found.find((m) => m.id === id))
+              .filter((item): item is NonNullable<typeof item> => Boolean(item));
+          }
+
+          if (topMaterials.length < 5) {
+            const fillCount = 5 - topMaterials.length;
+            const filled = await prisma.studyMaterial.findMany({
+              orderBy: { createdAt: "desc" },
+              select: { id: true, reportNumber: true, title: true, estimatedMins: true },
+              take: fillCount,
+              where: {
+                ...baseSectionWhere,
+                NOT: { id: { in: topMaterials.map((m) => m.id) } }
+              }
+            });
+            topMaterials = [...topMaterials, ...filled];
+          }
+
+          lawReportEngagement = {
+            topReports: topMaterials
+              .map((material) => {
+                const metrics = materialMetrics.get(material.id) ?? { visits: 0, totalSeconds: 0 };
+                const fallbackSeconds = material.estimatedMins
+                  ? Math.round(material.estimatedMins * 60 * Math.min(1, metrics.visits))
+                  : 0;
+                const effective = metrics.totalSeconds > 0 ? metrics.totalSeconds : fallbackSeconds;
+                return {
+                  id: material.id,
+                  reportNumber: material.reportNumber,
+                  title: material.title,
+                  totalHoursSpent: Number(toRoundedHoursFromSeconds(effective).toFixed(2)),
+                  visits: metrics.visits
+                };
+              })
+              .sort((l, r) => r.visits - l.visits || r.totalHoursSpent - l.totalHoursSpent),
+            totalHoursSpent,
+            totalVisits
+          };
+        } catch (error) {
+          console.error(
+            "[admin-library] law report engagement reduction failed",
+            error instanceof Error ? error.message : error
+          );
+          lawReportEngagement = { topReports: [], totalHoursSpent: 0, totalVisits: 0 };
+        }
+      } else if (reportNumberedSection) {
+        // No reading history yet (fresh section) — still prefill top-5 with the
+        // latest materials so the admin dashboard never has an empty leaderboard.
+        const latest = await prisma.studyMaterial.findMany({
+          orderBy: { createdAt: "desc" },
+          select: { id: true, reportNumber: true, title: true, estimatedMins: true },
+          take: 5,
+          where: { categoryId: category.id, deletedAt: null }
+        });
+        lawReportEngagement = {
+          topReports: latest.map((material) => ({
+            id: material.id,
+            reportNumber: material.reportNumber,
+            title: material.title,
+            totalHoursSpent: 0,
+            visits: 0
+          })),
           totalHoursSpent: 0,
-          visits: 0
-        })),
-        totalHoursSpent: 0,
-        totalVisits: 0
-      };
+          totalVisits: 0
+        };
+      }
+
+      // Populate cache after a successful fresh fetch so the next page / sort
+      // / filter change for this section hits cache immediately (0 DB calls).
+      adminListSummaryCache.set(cacheKey, {
+        averageReadTimeMins,
+        downloadableCount,
+        engagement: lawReportEngagement,
+        nextReportNumber,
+        recentUploadsCount,
+        refreshedAt: now,
+        totalInSection
+      });
     }
   }
 
@@ -1750,6 +1837,7 @@ export async function createAdminLibraryMaterial(
   // Reassemble the saved body/summary so callers get the exact text they submitted,
   // even for gigantic reports that exceeded the single-doc safe head.
   const reassembled = await reassembleMaterialText(prisma, material.id, material.body, material.summary);
+  invalidateAdminListSummaryCachesForSection(section);
   return mapLibraryMaterial({ ...material, body: reassembled.body, summary: reassembled.summary }, section);
 }
 
@@ -1877,6 +1965,7 @@ export async function updateAdminLibraryMaterial(
 
   // Reassemble so the caller receives the complete body/summary they just saved.
   const reassembled = await reassembleMaterialText(prisma, material.id, material.body, material.summary);
+  invalidateAdminListSummaryCachesForSection(section);
   return mapLibraryMaterial({ ...material, body: reassembled.body, summary: reassembled.summary }, section);
 }
 
@@ -1917,6 +2006,8 @@ export async function deleteAdminLibraryMaterial(
     reportNumber: existingMaterial.reportNumber,
     title: existingMaterial.title
   });
+
+  invalidateAdminListSummaryCachesForSection(section);
 
   return {
     id: materialId,

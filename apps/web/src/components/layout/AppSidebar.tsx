@@ -1,6 +1,6 @@
 import { BookOpenText, CheckSquare, ChevronDown, X } from 'lucide-react'
 import { NavLink, useLocation } from 'react-router-dom'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
 import { BrandMark } from '@/components/ui/BrandMark'
@@ -21,6 +21,14 @@ const defaultLibraryFilters = {
   sortOrder: "desc" as const
 };
 
+// Minimum gap between two prefetch calls for the same library section. We use
+// 55 seconds so it stays comfortably under the 60s staleTime window — any
+// hover / mouseenter that falls inside this window is a no-op (no network).
+// This prevents the classic triple-fetch problem: sidebar-mount → Library
+// trigger-hover → submenu-row-hover all firing prefetch for the same first
+// page within a 2-second window.
+const PREFETCH_DEDUP_MS = 55_000;
+
 type SidebarNavItem = { href: string; label: string }
 type SidebarNavGroup = { label: string; children: SidebarNavItem[] }
 type SidebarLibraryItem = SidebarNavItem | SidebarNavGroup
@@ -31,6 +39,9 @@ export function AppSidebar() {
   const { isDark } = useTheme()
   const location = useLocation()
   const queryClient = useQueryClient()
+  // Module-scope (per-mount) timestamps — survives re-renders, resets on
+  // client-side navigation reload but NOT on React strict-mode double-mount.
+  const lastPrefetchAtRef = useRef<Map<string, number>>(new Map());
   const roleCodes = session?.user.roleCodes ?? []
   const userName = session?.user.fullName ?? 'Chidi Adebayo'
   const isAdminWorkspace = hasAdminAccess(roleCodes)
@@ -43,28 +54,46 @@ export function AppSidebar() {
         : 'Student workspace'
   const navigationItems = getDashboardNav(roleCodes)
 
-  // Prefetch both library list results once per session mount.
-  // Prefetch the first page of law reports and Helarpedia after the layout
-  // first renders on user mount so clicking the menu item.
+  // Deduplicated prefetch helper. Checks both the React Query cache state AND
+  // the last-fired timestamp so we never issue a duplicate network call for
+  // the same first-page list inside the 60s stale window.
+  const prefetchLibrarySection = useMemo(() => {
+    const sectionFetchers: Record<string, () => Promise<unknown>> = {
+      "student-law-reports": () => fetchLibraryLawReports(defaultLibraryFilters),
+      "student-helarpedia": () => fetchLibraryHelarpedia(defaultLibraryFilters),
+    };
+    return (section: "student-law-reports" | "student-helarpedia") => {
+      const now = Date.now();
+      const lastAt = lastPrefetchAtRef.current.get(section) ?? 0;
+      if (now - lastAt < PREFETCH_DEDUP_MS) return;
+      const queryKey = queryKeys.adminLibrary(section, defaultLibraryFilters);
+      const cached = queryClient.getQueryState(queryKey);
+      if (cached && cached.data) {
+        // Already cached — update the in-ref timestamp so next hover short
+        // circuits even faster, no work needed.
+        lastPrefetchAtRef.current.set(section, now);
+        return;
+      }
+      lastPrefetchAtRef.current.set(section, now);
+      void queryClient.prefetchQuery({
+        queryKey,
+        queryFn: sectionFetchers[section],
+        staleTime: 60_000,
+      });
+    };
+  }, [queryClient]);
+
+  // Prefetch both library list results ONCE per session mount (deduped by the
+  // helper above — if mount fires at 0s and user hovers at 2s the hover call
+  // is a no-op, not a duplicate network call).
   const firstPageLawReportsCacheKey = useMemo(
     () => JSON.stringify(defaultLibraryFilters),
     []
-  )
+  );
   useEffect(() => {
-    // Student workspace only mounts once per mount.
-    // Both audiences have a query caches the lists for ~30s - 60s, so subsequent clicks are
-    // clicks to from cache within that window are instant.
-    void queryClient.prefetchQuery({
-      queryKey: queryKeys.adminLibrary('student-law-reports', defaultLibraryFilters),
-      queryFn: () => fetchLibraryLawReports(defaultLibraryFilters),
-      staleTime: 60_000,
-    })
-    void queryClient.prefetchQuery({
-      queryKey: queryKeys.adminLibrary('student-helarpedia', defaultLibraryFilters),
-      queryFn: () => fetchLibraryHelarpedia(defaultLibraryFilters),
-      staleTime: 60_000,
-    })
-  }, [queryClient, firstPageLawReportsCacheKey])
+    prefetchLibrarySection('student-law-reports');
+    prefetchLibrarySection('student-helarpedia');
+  }, [prefetchLibrarySection, firstPageLawReportsCacheKey]);
   const [isLibraryOpen, setIsLibraryOpen] = useState(
     location.pathname.startsWith('/app/admin/library') || location.pathname.startsWith('/app/library'),
   )
@@ -273,20 +302,12 @@ export function AppSidebar() {
                     )}
                     onClick={() => setIsLibraryOpen((current) => !current)}
                     onMouseEnter={() => {
-                      // Warm the cache the moment the user hovers over the
-                      // Library dropdown so the list is ready before they
-                      // click the sub-item. By the time the menu animates open
-                      // the first-page response has usually already arrived.
-                      void queryClient.prefetchQuery({
-                        queryKey: queryKeys.adminLibrary('student-law-reports', defaultLibraryFilters),
-                        queryFn: () => fetchLibraryLawReports(defaultLibraryFilters),
-                        staleTime: 60_000,
-                      })
-                      void queryClient.prefetchQuery({
-                        queryKey: queryKeys.adminLibrary('student-helarpedia', defaultLibraryFilters),
-                        queryFn: () => fetchLibraryHelarpedia(defaultLibraryFilters),
-                        staleTime: 60_000,
-                      })
+                      // Warm both library lists the moment the user hovers
+                      // the Library dropdown. By the time the menu animates
+                      // open the first-page fetch has usually already landed,
+                      // so the click to open the list is instant.
+                      prefetchLibrarySection('student-law-reports');
+                      prefetchLibrarySection('student-helarpedia');
                     }}
                     type="button"
                   >
@@ -320,17 +341,9 @@ export function AppSidebar() {
                               // the Library trigger was never hovered (e.g.
                               // dropdown already expanded from a previous visit).
                               if (libraryItem.href.includes('/law-reports')) {
-                                void queryClient.prefetchQuery({
-                                  queryKey: queryKeys.adminLibrary('student-law-reports', defaultLibraryFilters),
-                                  queryFn: () => fetchLibraryLawReports(defaultLibraryFilters),
-                                  staleTime: 60_000,
-                                })
+                                prefetchLibrarySection('student-law-reports');
                               } else if (libraryItem.href.includes('/helarpedia')) {
-                                void queryClient.prefetchQuery({
-                                  queryKey: queryKeys.adminLibrary('student-helarpedia', defaultLibraryFilters),
-                                  queryFn: () => fetchLibraryHelarpedia(defaultLibraryFilters),
-                                  staleTime: 60_000,
-                                })
+                                prefetchLibrarySection('student-helarpedia');
                               }
                             }}
                             to={libraryItem.href}

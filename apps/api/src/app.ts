@@ -697,6 +697,7 @@ type AdminLibraryFailureClassification =
   | "LIBRARY_PAYLOAD_TOO_LARGE"
   | "CHUNK_BUFFER_MISSING"
   | "CHUNK_TRANSPORT_FAILED"
+  | "UNIQUE_CONSTRAINT_VIOLATION"
   | "TRANSACTION_CONFLICT"
   | "DATABASE_UNAVAILABLE"
   | "UNKNOWN";
@@ -707,18 +708,13 @@ type AdminLibraryFailureClassification =
 function classifyAdminLibraryWriteError(error: unknown): AdminLibraryFailureClassification {
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
     if (error.code === "P2002") {
-      // Prisma reports `meta.target` differently across Prisma versions and
-      // database drivers:
-      //   PostgreSQL+Prisma: `["reportNumber"]` (array of column names)
-      //   MongoDB+Prisma:      `["reportNumber"]` OR the actual MongoDB
-      //                        unique-index name such as
-      //                        `StudyMaterial_reportNumber_key`, OR sometimes
-      //                        a nested `meta.field_name` / `meta.path` field
-      //                        depending on Prisma version.
-      // If ANY of the available meta fields mention "reportNumber" (case
-      // insensitive) we classify this as a specific report-number collision
-      // so the admin sees the "auto-assign next Helar-{year}-N on retry"
-      // guidance instead of the generic "another admin may be uploading".
+      // P2002 = unique-constraint violation. Distinguish three sub-classes
+      // because the user-facing guidance differs dramatically:
+      //   (1) reportNumber collision → "auto-assign next number on retry"
+      //   (2) other unique field (storageUrl / slug / id) → "this link/ID already
+      //       exists" (NEVER accuse them of concurrent upload)
+      //   (3) unknown meta shape → still unique constraint, not a transaction
+      //       conflict; surface a safe generic "entry already exists" message.
       const targetPieces: string[] = [];
       const rawTarget = (error.meta as { target?: unknown })?.target;
       if (Array.isArray(rawTarget)) targetPieces.push(rawTarget.map(String).join(","));
@@ -738,7 +734,7 @@ function classifyAdminLibraryWriteError(error: unknown): AdminLibraryFailureClas
       if (typeof error.message === "string") targetPieces.push(error.message);
       const fingerprint = targetPieces.join(" | ");
       if (/reportNumber|report_number|report-number/i.test(fingerprint)) return "REPORT_NUMBER_COLLISION";
-      return "TRANSACTION_CONFLICT";
+      return "UNIQUE_CONSTRAINT_VIOLATION";
     }
     // P2034: transaction conflict due to write/write races (stale snapshot).
     // P2024: "Transaction API error" — tx lifecycle errors, which MongoDB Atlas
@@ -902,11 +898,43 @@ function buildAdminLibraryFailureResponse(
             ? `One of the transport chunks failed to upload: ${rawMessage.trim().slice(0, 220)}`
             : "One of the transport chunks failed to upload. Please retry."
       };
+    case "UNIQUE_CONSTRAINT_VIOLATION": {
+      // P2002 on a *non-reportNumber* field (storageUrl, slug, id, etc.). We
+      // avoid the misleading "another admin uploading" copy and instead name
+      // the field(s) involved so the admin knows exactly what to fix.
+      let fieldHint = "";
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.meta &&
+        typeof error.meta === "object"
+      ) {
+        const raw = (error.meta as { target?: unknown }).target;
+        const pieces = Array.isArray(raw) ? raw.map(String) : typeof raw === "string" ? [raw] : [];
+        const clean = pieces
+          .map((piece) => piece.replace(/StudyMaterial_/g, "").replace(/_key$/g, ""))
+          .filter(Boolean);
+        if (clean.length > 0) fieldHint = clean.join(", ");
+      }
+      const friendly =
+        fieldHint && /storageUrl|storage_url|storage-url/i.test(fieldHint)
+          ? "The PDF link / storage URL you entered is already attached to an existing library entry. Please use a different URL or edit the existing record instead."
+          : fieldHint && /slug|title/i.test(fieldHint)
+            ? `A library entry with the same ${fieldHint} already exists. Please use a different ${fieldHint}.`
+            : fieldHint
+              ? `A library entry with the same ${fieldHint} already exists. Please adjust that field and try again.`
+              : "A library entry with matching unique fields already exists. Please check the PDF link / suit number and try again.";
+      return {
+        status: 409,
+        code: "LIBRARY_UNIQUE_CONSTRAINT_VIOLATION",
+        message: friendly
+      };
+    }
     case "TRANSACTION_CONFLICT":
       return {
         status: 409,
         code: "LIBRARY_TRANSACTION_CONFLICT",
-        message: "Another admin may have saved a law report at the same time. Please try again."
+        message:
+          "The save couldn't be committed right now. This usually means a momentary race with another write — wait 3–5 seconds then click Save again. If the problem persists, refresh the page and try once more."
       };
     case "DATABASE_UNAVAILABLE":
       return {
