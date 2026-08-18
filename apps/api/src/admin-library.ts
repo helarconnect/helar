@@ -1157,19 +1157,23 @@ export async function listAdminLibraryMaterials(
   const reportNumberedSection = isReportNumberedSection(section);
   const isAdminAudience = audience === "admin";
 
-  // Deterministic, audience-safe sort builder:
-  //   - For `reportNumber` sorted sections we use NULLS LAST so legacy PDFs
-  //     without a serial never float to the top of DESC order (default in
-  //     Postgres is NULLS FIRST for DESC, which puts newly uploaded
-  //     Helar-2026-1181 at position 2+ behind a single pre-refactor legacy
-  //     entry with no reportNumber).
-  //   - Always append `createdAt desc, id asc` as a tiebreaker so two
-  //     materials with identical sort values never re-order across pages.
+  // Deterministic, cross-database sort builder.
+  // NOTE: `nulls: "first" / "last"` exists on Prisma generated client types but the
+  //       MongoDB adapter does NOT support this field at runtime — it throws an
+  //       "Unknown argument `nulls`" validation error (P2009). MongoDB BSON sort
+  //       semantics already put STRING > NULL in DESC order, so a plain
+  //       `{ reportNumber: "desc" }` yields exactly the desired "nulls last"
+  //       ordering for legacy materials without a serial number, without needing
+  //       the PostgreSQL-specific `nulls` key. PostgreSQL users would need a
+  //       computed column or post-query reorder to match; since this deployment
+  //       is MongoDB Atlas, the simple form is both correct and portable.
+  // We always append `createdAt desc, id asc` as a tiebreaker so two materials
+  // with identical sort values never re-order across pages / calls.
   const orderBy: Array<Prisma.StudyMaterialOrderByWithRelationInput> = (() => {
     const direction: Prisma.SortOrder = filters.sortOrder;
     if (filters.sortBy === "reportNumber") {
       return [
-        { reportNumber: { sort: direction, nulls: "last" as const } },
+        { reportNumber: direction },
         { createdAt: "desc" as const },
         { id: "asc" as const }
       ] as Array<Prisma.StudyMaterialOrderByWithRelationInput>;
@@ -1183,7 +1187,7 @@ export async function listAdminLibraryMaterials(
     }
     if (filters.sortBy === "estimatedMins") {
       return [
-        { estimatedMins: { sort: direction, nulls: "last" as const } },
+        { estimatedMins: direction },
         { createdAt: "desc" as const },
         { id: "asc" as const }
       ] as Array<Prisma.StudyMaterialOrderByWithRelationInput>;
