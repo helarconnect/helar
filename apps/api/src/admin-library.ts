@@ -1122,99 +1122,221 @@ export async function listAdminLibraryMaterials(
   const reportNumberedSection = isReportNumberedSection(section);
   const isAdminAudience = audience === "admin";
 
-  // Deterministic, cross-database sort builder.
-  // NOTE: `nulls: "first" / "last"` exists on Prisma generated client types but the
-  //       MongoDB adapter does NOT support this field at runtime — it throws an
-  //       "Unknown argument `nulls`" validation error (P2009). MongoDB BSON sort
-  //       semantics already put STRING > NULL in DESC order, so a plain
-  //       `{ reportNumber: "desc" }` yields exactly the desired "nulls last"
-  //       ordering for legacy materials without a serial number, without needing
-  //       the PostgreSQL-specific `nulls` key. PostgreSQL users would need a
-  //       computed column or post-query reorder to match; since this deployment
-  //       is MongoDB Atlas, the simple form is both correct and portable.
-  // We always append `createdAt desc, id asc` as a tiebreaker so two materials
-  // with identical sort values never re-order across pages / calls.
-  const orderBy: Array<Prisma.StudyMaterialOrderByWithRelationInput> = (() => {
-    const direction: Prisma.SortOrder = filters.sortOrder;
-    if (filters.sortBy === "reportNumber") {
-      return [
-        { reportNumber: direction },
-        { createdAt: "desc" as const },
-        { id: "asc" as const }
-      ] as Array<Prisma.StudyMaterialOrderByWithRelationInput>;
-    }
-    if (filters.sortBy === "title") {
-      return [
-        { title: direction },
-        { createdAt: "desc" as const },
-        { id: "asc" as const }
-      ] as Array<Prisma.StudyMaterialOrderByWithRelationInput>;
-    }
-    if (filters.sortBy === "estimatedMins") {
-      return [
-        { estimatedMins: direction },
-        { createdAt: "desc" as const },
-        { id: "asc" as const }
-      ] as Array<Prisma.StudyMaterialOrderByWithRelationInput>;
-    }
-    return [
-      { [filters.sortBy]: direction },
-      { id: "asc" as const }
-    ] as Array<Prisma.StudyMaterialOrderByWithRelationInput>;
-  })();
+  // Sort modes — two hot paths:
+  //   A) `reportNumber` on a numbered section (Law Reports / Helarpedia): the
+  //      serial is a string like `Helar-2026-1204`. MongoDB string sort would
+  //      lex-compare characters and rank `Helar-2026-999` HIGHER than
+  //      `Helar-2026-1200` because character `'9' > '1'` at position 11, which
+  //      is exactly the opposite of what users expect when they say "display
+  //      the bracket number in DESC order". Correct fix is to:
+  //        1. fetch the 3 smallest scalar columns (`id`, `reportNumber`,
+  //           `createdAt`) for all matching rows (Atlas WiredTiger fully caches
+  //           this tiny projection for repeated loads — it is not a "fetch the
+  //           world" call even at 10k rows, and 10k law reports is decades of
+  //           uploads),
+  //        2. in memory, sort by `integer suffix of reportNumber` DESC
+  //           (null / malformed → -Infinity so they sink to the bottom, matching
+  //           the previous "nulls last" behaviour), then `createdAt DESC`,
+  //           then `id ASC` as a tiebreaker so pages never reorder,
+  //        3. slice the exact page of ids, hydrate it with the existing
+  //           audience-specific `select`/`include`, then reorder the hydrated
+  //           page rows to match the id slice (Prisma `where id in` does not
+  //           guarantee order).
+  //   B) Every other sort (title / createdAt / estimatedMins / updatedAt, OR
+  //      reportNumber on a non-numbered fallback): use native Prisma `orderBy`
+  //      + `count` + `skip/take` (single round trip, zero JS work).
+  const useNumericSerialSort = reportNumberedSection && filters.sortBy === "reportNumber";
 
-  // Student/portal list pages only need pagination plus the current page of
-  // materials. Every auxiliary query we skip on this hot path shaves another
-  // 50-200ms off a cold page load, which matters when a reader is deciding
-  // whether to stay. The admin dashboard renders 6 summary cards and needs
-  // the full picture — those queries only run when audience === "admin".
-  const [totalItems, materials] = await Promise.all([
-    prisma.studyMaterial.count({ where }),
-    prisma.studyMaterial.findMany(
-      (() => {
-        const base = {
-          where,
-          orderBy,
-          skip: (filters.page - 1) * filters.pageSize,
-          take: filters.pageSize
-        } as const;
-        if (isAdminAudience) {
-          return {
-            ...base,
-            include: {
-              _count: {
-                select: {
-                  bookmarks: true,
-                  readingHistory: true
-                }
-              }
-            }
-          };
-        }
-        return {
-          ...base,
-          select: {
-            approvedAt: true,
-            body: true,
-            createdAt: true,
-            downloadable: true,
-            estimatedMins: true,
-            id: true,
-            materialType: true,
-            publicationStatus: true,
-            reportDate: true,
-            reportNumber: true,
-            reviewFeedback: true,
-            sharingEnabled: true,
-            storageUrl: true,
-            summary: true,
-            title: true,
-            updatedAt: true
-          }
+  // Shared helper: given a list of raw materials in arbitrary id-in hydration
+  // order, reorder them so they match the exact page-id order computed by the
+  // sort step. This also filters out any row that Prisma returned but isn't in
+  // the requested page (shouldn't happen, but idempotent as a safeguard).
+  const reorderHydratedPageByIds = <T extends { id: string }>(rows: Array<T>, orderedIds: Array<string>): Array<T> => {
+    const byId = new Map<string, T>(rows.map((row) => [row.id, row]));
+    return orderedIds.map((id) => byId.get(id)).filter((row): row is T => Boolean(row));
+  };
+
+  const [totalItems, materials] = useNumericSerialSort
+    ? await (async (): Promise<[number, Array<Record<string, unknown>>]> => {
+        // Step 1: tiny 3-column fetch for the complete match set, with the
+        // values we need to compute a deterministic numeric serial sort.
+        const serialRows = await prisma.studyMaterial.findMany({
+          select: { id: true, reportNumber: true, createdAt: true },
+          where
+        });
+        const directionMul = filters.sortOrder === "desc" ? -1 : 1;
+        // Parse the integer suffix `NNNN` out of `Helar-YYYY-NNNN`. Matches
+        // the last run of digits at the tail of the string, which works even
+        // if someone later tweaks the prefix to e.g. `Helar-2026/11-NNNN`.
+        // Returns -Infinity for null / missing / non-matching values so those
+        // rows always sort after any valid serial in DESC order.
+        const parseSerialSuffix = (rn: string | null): number => {
+          if (!rn) return Number.NEGATIVE_INFINITY;
+          const match = rn.match(/(\d+)\s*$/);
+          if (!match) return Number.NEGATIVE_INFINITY;
+          const parsed = Number.parseInt(match[1], 10);
+          return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
         };
-      })() as never
-    )
-  ]);
+        const createdAtMs = (row: { createdAt: Date | string }): number =>
+          (row.createdAt instanceof Date ? row.createdAt : new Date(row.createdAt)).getTime();
+        const sortedSerialRows = [...serialRows].sort((left, right) => {
+          const sCmp = (parseSerialSuffix(left.reportNumber) - parseSerialSuffix(right.reportNumber)) * directionMul;
+          if (sCmp !== 0) return sCmp;
+          const cCmp = (createdAtMs(left) - createdAtMs(right)) * (filters.sortOrder === "desc" ? -1 : 1);
+          if (cCmp !== 0) return cCmp;
+          return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+        });
+        const orderedAllIds = sortedSerialRows.map((row) => row.id);
+        const pageStart = Math.max(0, (filters.page - 1) * filters.pageSize);
+        const pageEnd = pageStart + filters.pageSize;
+        const pageIds = orderedAllIds.slice(pageStart, pageEnd);
+        // Step 2: hydrate only the current page of ids using the exact same
+        // audience-shape logic as the fast-path branch (admin gets _count
+        // include, student gets the lean select). 100% shape parity.
+        if (pageIds.length === 0) {
+          return [orderedAllIds.length, []];
+        }
+        const hydrated = await prisma.studyMaterial.findMany(
+          (() => {
+            const base = {
+              where: { id: { in: pageIds } }
+            } as const;
+            if (isAdminAudience) {
+              return {
+                ...base,
+                include: {
+                  _count: {
+                    select: {
+                      bookmarks: true,
+                      readingHistory: true
+                    }
+                  }
+                }
+              };
+            }
+            return {
+              ...base,
+              select: {
+                approvedAt: true,
+                body: true,
+                createdAt: true,
+                downloadable: true,
+                estimatedMins: true,
+                id: true,
+                materialType: true,
+                publicationStatus: true,
+                reportDate: true,
+                reportNumber: true,
+                reviewFeedback: true,
+                sharingEnabled: true,
+                storageUrl: true,
+                summary: true,
+                title: true,
+                updatedAt: true
+              }
+            };
+          })() as never
+        );
+        // Step 3: `where id in` does not guarantee order. Put rows back into
+        // the exact numeric-serial order we computed above so the page
+        // renders highest bracket number first (Helar-2026-1200 > 999).
+        const orderedPage = reorderHydratedPageByIds(hydrated as Array<{ id: string } & Record<string, unknown>>, pageIds);
+        return [orderedAllIds.length, orderedPage];
+      })()
+    : await (async (): Promise<[number, Array<Record<string, unknown>>]> => {
+        // Fast native Prisma path for every other sort (title / createdAt /
+        // updatedAt / estimatedMins, or reportNumber on a non-numbered
+        // section where lexicographic sort is perfectly fine).
+        // Deterministic, cross-database sort builder.
+        // NOTE: `nulls: "first" / "last"` exists on Prisma generated client types but the
+        //       MongoDB adapter does NOT support this field at runtime — it throws an
+        //       "Unknown argument `nulls`" validation error (P2009). MongoDB BSON sort
+        //       semantics already put STRING > NULL in DESC order, so a plain
+        //       `{ reportNumber: "desc" }` yields exactly the desired "nulls last"
+        //       ordering for legacy materials without a serial number, without needing
+        //       the PostgreSQL-specific `nulls` key. PostgreSQL users would need a
+        //       computed column or post-query reorder to match; since this deployment
+        //       is MongoDB Atlas, the simple form is both correct and portable.
+        // We always append `createdAt desc, id asc` as a tiebreaker so two materials
+        // with identical sort values never re-order across pages / calls.
+        const orderBy: Array<Prisma.StudyMaterialOrderByWithRelationInput> = (() => {
+          const direction: Prisma.SortOrder = filters.sortOrder;
+          if (filters.sortBy === "reportNumber") {
+            return [
+              { reportNumber: direction },
+              { createdAt: "desc" as const },
+              { id: "asc" as const }
+            ] as Array<Prisma.StudyMaterialOrderByWithRelationInput>;
+          }
+          if (filters.sortBy === "title") {
+            return [
+              { title: direction },
+              { createdAt: "desc" as const },
+              { id: "asc" as const }
+            ] as Array<Prisma.StudyMaterialOrderByWithRelationInput>;
+          }
+          if (filters.sortBy === "estimatedMins") {
+            return [
+              { estimatedMins: direction },
+              { createdAt: "desc" as const },
+              { id: "asc" as const }
+            ] as Array<Prisma.StudyMaterialOrderByWithRelationInput>;
+          }
+          return [
+            { [filters.sortBy]: direction },
+            { id: "asc" as const }
+          ] as Array<Prisma.StudyMaterialOrderByWithRelationInput>;
+        })();
+
+        const [count, rows] = await Promise.all([
+          prisma.studyMaterial.count({ where }),
+          prisma.studyMaterial.findMany(
+            (() => {
+              const base = {
+                where,
+                orderBy,
+                skip: (filters.page - 1) * filters.pageSize,
+                take: filters.pageSize
+              } as const;
+              if (isAdminAudience) {
+                return {
+                  ...base,
+                  include: {
+                    _count: {
+                      select: {
+                        bookmarks: true,
+                        readingHistory: true
+                      }
+                    }
+                  }
+                };
+              }
+              return {
+                ...base,
+                select: {
+                  approvedAt: true,
+                  body: true,
+                  createdAt: true,
+                  downloadable: true,
+                  estimatedMins: true,
+                  id: true,
+                  materialType: true,
+                  publicationStatus: true,
+                  reportDate: true,
+                  reportNumber: true,
+                  reviewFeedback: true,
+                  sharingEnabled: true,
+                  storageUrl: true,
+                  summary: true,
+                  title: true,
+                  updatedAt: true
+                }
+              };
+            })() as never
+          )
+        ]);
+        return [count, rows as Array<Record<string, unknown>>];
+      })();
 
   // ---- Admin-only engagement counters (read-through process cache) --------
   let nextReportNumber: string | null = null;
