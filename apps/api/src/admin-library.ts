@@ -384,8 +384,32 @@ function assertStorageUrlFilledForSection(section: AdminLibrarySection, storageU
   ]);
 }
 
-async function ensureAdminLibraryCategories() {
-  return Promise.all(
+// Caching guard so `ensureAdminLibraryCategories` — which does 4 category
+// upserts into Postgres — runs at MOST once every 5 minutes per process.
+// Without this cache every law-reports list/detail + helarpedia list/detail
+// request triggered 4 writes on the hot path and added 40-120ms of latency.
+let cachedEnsureCategoriesPromise: Promise<unknown> | null = null;
+let cachedEnsureCategoriesAt = 0;
+const CATEGORY_CACHE_MS = 5 * 60 * 1000;
+
+type SectionCategory = {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt: Date | null;
+};
+
+async function ensureAdminLibraryCategories(): Promise<Array<SectionCategory>> {
+  const now = Date.now();
+  if (cachedEnsureCategoriesPromise && now - cachedEnsureCategoriesAt < CATEGORY_CACHE_MS) {
+    return cachedEnsureCategoriesPromise as Promise<Array<SectionCategory>>;
+  }
+
+  cachedEnsureCategoriesAt = now;
+  cachedEnsureCategoriesPromise = Promise.all(
     Object.values(adminLibrarySectionConfig).map((section) =>
       prisma.category.upsert({
         where: {
@@ -403,6 +427,7 @@ async function ensureAdminLibraryCategories() {
       })
     )
   );
+  return cachedEnsureCategoriesPromise as Promise<Array<SectionCategory>>;
 }
 
 async function getSectionCategory(section: AdminLibrarySection) {

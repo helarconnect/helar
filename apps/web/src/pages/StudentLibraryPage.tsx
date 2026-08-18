@@ -500,21 +500,6 @@ export function StudentLawReportsPage() {
                           Read report
                           <ExternalLink className="h-4 w-4" />
                         </Link>
-                        {material.downloadable ? (
-                          <a
-                            className={cn(
-                              "inline-flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium transition",
-                              isDark
-                                ? "border-slate-700 bg-slate-950 text-slate-200 hover:border-slate-600"
-                                : "border-slate-200 bg-white text-slate-950 shadow-sm hover:bg-slate-50"
-                            )}
-                            href={material.storageUrl}
-                            rel="noreferrer"
-                            target="_blank"
-                          >
-                            Download PDF
-                          </a>
-                        ) : null}
                       </div>
                     </div>
                   </div>

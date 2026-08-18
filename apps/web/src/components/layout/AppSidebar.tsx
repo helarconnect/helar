@@ -1,13 +1,25 @@
 import { BookOpenText, CheckSquare, ChevronDown, X } from 'lucide-react'
 import { NavLink, useLocation } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 
 import { BrandMark } from '@/components/ui/BrandMark'
 import { useTheme } from '@/hooks/useTheme'
+import { fetchLibraryHelarpedia, fetchLibraryLawReports } from '@/lib/admin-api'
 import { getDashboardNav } from '@/lib/mock-api'
+import { queryKeys } from '@/lib/query-keys'
 import { cn, hasAdminAccess, isContentAdmin, isSuperAdmin } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth-store'
 import { useUiStore } from '@/store/ui-store'
+
+const defaultLibraryFilters = {
+  materialType: "all" as const,
+  page: 1,
+  pageSize: 12,
+  search: "",
+  sortBy: "reportNumber" as const,
+  sortOrder: "desc" as const
+};
 
 type SidebarNavItem = { href: string; label: string }
 type SidebarNavGroup = { label: string; children: SidebarNavItem[] }
@@ -18,6 +30,7 @@ export function AppSidebar() {
   const session = useAuthStore((state) => state.session)
   const { isDark } = useTheme()
   const location = useLocation()
+  const queryClient = useQueryClient()
   const roleCodes = session?.user.roleCodes ?? []
   const userName = session?.user.fullName ?? 'Chidi Adebayo'
   const isAdminWorkspace = hasAdminAccess(roleCodes)
@@ -29,6 +42,29 @@ export function AppSidebar() {
         ? 'Admin workspace'
         : 'Student workspace'
   const navigationItems = getDashboardNav(roleCodes)
+
+  // Prefetch both library list results once per session mount.
+  // Prefetch the first page of law reports and Helarpedia after the layout
+  // first renders on user mount so clicking the menu item.
+  const firstPageLawReportsCacheKey = useMemo(
+    () => JSON.stringify(defaultLibraryFilters),
+    []
+  )
+  useEffect(() => {
+    // Student workspace only mounts once per mount.
+    // Both audiences have a query caches the lists for ~30s - 60s, so subsequent clicks are
+    // clicks to from cache within that window are instant.
+    void queryClient.prefetchQuery({
+      queryKey: queryKeys.adminLibrary('student-law-reports', defaultLibraryFilters),
+      queryFn: () => fetchLibraryLawReports(defaultLibraryFilters),
+      staleTime: 60_000,
+    })
+    void queryClient.prefetchQuery({
+      queryKey: queryKeys.adminLibrary('student-helarpedia', defaultLibraryFilters),
+      queryFn: () => fetchLibraryHelarpedia(defaultLibraryFilters),
+      staleTime: 60_000,
+    })
+  }, [queryClient, firstPageLawReportsCacheKey])
   const [isLibraryOpen, setIsLibraryOpen] = useState(
     location.pathname.startsWith('/app/admin/library') || location.pathname.startsWith('/app/library'),
   )
@@ -236,6 +272,22 @@ export function AppSidebar() {
                         (isDark ? 'border-white/10 bg-white/10 text-white' : 'border-slate-200 bg-white text-slate-950'),
                     )}
                     onClick={() => setIsLibraryOpen((current) => !current)}
+                    onMouseEnter={() => {
+                      // Warm the cache the moment the user hovers over the
+                      // Library dropdown so the list is ready before they
+                      // click the sub-item. By the time the menu animates open
+                      // the first-page response has usually already arrived.
+                      void queryClient.prefetchQuery({
+                        queryKey: queryKeys.adminLibrary('student-law-reports', defaultLibraryFilters),
+                        queryFn: () => fetchLibraryLawReports(defaultLibraryFilters),
+                        staleTime: 60_000,
+                      })
+                      void queryClient.prefetchQuery({
+                        queryKey: queryKeys.adminLibrary('student-helarpedia', defaultLibraryFilters),
+                        queryFn: () => fetchLibraryHelarpedia(defaultLibraryFilters),
+                        staleTime: 60_000,
+                      })
+                    }}
                     type="button"
                   >
                     <span className="flex items-center gap-3">
@@ -262,6 +314,25 @@ export function AppSidebar() {
                               )
                             }
                             onClick={closeSidebar}
+                            onMouseEnter={() => {
+                              // Warm each section-specific list as the user
+                              // hovers the submenu row — this fires even if
+                              // the Library trigger was never hovered (e.g.
+                              // dropdown already expanded from a previous visit).
+                              if (libraryItem.href.includes('/law-reports')) {
+                                void queryClient.prefetchQuery({
+                                  queryKey: queryKeys.adminLibrary('student-law-reports', defaultLibraryFilters),
+                                  queryFn: () => fetchLibraryLawReports(defaultLibraryFilters),
+                                  staleTime: 60_000,
+                                })
+                              } else if (libraryItem.href.includes('/helarpedia')) {
+                                void queryClient.prefetchQuery({
+                                  queryKey: queryKeys.adminLibrary('student-helarpedia', defaultLibraryFilters),
+                                  queryFn: () => fetchLibraryHelarpedia(defaultLibraryFilters),
+                                  staleTime: 60_000,
+                                })
+                              }
+                            }}
                             to={libraryItem.href}
                           >
                             {libraryItem.label}
