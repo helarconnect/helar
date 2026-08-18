@@ -1204,6 +1204,52 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
     queryFn: () => fetchAdminLibraryMaterials(section, filters),
     staleTime: 20_000
   });
+  useEffect(() => {
+    const error = materialsQuery.error;
+    if (!error) return;
+    // #region debug-point A:admin-materials-query-error
+    fetch("http://127.0.0.1:7777/event", {
+      method: "POST",
+      body: JSON.stringify({
+        sessionId: "law-reports-not-loading",
+        runId: "pre",
+        hypothesisId: "A",
+        location: "AdminLibraryWorkspace.tsx:materialsQuery-error-useEffect",
+        msg: "[DEBUG] Admin library workspace materialsQuery error detected",
+        data: {
+          section,
+          filters: {
+            sortBy: filters.sortBy,
+            sortOrder: filters.sortOrder,
+            page: filters.page,
+            pageSize: filters.pageSize
+          },
+          errorClass: error instanceof Error ? error.constructor.name : typeof error,
+          httpStatus:
+            error && typeof error === "object" && "response" in error
+              ? ((error as { response?: { status?: number } }).response?.status ?? null)
+              : null,
+          serverErrorCode:
+            (error &&
+              typeof error === "object" &&
+              "response" in error &&
+              (error as { response?: { data?: { error?: { code?: unknown } } } }).response?.data
+                ?.error?.code) ??
+            null,
+          serverErrorMessage:
+            (error &&
+              typeof error === "object" &&
+              "response" in error &&
+              (error as { response?: { data?: { error?: { message?: unknown } } } }).response?.data
+                ?.error?.message) ??
+            null,
+          rawErrorString: String(error)
+        },
+        ts: Date.now()
+      })
+    }).catch(() => {});
+    // #endregion
+  }, [materialsQuery.error, section, filters.sortBy, filters.sortOrder, filters.page, filters.pageSize]);
 
   useEffect(() => {
     if (!numberedSection || editingMaterial || !isModalOpen) {
