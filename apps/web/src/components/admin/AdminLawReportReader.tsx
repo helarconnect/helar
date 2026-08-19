@@ -611,10 +611,14 @@ export function AdminLawReportReader() {
       return;
     }
 
+    // Use correct section path for deep links — Helarpedia uses /helarpedia/,
+    // law reports use /law-reports/ to preserve context when sharing across
+    // the two numbered citation series.
+    const sectionSlug = isHelarpedia ? "helarpedia" : "law-reports";
     const basePath =
       report?.publicationStatus === "PUBLISHED"
-        ? `/app/library/law-reports/${materialId}`
-        : `/app/admin/library/law-reports/${materialId}`;
+        ? `/app/library/${sectionSlug}/${materialId}`
+        : `/app/admin/library/${sectionSlug}/${materialId}`;
     const url = new URL(`${window.location.origin}${basePath}`);
     url.hash = paragraphId;
     url.searchParams.set("dl", createShareToken());
@@ -977,7 +981,9 @@ export function AdminLawReportReader() {
             <ArrowLeft className="h-4 w-4" />
             {backLabel}
           </Link>
-          <p className={cn("mt-4 text-xs uppercase tracking-[0.24em]", isDark ? "text-slate-500" : "text-slate-400")}>Law report reader</p>
+          <p className={cn("mt-4 text-xs uppercase tracking-[0.24em]", isDark ? "text-slate-500" : "text-slate-400")}>
+            {isHelarpedia ? "Helarpedia entry reader" : "Law report reader"}
+          </p>
           <h1 className={cn("mt-2 font-heading text-3xl sm:text-4xl leading-tight break-words max-w-full", isDark ? "text-white" : "text-slate-950")}>
             {renderHighlightedText(report.title, searchTerm, highlightClassName, "title")}
           </h1>
@@ -1064,7 +1070,9 @@ export function AdminLawReportReader() {
               </div>
             ) : null}
             <section ref={summaryRef}>
-              <p className={cn("text-xs uppercase tracking-[0.22em]", isDark ? "text-slate-500" : "text-slate-400")}>Summary</p>
+              <p className={cn("text-xs uppercase tracking-[0.22em]", isDark ? "text-slate-500" : "text-slate-400")}>
+                {isHelarpedia ? "Definition / Summary" : "Summary"}
+              </p>
               {stripHtml(report.summary) ? (
                 <div
                   className={cn(
@@ -1074,7 +1082,14 @@ export function AdminLawReportReader() {
                   dangerouslySetInnerHTML={{ __html: highlightedSummary }}
                 />
               ) : (
-                <EmptyState isDark={isDark} message={`No summary has been added to this ${singularNoun} yet.`} />
+                <EmptyState
+                  isDark={isDark}
+                  message={
+                    isHelarpedia
+                      ? `No definition or summary has been added to this Helarpedia entry yet.`
+                      : `No summary has been added to this ${singularNoun} yet.`
+                  }
+                />
               )}
             </section>
           </Surface>
@@ -1082,7 +1097,13 @@ export function AdminLawReportReader() {
           <Surface className="p-5 sm:p-6 lg:p-7 min-w-0 overflow-hidden" isDark={isDark}>
             <section ref={bodyRef}>
               <p className={cn("text-xs uppercase tracking-[0.22em]", isDark ? "text-slate-500" : "text-slate-400")}>
-                {isStudentReader && contentAccess?.isPreview ? "Full report locked" : "Full report"}
+                {isStudentReader && contentAccess?.isPreview
+                  ? isHelarpedia
+                    ? "Related cases locked"
+                    : "Full report locked"
+                  : isHelarpedia
+                    ? "Related cases"
+                    : "Full report"}
               </p>
               {stripHtml(report.body) ? (
                 <div
@@ -1158,8 +1179,12 @@ export function AdminLawReportReader() {
                   isDark={isDark}
                   message={
                     isStudentReader && contentAccess?.isPreview
-                      ? `Subscribe to unlock the full ${singularNoun} body after the preview.`
-                      : `This ${singularNoun} does not have a full body yet.`
+                      ? isHelarpedia
+                        ? `Subscribe to unlock the full related cases and authorities for this Helarpedia entry.`
+                        : `Subscribe to unlock the full ${singularNoun} body after the preview.`
+                      : isHelarpedia
+                        ? `This Helarpedia entry does not have related cases and authorities added yet.`
+                        : `This ${singularNoun} does not have a full body yet.`
                   }
                 />
               )}
@@ -1169,7 +1194,9 @@ export function AdminLawReportReader() {
 
         <aside className="xl:h-full xl:min-h-0 xl:self-start">
           <Surface className="overflow-hidden p-5 xl:flex xl:h-full xl:min-h-0 xl:max-h-full xl:flex-col" isDark={isDark}>
-            <p className={cn("text-xs uppercase tracking-[0.22em]", isDark ? "text-slate-500" : "text-slate-400")}>Search report</p>
+            <p className={cn("text-xs uppercase tracking-[0.22em]", isDark ? "text-slate-500" : "text-slate-400")}>
+              {isHelarpedia ? "Search entry" : "Search report"}
+            </p>
             <label
               className={cn(
                 "mt-4 flex items-center gap-3 rounded-2xl border px-4 py-3",
@@ -1183,7 +1210,11 @@ export function AdminLawReportReader() {
                   isDark ? "text-white placeholder:text-slate-500" : "text-slate-950 placeholder:text-slate-400"
                 )}
                 onChange={(event) => setSearchTerm(event.target.value)}
-                placeholder="Search all contents of this report"
+                placeholder={
+                  isHelarpedia
+                    ? "Search definition, related cases, and metadata"
+                    : "Search all contents of this report"
+                }
                 type="text"
                 value={searchTerm}
               />
@@ -1198,7 +1229,8 @@ export function AdminLawReportReader() {
             >
               {!searchTerm.trim() ? (
                 <p className={cn("text-sm leading-7", isDark ? "text-slate-400" : "text-slate-600")}>
-                  Search across the overview, summary, and full body of this {singularNoun}.
+                  Search across the overview, definition/summary, and {isHelarpedia ? "related cases" : "full body"} of
+                  this {singularNoun}.
                 </p>
               ) : searchResults.length ? (
                 <div className="space-y-3">

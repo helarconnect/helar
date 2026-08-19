@@ -1,10 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  AlignCenter,
-  AlignLeft,
-  AlignRight,
   BarChart3,
-  Bold,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -13,14 +9,10 @@ import {
   Eye,
   Pencil,
   ExternalLink,
-  Italic,
-  List,
-  ListOrdered,
   Plus,
   RefreshCw,
   Search,
   Trash2,
-  Underline,
   X
 } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
@@ -29,7 +21,6 @@ import { Link, useLocation, useSearchParams } from "react-router-dom";
 
 import { useTheme } from "@/hooks/useTheme";
 import {
-  ADMIN_LIBRARY_TRANSPORT_CHUNK_MAX_CHARS,
   clearAdminLibraryTransportChunks,
   createAdminLibraryMaterial,
   deleteAdminLibraryMaterial,
@@ -46,6 +37,7 @@ import {
 } from "@/lib/admin-api";
 import { queryKeys } from "@/lib/query-keys";
 import { cn, isContentAdmin } from "@/lib/utils";
+import { RichTextEditor } from "@/components/ui/RichTextEditor";
 import { useAuthStore } from "@/store/auth-store";
 
 type ToastTone = "error" | "success";
@@ -326,166 +318,6 @@ function IconActionButton({
   );
 }
 
-function RichTextField({
-  isDark,
-  label,
-  minHeight,
-  onChange,
-  placeholder,
-  value
-}: {
-  isDark: boolean;
-  label: string;
-  minHeight: number;
-  onChange: (value: string) => void;
-  placeholder: string;
-  value: string;
-}) {
-  const editorRef = useRef<HTMLDivElement | null>(null);
-  const colorInputRef = useRef<HTMLInputElement | null>(null);
-  const selectionRef = useRef<Range | null>(null);
-
-  useEffect(() => {
-    if (!editorRef.current || editorRef.current.innerHTML === value) {
-      return;
-    }
-
-    editorRef.current.innerHTML = value;
-  }, [value]);
-
-  function saveSelection() {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0) {
-      return;
-    }
-
-    const range = selection.getRangeAt(0);
-    if (!editorRef.current?.contains(range.commonAncestorContainer)) {
-      return;
-    }
-
-    selectionRef.current = range.cloneRange();
-  }
-
-  function restoreSelection() {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const range = selectionRef.current;
-    if (!range) {
-      return;
-    }
-
-    const selection = window.getSelection();
-    if (!selection) {
-      return;
-    }
-
-    selection.removeAllRanges();
-    selection.addRange(range);
-  }
-
-  function applyCommand(command: string, commandValue?: string) {
-    if (!editorRef.current) {
-      return;
-    }
-
-    editorRef.current.focus();
-    restoreSelection();
-    document.execCommand(command, false, commandValue);
-    onChange(editorRef.current.innerHTML);
-  }
-
-  const isEmpty = stripHtml(value).length === 0;
-
-  return (
-    <div className="space-y-1.5">
-      <span className={cn("text-xs font-medium uppercase tracking-[0.2em]", isDark ? "text-slate-500" : "text-slate-500")}>{label}</span>
-      <div className={cn("rounded-[24px] border", isDark ? "border-slate-700 bg-slate-900" : "border-slate-200 bg-slate-50")}>
-        <div className={cn("flex flex-wrap gap-2 border-b px-3 py-2.5", isDark ? "border-slate-700" : "border-slate-200")}>
-          {[
-            { command: "bold", icon: Bold, label: "Bold" },
-            { command: "italic", icon: Italic, label: "Italic" },
-            { command: "underline", icon: Underline, label: "Underline" },
-            { command: "justifyLeft", icon: AlignLeft, label: "Align left" },
-            { command: "justifyCenter", icon: AlignCenter, label: "Center" },
-            { command: "justifyRight", icon: AlignRight, label: "Align right" },
-            { command: "insertUnorderedList", icon: List, label: "Bullet list" },
-            { command: "insertOrderedList", icon: ListOrdered, label: "Numbered list" }
-          ].map((item) => {
-            const Icon = item.icon;
-
-            return (
-              <button
-                className={cn(
-                  "inline-flex h-9 w-9 items-center justify-center rounded-2xl border transition",
-                  isDark
-                    ? "border-slate-700 bg-slate-950 text-slate-200 hover:border-slate-600 hover:text-white"
-                    : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950"
-                )}
-                key={item.command}
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                  applyCommand(item.command);
-                }}
-                title={item.label}
-                type="button"
-              >
-                <Icon className="h-4 w-4" />
-              </button>
-            );
-          })}
-          <button
-            className={cn(
-              "inline-flex h-9 w-9 items-center justify-center rounded-2xl border text-xs font-semibold transition",
-              isDark
-                ? "border-slate-700 bg-slate-950 text-slate-200 hover:border-slate-600 hover:text-white"
-                : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950"
-            )}
-            onMouseDown={(event) => {
-              event.preventDefault();
-              saveSelection();
-              colorInputRef.current?.click();
-            }}
-            title="Text color"
-            type="button"
-          >
-            A
-          </button>
-          <input className="sr-only" onChange={(event) => applyCommand("foreColor", event.target.value)} ref={colorInputRef} type="color" />
-        </div>
-
-        <div
-          className="relative resize-y overflow-auto"
-          style={{ minHeight }}
-        >
-          {isEmpty ? (
-            <div className={cn("pointer-events-none absolute left-4 top-4 text-sm", isDark ? "text-slate-500" : "text-slate-400")}>
-              {placeholder}
-            </div>
-          ) : null}
-          <div
-            className={cn(
-              "rich-text-content h-full min-h-full w-full px-3.5 py-3 text-sm leading-6 outline-none",
-              isDark ? "text-white" : "text-slate-950"
-            )}
-            contentEditable
-            onInput={(event) => onChange(event.currentTarget.innerHTML)}
-            onKeyUp={saveSelection}
-            onMouseUp={saveSelection}
-            ref={editorRef}
-            suppressContentEditableWarning
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function LibraryMaterialModal({
   draft,
@@ -792,33 +624,35 @@ function LibraryMaterialModal({
             {numberedSection ? (
               <>
                 <div>
-                  <RichTextField
-                    isDark={isDark}
-                    label={isHelarpedia ? "Definition / summary" : "Summary"}
-                    minHeight={isHelarpedia ? 160 : 104}
-                    onChange={(value) => onChange("summary", value)}
-                    placeholder={
-                      isHelarpedia
-                        ? "Write the concise definition or legal explanation for this issue."
-                        : "Write a concise formatted summary for this report."
-                    }
-                    value={draft.summary}
-                  />
+                  <RichTextEditor
+                  isDark={isDark}
+                  label={isHelarpedia ? "Definition / summary" : "Summary"}
+                  minHeight={isHelarpedia ? 180 : 120}
+                  maxHeight={isHelarpedia ? 420 : 320}
+                  onChange={(value) => onChange("summary", value)}
+                  placeholder={
+                    isHelarpedia
+                      ? "Write the concise definition or legal explanation for this issue. Use headings for subsections, bullet points, and links to structure the content professionally."
+                      : "Write a concise formatted summary for this report. Use headings and bullet points to organise the summary."
+                  }
+                  value={draft.summary}
+                />
                 </div>
 
                 <div>
-                  <RichTextField
-                    isDark={isDark}
-                    label={isHelarpedia ? "Related cases" : "Body"}
-                    minHeight={isHelarpedia ? 200 : 128}
-                    onChange={(value) => onChange("body", value)}
-                    placeholder={
-                      isHelarpedia
-                        ? "List related case law citations, Helar-YYYY-NNN references, and supporting authorities here."
-                        : "Write the full law report body here."
-                    }
-                    value={draft.body}
-                  />
+                  <RichTextEditor
+                  isDark={isDark}
+                  label={isHelarpedia ? "Related cases" : "Body"}
+                  minHeight={isHelarpedia ? 240 : 160}
+                  maxHeight={isHelarpedia ? 600 : 520}
+                  onChange={(value) => onChange("body", value)}
+                  placeholder={
+                    isHelarpedia
+                      ? "List related case law citations, Helar-YYYY-NNN references, and supporting authorities here. Use headings, lists, and links to structure the content."
+                      : "Write the full law report body here. Use headings, paragraphs, and lists to organise the content."
+                  }
+                  value={draft.body}
+                />
                 </div>
 
                 <label
@@ -1767,7 +1601,29 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
                                 {isLawReports ? "Suit Number" : "Cross-reference"}: {material.storageUrl?.trim() ? material.storageUrl : "—"}
                               </p>
                               {stripHtml(material.summary) ? (
-                                <p className={cn("mt-3 line-clamp-2 text-sm leading-6", isDark ? "text-slate-300" : "text-slate-600")}>{stripHtml(material.summary)}</p>
+                                // For Helarpedia, render formatted rich text preview
+                                // with clamped height. For law reports, keep
+                                // plain-text line-clamp for compact admin view.
+                                isHelarpedia ? (
+                                  <div
+                                    className={cn(
+                                      "mt-3 text-sm leading-6 rich-text-preview rich-text-content overflow-hidden",
+                                      isDark ? "text-slate-300" : "text-slate-600"
+                                    )}
+                                    style={{
+                                      display: "-webkit-box",
+                                      WebkitLineClamp: 3,
+                                      WebkitBoxOrient: "vertical",
+                                      maxHeight: "5.5rem",
+                                      overflow: "hidden"
+                                    }}
+                                    dangerouslySetInnerHTML={{ __html: material.summary }}
+                                  />
+                                ) : (
+                                  <p className={cn("mt-3 line-clamp-2 text-sm leading-6", isDark ? "text-slate-300" : "text-slate-600")}>
+                                    {stripHtml(material.summary)}
+                                  </p>
+                                )
                               ) : null}
                             </>
                           ) : (

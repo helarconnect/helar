@@ -687,9 +687,28 @@ export function StudentHelarpediaPage() {
                         </div>
                       </div>
 
-                      <p className={cn("mt-4 line-clamp-4 text-sm leading-7", isDark ? "text-slate-300" : "text-slate-600")}>
-                        {stripHtml(material.summary) || "No definition has been added for this Helarpedia entry yet."}
-                      </p>
+                      {stripHtml(material.summary) ? (
+                        // Render formatted rich text preview for the Definition/Summary section
+                        // with controlled height to maintain consistent card layouts.
+                        <div
+                          className={cn(
+                            "mt-4 overflow-hidden text-sm leading-7 rich-text-preview rich-text-content",
+                            isDark ? "text-slate-300" : "text-slate-600"
+                          )}
+                          style={{
+                            display: "-webkit-box",
+                            WebkitLineClamp: 6,
+                            WebkitBoxOrient: "vertical",
+                            maxHeight: "10.5rem",
+                            overflow: "hidden"
+                          }}
+                          dangerouslySetInnerHTML={{ __html: material.summary }}
+                        />
+                      ) : (
+                        <p className={cn("mt-4 line-clamp-4 text-sm leading-7 italic", isDark ? "text-slate-500" : "text-slate-400")}>
+                          No definition has been added for this Helarpedia entry yet.
+                        </p>
+                      )}
 
                       <div className="mt-5 flex items-center justify-between gap-3">
                         <div className="flex items-center gap-3">
