@@ -1677,14 +1677,118 @@ export async function fetchPublishedSubjectSummaryCases(filters: PublishedSubjec
     if (status !== 404) {
       throw error;
     }
-    const response = await authenticatedHttp.get<{ success: true; data: PublishedSubjectSummaryCaseList }>(
-      "/api/v1/library/subject-summaries/cases",
-      {
-        params: { ...queryParams, caseType }
+    try {
+      const response = await authenticatedHttp.get<{ success: true; data: PublishedSubjectSummaryCaseList }>(
+        "/api/v1/library/subject-summaries/cases",
+        {
+          params: { ...queryParams, caseType }
+        }
+      );
+      return response.data.data;
+    } catch (fallbackError) {
+      const fallbackStatus = fallbackError && typeof fallbackError === "object" && "response" in fallbackError
+        ? (fallbackError as { response?: { status?: number } }).response?.status ?? null
+        : null;
+      if (fallbackStatus !== 404) {
+        throw fallbackError;
       }
-    );
-    return response.data.data;
+      return fetchPublishedSubjectSummaryCasesViaHierarchy(filters);
+    }
   }
+}
+
+async function fetchPublishedSubjectSummaryCasesViaHierarchy(filters: PublishedSubjectSummaryCaseFilters): Promise<PublishedSubjectSummaryCaseList> {
+  const page = filters.page ?? 1;
+  const pageSize = filters.pageSize ?? 20;
+  const search = (filters.search ?? "").trim().toLowerCase();
+  const sortBy = filters.sortBy ?? "updatedAt";
+  const sortOrder = filters.sortOrder ?? "desc";
+
+  const normalizeCaseType = (value: string | null | undefined) => {
+    const normalized = (value ?? "").trim().toLowerCase();
+    if (normalized === "handbook") return "HANDBOOK";
+    if (normalized === "textbook" || normalized === "textbooks") return "TEXTBOOK";
+    return null;
+  };
+
+  const requestedCaseType = filters.caseType ?? "all";
+  const hierarchy = await fetchPublishedSubjectSummaryHierarchy({ caseType: "all" });
+  const subjectIds = filters.subjectId ? [filters.subjectId] : hierarchy.items.map((item) => item.id);
+  const allCases: SubjectSummaryCase[] = [];
+
+  for (const subjectId of subjectIds) {
+    const topicsResponse = await fetchPublishedSubjectSummaryHierarchyTopics(subjectId, { caseType: "all" });
+    const topics = topicsResponse.items;
+    const topicIds = filters.topicId ? topics.filter((topic) => topic.id === filters.topicId).map((topic) => topic.id) : topics.map((topic) => topic.id);
+
+    for (const topicId of topicIds) {
+      const casesResponse = await fetchPublishedSubjectSummaryHierarchyCases(topicId, { caseType: "all" });
+      allCases.push(...casesResponse.items);
+    }
+  }
+
+  const matchesCaseType = (value: string | null | undefined) => {
+    if (requestedCaseType === "all") return true;
+    const normalized = normalizeCaseType(value);
+    return normalized === requestedCaseType;
+  };
+
+  const withCaseType = allCases.filter((item) => matchesCaseType(item.jurisdiction));
+  const subjects = Array.from(
+    new Map(withCaseType.map((item) => [item.subjectId, { id: item.subjectId, name: item.subject.name }])).values()
+  );
+  const topics = Array.from(
+    new Map(withCaseType.map((item) => [item.topicId, { id: item.topicId, name: item.topic.name, subjectId: item.subjectId }])).values()
+  );
+
+  let filtered = withCaseType;
+  if (filters.subjectId) {
+    filtered = filtered.filter((item) => item.subjectId === filters.subjectId);
+  }
+  if (filters.topicId) {
+    filtered = filtered.filter((item) => item.topicId === filters.topicId);
+  }
+  if (search) {
+    filtered = filtered.filter((item) => {
+      const value = `${item.title} ${item.citation ?? ""} ${item.court ?? ""} ${item.caseSummary ?? ""}`.toLowerCase();
+      return value.includes(search);
+    });
+  }
+
+  const sorted = [...filtered].sort((left, right) => {
+    const direction = sortOrder === "asc" ? 1 : -1;
+    if (sortBy === "title") {
+      return direction * left.title.localeCompare(right.title);
+    }
+    if (sortBy === "year") {
+      const leftYear = left.year ?? 0;
+      const rightYear = right.year ?? 0;
+      return direction * (leftYear - rightYear);
+    }
+    const leftDate = new Date(sortBy === "createdAt" ? left.createdAt : left.updatedAt).getTime();
+    const rightDate = new Date(sortBy === "createdAt" ? right.createdAt : right.updatedAt).getTime();
+    return direction * (leftDate - rightDate);
+  });
+
+  const totalItems = sorted.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const start = (safePage - 1) * pageSize;
+
+  return {
+    items: sorted.slice(start, start + pageSize),
+    pagination: {
+      page: safePage,
+      pageSize,
+      totalItems,
+      totalPages
+    },
+    subjects,
+    topics,
+    summary: {
+      totalCases: totalItems
+    }
+  };
 }
 
 export async function fetchSubjectSummaryHierarchyTopics(subjectId: string, params: SubjectSummaryHierarchyQuery = {}) {
