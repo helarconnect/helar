@@ -92,16 +92,6 @@ function stripHtml(value: string) {
     .trim();
 }
 
-// Word-level truncation helper (for admin question-card summaries).
-// Strip HTML first so formatting markup is not counted as words.
-function truncateWords(value: string, maxWords: number) {
-  const plain = stripHtml(value);
-  if (!plain) return { isTruncated: false, text: "" };
-  const words = plain.split(/\s+/).filter(Boolean);
-  if (words.length <= maxWords) return { isTruncated: false, text: words.join(" ") };
-  return { isTruncated: true, text: `${words.slice(0, maxWords).join(" ")}…` };
-}
-
 function buildDefaultDraft(subjectId: string): BarFinalExamQuestionInput {
   return {
     answer: "",
@@ -277,7 +267,7 @@ export function AdminBarFinalExamsMlsMcqPage() {
         <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-1">
             <h1 className={cn("text-xl font-semibold tracking-tight", isDark ? "text-white" : "text-slate-950")}>
-              Bar Final Exams NLS-MCQ (Q & A)
+              Bar Final Exams NLS
             </h1>
             <p className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-600")}>
               Select a subject and upload questions with their answers.
@@ -360,9 +350,11 @@ export function AdminBarFinalExamsMlsMcqPage() {
             ) : (
               <div className="space-y-3">
                 {sortedItems.map((item, index) => {
-                  // Admin cards use plain-text 150-word summaries (not rich
-                  // HTML preview) for fast scanning of large libraries.
-                  const summary = truncateWords(item.question, 150);
+                  // Admin cards show a ~100-word, 8-line clamped rich-HTML
+                  // preview so admins see question content WITH formatting
+                  // (bold case names, italic statutory refs, etc.) while
+                  // keeping cards scannable within the list.
+                  const hasContent = stripHtml(item.question).length > 0;
                   return (
                   <div
                     className={cn(
@@ -382,9 +374,24 @@ export function AdminBarFinalExamsMlsMcqPage() {
                         <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>
                           Question {index + 1}
                         </p>
-                        <p className={cn("text-sm font-medium leading-relaxed", isDark ? "text-white" : "text-slate-950")}>
-                          {summary.text || "No question content."}
-                        </p>
+                        {hasContent ? (
+                          <div
+                            className={cn(
+                              "overflow-hidden text-sm leading-7 rich-text-preview rich-text-content",
+                              isDark ? "text-slate-200" : "text-slate-900"
+                            )}
+                            style={{
+                              display: "-webkit-box",
+                              WebkitLineClamp: 8,
+                              WebkitBoxOrient: "vertical",
+                              maxHeight: "15rem",
+                              overflow: "hidden"
+                            }}
+                            dangerouslySetInnerHTML={{ __html: item.question }}
+                          />
+                        ) : (
+                          <p className={cn("text-sm leading-7 italic", isDark ? "text-slate-500" : "text-slate-500")}>No question content.</p>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-2">
