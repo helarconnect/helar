@@ -1592,6 +1592,7 @@ export async function getSubjectSummaryReadingInsights() {
 export async function autocompleteSubjectSummaries(query: SubjectSummaryAutocompleteQuery) {
   const caseTypeWhere = buildCaseTypeWhere(query.caseType);
   const caseTypeParam = query.caseType === "all" ? "" : `&caseType=${query.caseType}`;
+  const caseTypeCasePathParam = query.caseType === "all" ? "" : `?caseType=${query.caseType}`;
 
   const [subjects, topics, cases] = await Promise.all([
     prisma.subjectSummarySubject.findMany({
@@ -1712,7 +1713,7 @@ export async function autocompleteSubjectSummaries(query: SubjectSummaryAutocomp
       ...cases.map((item) => ({
         id: item.id,
         label: item.title,
-        path: `/app/admin/library/subject-summaries/cases/${item.id}`,
+        path: `/app/admin/library/subject-summaries/cases/${item.id}${caseTypeCasePathParam}`,
         subtitle: `${item.subject.name} / ${item.topic.name}`,
         type: "case" as const
       }))
@@ -1723,6 +1724,7 @@ export async function autocompleteSubjectSummaries(query: SubjectSummaryAutocomp
 export async function autocompletePublishedSubjectSummaries(query: SubjectSummaryAutocompleteQuery) {
   const caseTypeWhere = buildCaseTypeWhere(query.caseType);
   const caseTypeParam = query.caseType === "all" ? "" : `&caseType=${query.caseType}`;
+  const caseTypeCasePathParam = query.caseType === "all" ? "" : `?caseType=${query.caseType}`;
 
   const [subjects, topics, cases] = await Promise.all([
     prisma.subjectSummarySubject.findMany({
@@ -1853,7 +1855,7 @@ export async function autocompletePublishedSubjectSummaries(query: SubjectSummar
       ...cases.map((item) => ({
         id: item.id,
         label: item.title,
-        path: `/app/library/subject-summaries/cases/${item.id}`,
+        path: `/app/library/subject-summaries/cases/${item.id}${caseTypeCasePathParam}`,
         subtitle: `${item.subject.name} / ${item.topic.name}`,
         type: "case" as const
       }))

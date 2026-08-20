@@ -159,7 +159,7 @@ function StudentSubjectSummaryTopicItem({
                 <Link
                   className={cn("block rounded-[20px] border px-4 py-3 transition", isDark ? "border-slate-800 bg-slate-950 hover:border-slate-700" : "border-slate-200 bg-slate-50 hover:border-slate-300")}
                   key={item.id}
-                  to={`/app/library/subject-summaries/cases/${item.id}`}
+                  to={`/app/library/subject-summaries/cases/${item.id}?caseType=${caseType}`}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>

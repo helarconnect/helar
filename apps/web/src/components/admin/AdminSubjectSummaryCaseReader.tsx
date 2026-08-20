@@ -72,7 +72,7 @@ export function AdminSubjectSummaryCaseReader() {
   const { caseId } = useParams<{ caseId: string }>();
   const location = useLocation();
   const isStudentReader = location.pathname.startsWith("/app/library/");
-  const backPath = isStudentReader ? "/app/library/subject-summaries" : "/app/admin/library/subject-summaries";
+  const backPath = `${isStudentReader ? "/app/library/subject-summaries" : "/app/admin/library/subject-summaries"}${location.search}`;
   const backLabel = isStudentReader ? "Back to subject summaries" : "Back to hierarchy";
   const hasRestoredStudyProgressRef = useRef(false);
   const caseQuery = useQuery({

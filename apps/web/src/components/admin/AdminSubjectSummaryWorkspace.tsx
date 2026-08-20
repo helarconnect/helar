@@ -1014,6 +1014,7 @@ type HierarchyTopicSelection = {
 };
 
 function HierarchyTopicItem({
+  caseType,
   isDark,
   onAddCase,
   onDeleteCase,
@@ -1024,6 +1025,7 @@ function HierarchyTopicItem({
   selectedTopicId,
   topic
 }: {
+  caseType: "all" | SubjectSummaryCaseType;
   isDark: boolean;
   onAddCase: (selection: HierarchyTopicSelection) => void;
   onDeleteCase: (caseId: string) => void;
@@ -1038,8 +1040,8 @@ function HierarchyTopicItem({
   const isSelected = selectedTopicId === topic.id;
   const casesQuery = useQuery({
     enabled: isExpanded,
-    queryFn: () => fetchSubjectSummaryHierarchyCases(topic.id),
-    queryKey: queryKeys.subjectSummaryHierarchyCases(topic.id, {})
+    queryFn: () => fetchSubjectSummaryHierarchyCases(topic.id, { caseType }),
+    queryKey: queryKeys.subjectSummaryHierarchyCases(topic.id, { caseType })
   });
   const selection = {
     subjectId: topic.subjectId,
@@ -1136,7 +1138,7 @@ function HierarchyTopicItem({
                       "flex-1 rounded-[16px] pr-3 transition",
                       isDark ? "hover:text-white" : "hover:text-slate-950"
                     )}
-                    to={`/app/admin/library/subject-summaries/cases/${item.id}`}
+                    to={`/app/admin/library/subject-summaries/cases/${item.id}${caseType === "all" ? "" : `?caseType=${caseType}`}`}
                   >
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
@@ -1177,6 +1179,7 @@ function HierarchyTopicItem({
 }
 
 function HierarchySubjectItem({
+  caseType,
   isDark,
   onAddCase,
   onAddTopic,
@@ -1190,6 +1193,7 @@ function HierarchySubjectItem({
   selectedTopicId,
   subject
 }: {
+  caseType: "all" | SubjectSummaryCaseType;
   isDark: boolean;
   onAddCase: (selection: HierarchyTopicSelection) => void;
   onAddTopic: (subject: SubjectSummarySubject) => void;
@@ -1206,8 +1210,8 @@ function HierarchySubjectItem({
   const [isExpanded, setIsExpanded] = useState(false);
   const topicsQuery = useQuery({
     enabled: isExpanded,
-    queryFn: () => fetchSubjectSummaryHierarchyTopics(subject.id),
-    queryKey: queryKeys.subjectSummaryHierarchyTopics(subject.id, {})
+    queryFn: () => fetchSubjectSummaryHierarchyTopics(subject.id, { caseType }),
+    queryKey: queryKeys.subjectSummaryHierarchyTopics(subject.id, { caseType })
   });
 
   return (
@@ -1267,6 +1271,7 @@ function HierarchySubjectItem({
           ) : topicsQuery.data?.items.length ? (
             topicsQuery.data.items.map((topic) => (
               <HierarchyTopicItem
+                caseType={caseType}
                 isDark={isDark}
                 key={topic.id}
                 onAddCase={onAddCase}
@@ -1293,6 +1298,11 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
+  const selectedCaseType = searchParams.get("caseType") === "HANDBOOK"
+    ? "HANDBOOK"
+    : searchParams.get("caseType") === "TEXTBOOK"
+      ? "TEXTBOOK"
+      : "all";
   const incomingSearch = searchParams.get("search") ?? "";
   const incomingSubjectId = searchParams.get("subjectId") ?? "";
   const incomingTopicId = searchParams.get("topicId") ?? "";
@@ -1303,8 +1313,9 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
     search: incomingSearch,
     subjectId: incomingSubjectId
   });
-  const [caseFilters, setCaseFilters] = useState({
+  const [caseFilters, setCaseFilters] = useState<Required<SubjectSummaryCaseFilters>>({
     ...defaultCaseFilters,
+    caseType: selectedCaseType,
     search: incomingSearch,
     subjectId: incomingSubjectId,
     topicId: incomingTopicId
@@ -1353,8 +1364,8 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
   }
 
   const hierarchyQuery = useQuery({
-    queryFn: () => fetchSubjectSummaryHierarchy(),
-    queryKey: queryKeys.subjectSummaryHierarchy({})
+    queryFn: () => fetchSubjectSummaryHierarchy({ caseType: selectedCaseType }),
+    queryKey: queryKeys.subjectSummaryHierarchy({ caseType: selectedCaseType })
   });
 
   const readingInsightsQuery = useQuery({
@@ -1690,6 +1701,18 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
   }, [hierarchyQuery.data?.items, hierarchyQuery.data?.summary]);
 
   useEffect(() => {
+    setCaseFilters((current) =>
+      current.caseType === selectedCaseType
+        ? current
+        : {
+            ...current,
+            caseType: selectedCaseType,
+            page: 1
+          }
+    );
+  }, [selectedCaseType]);
+
+  useEffect(() => {
     const editCaseId = searchParams.get("editCase");
 
     if (!editCaseId || caseModalOpen || !casesQuery.data?.items.length) {
@@ -1989,7 +2012,7 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
                       )
                     }
                     key={item.href}
-                    to={item.href}
+                    to={`${item.href}${selectedCaseType === "all" ? "" : `?caseType=${selectedCaseType}`}`}
                   >
                     {item.label}
                   </NavLink>
@@ -2051,6 +2074,7 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
               ) : hierarchyQuery.data?.items.length ? (
                 hierarchyQuery.data.items.map((subject) => (
                   <HierarchySubjectItem
+                    caseType={selectedCaseType}
                     isDark={isDark}
                     key={subject.id}
                     onAddCase={(selection) => openCaseModal(undefined, selection)}
@@ -2512,7 +2536,7 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
                         <td className="px-4 py-4">{formatDate(item.updatedAt)}</td>
                         <td className="px-4 py-4">
                           <div className="flex items-center gap-2">
-                            <Link className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-300 bg-white text-slate-900 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:border-slate-600 dark:hover:bg-slate-800" to={`/app/admin/library/subject-summaries/cases/${item.id}`}>
+                            <Link className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-300 bg-white text-slate-900 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:border-slate-600 dark:hover:bg-slate-800" to={`/app/admin/library/subject-summaries/cases/${item.id}${caseFilters.caseType === "all" ? "" : `?caseType=${caseFilters.caseType}`}`}>
                               <Eye className="h-4 w-4" />
                             </Link>
                             <IconButton isDark={isDark} onClick={() => openCaseModal(item)} title="Edit case">
