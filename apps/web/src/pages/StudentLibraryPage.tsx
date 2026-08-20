@@ -990,6 +990,10 @@ export function StudentSubjectSummariesPage() {
             <div className={cn("rounded-[24px] border px-6 py-8 text-sm", isDark ? "border-slate-800 bg-slate-950 text-slate-400" : "border-slate-200 bg-slate-50 text-slate-600")}>
               Loading cases...
             </div>
+          ) : casesQuery.isError ? (
+            <div className={cn("rounded-[24px] border px-6 py-8 text-sm leading-7", isDark ? "border-rose-500/25 bg-rose-500/10 text-rose-100" : "border-rose-200 bg-rose-50 text-rose-700")}>
+              Could not load published {selectedCaseType === "HANDBOOK" ? "handbook" : "textbook"} cases right now. Please refresh the page.
+            </div>
           ) : visibleRows.length ? (
             <table className={cn("min-w-full text-left text-sm", isDark ? "text-slate-200" : "text-slate-700")}>
               <thead className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-400")}>
