@@ -128,6 +128,13 @@ export function AppSidebar() {
     }
   }, [location.pathname])
 
+  function normalizeCaseTypeValue(value: string | null | undefined) {
+    const normalized = (value ?? '').trim().toLowerCase()
+    if (normalized === 'handbook') return 'HANDBOOK'
+    if (normalized === 'textbook' || normalized === 'textbooks') return 'TEXTBOOK'
+    return 'TEXTBOOK'
+  }
+
   function isLibraryHrefActive(href: string) {
     const url = new URL(href, 'http://localhost')
     if (location.pathname !== url.pathname) {
@@ -144,7 +151,7 @@ export function AppSidebar() {
       }
 
       if (key === 'caseType') {
-        return (currentParams.get(key) || 'TEXTBOOK') === value
+        return normalizeCaseTypeValue(currentParams.get(key)) === normalizeCaseTypeValue(value)
       }
 
       return currentParams.get(key) === value
@@ -166,8 +173,8 @@ export function AppSidebar() {
         {
           label: 'Cases and Ratios',
           children: [
-            { href: '/app/admin/library/subject-summaries?caseType=HANDBOOK', label: 'Handbook' },
-            { href: '/app/admin/library/subject-summaries?caseType=TEXTBOOK', label: 'Textbook' },
+            { href: '/app/admin/library/subject-summaries/cases?caseType=HANDBOOK', label: 'Handbook' },
+            { href: '/app/admin/library/subject-summaries/cases?caseType=TEXTBOOK', label: 'Textbook' },
           ],
         },
         {

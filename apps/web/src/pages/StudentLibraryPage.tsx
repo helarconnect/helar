@@ -824,7 +824,12 @@ export function StudentSubjectSummariesPage() {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const [autocompleteQuery, setAutocompleteQuery] = useState("");
-  const selectedCaseType: SubjectSummaryCaseType = searchParams.get("caseType") === "HANDBOOK" ? "HANDBOOK" : "TEXTBOOK";
+  const selectedCaseType: SubjectSummaryCaseType = (() => {
+    const value = (searchParams.get("caseType") ?? "").trim().toLowerCase();
+    if (value === "handbook") return "HANDBOOK";
+    if (value === "textbook" || value === "textbooks") return "TEXTBOOK";
+    return "TEXTBOOK";
+  })();
   const selectedSubjectId = searchParams.get("subjectId");
   const selectedTopicId = searchParams.get("topicId");
   const activeHierarchyQuery = useQuery({
@@ -861,6 +866,9 @@ export function StudentSubjectSummariesPage() {
   const totalSubjects = hierarchyItems.length;
   const handbookTotalCases = hierarchySummaryQuery.data?.summary?.handbookCases ?? 0;
   const textbookTotalCases = hierarchySummaryQuery.data?.summary?.textbookCases ?? 0;
+  const displayedCaseTotal = useMemo(() => hierarchyItems.reduce((sum, item) => sum + item.caseCount, 0), [hierarchyItems]);
+  const handbookDisplayedCases = selectedCaseType === "HANDBOOK" ? displayedCaseTotal : handbookTotalCases;
+  const textbookDisplayedCases = selectedCaseType === "TEXTBOOK" ? displayedCaseTotal : textbookTotalCases;
   const bookmarks = bookmarksQuery.data?.items ?? [];
   const bookmarkKeys = new Set(bookmarks.map((item) => item.contentKey));
   const summaryText = useMemo(
@@ -990,8 +998,8 @@ export function StudentSubjectSummariesPage() {
 
       <section className="grid gap-4 md:grid-cols-2">
         {[
-          { label: "Handbook Cases", value: handbookTotalCases },
-          { label: "Textbook Cases", value: textbookTotalCases }
+          { label: "Handbook Cases", value: handbookDisplayedCases },
+          { label: "Textbook Cases", value: textbookDisplayedCases }
         ].map((item) => (
           <div
             className={cn("rounded-[24px] border px-5 py-5", isDark ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-white")}

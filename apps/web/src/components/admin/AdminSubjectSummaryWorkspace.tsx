@@ -1313,11 +1313,12 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
-  const selectedCaseType = searchParams.get("caseType") === "HANDBOOK"
-    ? "HANDBOOK"
-    : searchParams.get("caseType") === "TEXTBOOK"
-      ? "TEXTBOOK"
-      : "all";
+  const selectedCaseType = (() => {
+    const value = (searchParams.get("caseType") ?? "").trim().toLowerCase();
+    if (value === "handbook") return "HANDBOOK";
+    if (value === "textbook" || value === "textbooks") return "TEXTBOOK";
+    return "all";
+  })();
   const incomingSearch = searchParams.get("search") ?? "";
   const incomingSubjectId = searchParams.get("subjectId") ?? "";
   const incomingTopicId = searchParams.get("topicId") ?? "";
@@ -1710,15 +1711,57 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
   const overviewStats = useMemo(() => {
     const items = hierarchyQuery.data?.items ?? [];
     const summary = hierarchySummaryQuery.data?.summary;
+    const handbookTotal = summary?.handbookCases ?? 0;
+    const textbookTotal = summary?.textbookCases ?? 0;
+    const filteredListTotalCases =
+      selectedCaseType === "all"
+        ? undefined
+        : casesQuery.data?.summary.totalCases ?? casesQuery.data?.pagination.totalItems;
+
+    if (selectedCaseType === "HANDBOOK") {
+      const totalCases = filteredListTotalCases ?? handbookTotal;
+      return {
+        handbookCaseCount: totalCases,
+        textbookCaseCount: 0,
+        totalCases,
+        totalSubjects: items.length,
+        totalTopics: items.reduce((sum, item) => sum + item.topicCount, 0)
+      };
+    }
+
+    if (selectedCaseType === "TEXTBOOK") {
+      const totalCases = filteredListTotalCases ?? textbookTotal;
+      return {
+        handbookCaseCount: 0,
+        textbookCaseCount: totalCases,
+        totalCases,
+        totalSubjects: items.length,
+        totalTopics: items.reduce((sum, item) => sum + item.topicCount, 0)
+      };
+    }
 
     return {
-      handbookCaseCount: summary?.handbookCases ?? 0,
-      textbookCaseCount: summary?.textbookCases ?? 0,
-      totalCases: summary?.totalCases ?? 0,
+      handbookCaseCount: handbookTotal,
+      textbookCaseCount: textbookTotal,
+      totalCases: summary?.totalCases ?? handbookTotal + textbookTotal,
       totalSubjects: items.length,
       totalTopics: items.reduce((sum, item) => sum + item.topicCount, 0)
     };
-  }, [hierarchyQuery.data?.items, hierarchySummaryQuery.data?.summary]);
+  }, [
+    casesQuery.data?.pagination.totalItems,
+    casesQuery.data?.summary.totalCases,
+    hierarchyQuery.data?.items,
+    hierarchySummaryQuery.data?.summary,
+    selectedCaseType
+  ]);
+
+  useEffect(() => {
+    if (mode !== "overview" || selectedCaseType === "all") {
+      return;
+    }
+
+    navigate(`/app/admin/library/subject-summaries/cases?caseType=${selectedCaseType}`, { replace: true });
+  }, [mode, navigate, selectedCaseType]);
 
   useEffect(() => {
     setCaseFilters((current) =>
@@ -2016,7 +2059,7 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
               <p className={cn("text-xs uppercase tracking-[0.24em]", isDark ? "text-slate-500" : "text-slate-400")}>Navigation</p>
               <div className="mt-4 flex flex-wrap gap-2">
                 {[
-                  { href: "/app/admin/library/subject-summaries", label: "Overview" },
+                  ...(selectedCaseType === "all" ? [{ href: "/app/admin/library/subject-summaries", label: "Overview" }] : []),
                   { href: "/app/admin/library/subject-summaries/subjects", label: "Subjects" },
                   { href: "/app/admin/library/subject-summaries/topics", label: "Topics" },
                   { href: "/app/admin/library/subject-summaries/cases", label: "Cases" }
