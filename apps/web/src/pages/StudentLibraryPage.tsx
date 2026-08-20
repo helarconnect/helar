@@ -837,9 +837,6 @@ export function StudentSubjectSummariesPage() {
     page: 1,
     pageSize: 10,
     search: "",
-    sortBy: "updatedAt" as const,
-    sortOrder: "desc" as const,
-    status: "PUBLISHED" as const,
     subjectId: "",
     topicId: ""
   }));
@@ -860,8 +857,8 @@ export function StudentSubjectSummariesPage() {
         page: caseFilters.page,
         pageSize: caseFilters.pageSize,
         search: caseFilters.search,
-        sortBy: caseFilters.sortBy,
-        sortOrder: caseFilters.sortOrder,
+        sortBy: "updatedAt",
+        sortOrder: "desc",
         subjectId: caseFilters.subjectId || undefined,
         topicId: caseFilters.topicId || undefined
       }),
@@ -870,8 +867,8 @@ export function StudentSubjectSummariesPage() {
       page: caseFilters.page,
       pageSize: caseFilters.pageSize,
       search: caseFilters.search,
-      sortBy: caseFilters.sortBy,
-      sortOrder: caseFilters.sortOrder,
+      sortBy: "updatedAt",
+      sortOrder: "desc",
       subjectId: caseFilters.subjectId,
       topicId: caseFilters.topicId
     })
@@ -940,7 +937,7 @@ export function StudentSubjectSummariesPage() {
           </div>
         </div>
 
-        <div className="mt-6 grid gap-4 md:grid-cols-6">
+        <div className="mt-6 grid gap-4 md:grid-cols-4">
           <input
             className={cn("rounded-2xl border px-4 py-3 text-sm outline-none md:col-span-2", isDark ? "border-slate-700 bg-slate-950 text-white" : "border-slate-200 bg-slate-50 text-slate-950")}
             onChange={(event) => setCaseFilters((current) => ({ ...current, page: 1, search: event.target.value }))}
@@ -986,33 +983,6 @@ export function StudentSubjectSummariesPage() {
               </option>
             ))}
           </select>
-          <select
-            className={cn("rounded-2xl border px-4 py-3 text-sm outline-none", isDark ? "border-slate-700 bg-slate-950 text-white" : "border-slate-200 bg-slate-50 text-slate-950")}
-            disabled
-            value={caseFilters.status}
-          >
-            <option value="PUBLISHED">Published</option>
-          </select>
-          <div className="flex items-center gap-3 md:col-span-6">
-            <select
-              className={cn("w-full rounded-2xl border px-4 py-3 text-sm outline-none", isDark ? "border-slate-700 bg-slate-950 text-white" : "border-slate-200 bg-slate-50 text-slate-950")}
-              onChange={(event) => setCaseFilters((current) => ({ ...current, sortBy: event.target.value as typeof current.sortBy }))}
-              value={caseFilters.sortBy}
-            >
-              <option value="updatedAt">Sort by updated date</option>
-              <option value="createdAt">Sort by created date</option>
-              <option value="title">Sort by title</option>
-              <option value="year">Sort by year</option>
-            </select>
-            <select
-              className={cn("w-full rounded-2xl border px-4 py-3 text-sm outline-none", isDark ? "border-slate-700 bg-slate-950 text-white" : "border-slate-200 bg-slate-50 text-slate-950")}
-              onChange={(event) => setCaseFilters((current) => ({ ...current, sortOrder: event.target.value as typeof current.sortOrder }))}
-              value={caseFilters.sortOrder}
-            >
-              <option value="desc">Descending</option>
-              <option value="asc">Ascending</option>
-            </select>
-          </div>
         </div>
 
         <div className="mt-6 overflow-x-auto">
@@ -1077,7 +1047,7 @@ export function StudentSubjectSummariesPage() {
             </table>
           ) : (
             <div className={cn("rounded-[24px] border px-6 py-8 text-sm leading-7", isDark ? "border-slate-800 bg-slate-950 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600")}>
-              No published {selectedCaseType === "HANDBOOK" ? "handbook" : "textbook"} cases match the current filters.
+              No published {selectedCaseType === "HANDBOOK" ? "handbook" : "textbook"} cases are available yet.
             </div>
           )}
         </div>
