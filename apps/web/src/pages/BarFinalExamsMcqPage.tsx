@@ -50,12 +50,50 @@ function truncateWords(value: string, maxWords: number) {
   return { isTruncated: true, text: `${words.slice(0, maxWords).join(" ")}…` };
 }
 
-// --- MCQ Attempt Tracking (Answer Gating) -----------------------------------
-// Answers for each question are only revealed once the student has attempted
-// EVERY question in the selected subject. Attempt records are persisted to
-// localStorage under a per-subject composite key so the gating survives
-// page refreshes and browser restarts.
+// --- MCQ View Tracking (Answer Gating) + Attempt Tracking --------------------
+//
+// Answer reveal rule (per product):
+//   Students, Lawyers, and Judges must VIEW every question in a subject before
+//   correct answers are displayed. Attempting (submitting) answers is optional —
+//   answers unlock once the student has visited the LAST question in the
+//   subject (equivalently: once all question IDs exist in the viewed set).
+//
+// BOTH state records persist to localStorage under per-subject composite keys
+// so gating survives refreshes / back-nav / browser restarts.
 
+// ---- VIEW tracking ----
+const MCQ_VIEW_STORAGE_PREFIX = "bar-final-mcq:views:";
+
+function buildViewStorageKey(subjectId: string) {
+  return `${MCQ_VIEW_STORAGE_PREFIX}${subjectId}`;
+}
+
+function readViewedQuestionIds(subjectId: string): Set<string> {
+  if (typeof window === "undefined" || !subjectId) return new Set();
+  try {
+    const raw = window.localStorage.getItem(buildViewStorageKey(subjectId));
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return new Set(parsed.filter((item) => typeof item === "string"));
+    return new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function writeViewedQuestionId(subjectId: string, questionId: string) {
+  if (typeof window === "undefined" || !subjectId || !questionId) return;
+  const current = readViewedQuestionIds(subjectId);
+  if (current.has(questionId)) return;
+  current.add(questionId);
+  try {
+    window.localStorage.setItem(buildViewStorageKey(subjectId), JSON.stringify(Array.from(current)));
+  } catch {
+    // Ignore quota / disabled localStorage.
+  }
+}
+
+// ---- ATTEMPT tracking (for badges only; no longer drives answer reveal) ----
 const MCQ_ATTEMPT_STORAGE_PREFIX = "bar-final-mcq:attempts:";
 
 function buildAttemptStorageKey(subjectId: string) {
@@ -63,10 +101,7 @@ function buildAttemptStorageKey(subjectId: string) {
 }
 
 function readAttemptedQuestionIds(subjectId: string): Set<string> {
-  if (typeof window === "undefined" || !subjectId) {
-    return new Set();
-  }
-
+  if (typeof window === "undefined" || !subjectId) return new Set();
   try {
     const raw = window.localStorage.getItem(buildAttemptStorageKey(subjectId));
     if (!raw) return new Set();
@@ -79,10 +114,7 @@ function readAttemptedQuestionIds(subjectId: string): Set<string> {
 }
 
 function writeAttemptedQuestionId(subjectId: string, questionId: string) {
-  if (typeof window === "undefined" || !subjectId || !questionId) {
-    return;
-  }
-
+  if (typeof window === "undefined" || !subjectId || !questionId) return;
   const current = readAttemptedQuestionIds(subjectId);
   if (current.has(questionId)) return;
   current.add(questionId);
@@ -93,22 +125,45 @@ function writeAttemptedQuestionId(subjectId: string, questionId: string) {
   }
 }
 
-function useMcqAnswerGating(subjectId: string, allQuestionIds: string[]): {
-  allAttempted: boolean;
-  attemptedCount: number;
-  totalQuestions: number;
-  attemptedSet: Set<string>;
-  registerAttempt: (questionId: string) => void;
-} {
+// ---- Unified Gating Hook ----
+// `allQuestionIds` is the ordered list of question IDs for the selected subject
+// (index order = list order). `allViewed` is true when the last question has
+// been viewed (enforces "go to the last of it" semantics regardless of gaps).
+function useMcqAnswerGating(subjectId: string, allQuestionIds: string[]) {
+  const [viewedSet, setViewedSet] = useState<Set<string>>(() => readViewedQuestionIds(subjectId));
   const [attemptedSet, setAttemptedSet] = useState<Set<string>>(() => readAttemptedQuestionIds(subjectId));
 
   useEffect(() => {
+    setViewedSet(readViewedQuestionIds(subjectId));
     setAttemptedSet(readAttemptedQuestionIds(subjectId));
   }, [subjectId]);
 
   const totalQuestions = allQuestionIds.length;
+  const lastQuestionId = totalQuestions > 0 ? allQuestionIds[totalQuestions - 1] : null;
+
+  // View counters
+  const viewedCount = allQuestionIds.reduce((acc, id) => (viewedSet.has(id) ? acc + 1 : acc), 0);
+  // Per spec: unlock when the LAST question has been visited. That is strictly
+  // a stronger condition than "any/all viewed" and prevents shortcuts where a
+  // user directly opens the first/last URL without scrolling through the rest.
+  const allViewed = Boolean(lastQuestionId) && viewedSet.has(lastQuestionId);
+
+  // Attempt counters (kept for UI badges, no longer drives unlocking)
   const attemptedCount = allQuestionIds.reduce((acc, id) => (attemptedSet.has(id) ? acc + 1 : acc), 0);
   const allAttempted = totalQuestions > 0 && attemptedCount >= totalQuestions;
+
+  // Answers are revealed once the entire subject has been VIEWED.
+  const canRevealAnswers = allViewed;
+
+  function registerView(questionId: string) {
+    writeViewedQuestionId(subjectId, questionId);
+    setViewedSet((current) => {
+      if (current.has(questionId)) return current;
+      const next = new Set(current);
+      next.add(questionId);
+      return next;
+    });
+  }
 
   function registerAttempt(questionId: string) {
     writeAttemptedQuestionId(subjectId, questionId);
@@ -120,7 +175,22 @@ function useMcqAnswerGating(subjectId: string, allQuestionIds: string[]): {
     });
   }
 
-  return { allAttempted, attemptedCount, totalQuestions, attemptedSet, registerAttempt };
+  return {
+    // Primary unlock flag (consumed by option coloring + result card).
+    canRevealAnswers,
+    // View progress (used by progress bar + status pill).
+    allViewed,
+    viewedCount,
+    totalQuestions,
+    viewedSet,
+    registerView,
+    // Attempt progress (kept for per-question badges; allAttempted unused for
+    // gating now but retained for analytics-type UI later).
+    allAttempted,
+    attemptedCount,
+    attemptedSet,
+    registerAttempt
+  };
 }
 
 function statusLabel(status: BarFinalExamQuestionStatus) {

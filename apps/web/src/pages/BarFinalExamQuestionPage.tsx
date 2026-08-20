@@ -58,7 +58,7 @@ export function StudentBarFinalExamQuestionPage() {
               Back to questions
             </button>
             <h1 className={cn("text-xl font-semibold tracking-tight", isDark ? "text-white" : "text-slate-950")}>
-              Bar Final Exams NLS-MCQ (Q & A)
+              Bar Final Exams NLS
             </h1>
             <p className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-600")}>
               {activeSubject?.name ?? "Subject"} •{" "}

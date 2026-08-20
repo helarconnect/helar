@@ -92,6 +92,16 @@ function stripHtml(value: string) {
     .trim();
 }
 
+// Word-level truncation helper (for admin question-card summaries).
+// Strip HTML first so formatting markup is not counted as words.
+function truncateWords(value: string, maxWords: number) {
+  const plain = stripHtml(value);
+  if (!plain) return { isTruncated: false, text: "" };
+  const words = plain.split(/\s+/).filter(Boolean);
+  if (words.length <= maxWords) return { isTruncated: false, text: words.join(" ") };
+  return { isTruncated: true, text: `${words.slice(0, maxWords).join(" ")}…` };
+}
+
 function buildDefaultDraft(subjectId: string): BarFinalExamQuestionInput {
   return {
     answer: "",
@@ -230,8 +240,10 @@ export function AdminBarFinalExamsMlsMcqPage() {
 
   const subjects = formOptionsQuery.data?.subjects ?? [];
   const items = questionsQuery.data?.items ?? [];
+  // Descending by createdAt — newest uploaded questions appear at the top
+  // of the admin list (matches law-reports baseline UX).
   const sortedItems = useMemo(
-    () => [...items].sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime()),
+    () => [...items].sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()),
     [items]
   );
   const canSaveDraft = Boolean(draft.subjectId) && stripHtml(draft.question).length >= 2 && stripHtml(draft.answer).length >= 2;
@@ -347,7 +359,11 @@ export function AdminBarFinalExamsMlsMcqPage() {
               </div>
             ) : (
               <div className="space-y-3">
-                {sortedItems.map((item, index) => (
+                {sortedItems.map((item, index) => {
+                  // Admin cards use plain-text 150-word summaries (not rich
+                  // HTML preview) for fast scanning of large libraries.
+                  const summary = truncateWords(item.question, 150);
+                  return (
                   <div
                     className={cn(
                       "rounded-3xl border px-4 py-4",
@@ -366,7 +382,9 @@ export function AdminBarFinalExamsMlsMcqPage() {
                         <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>
                           Question {index + 1}
                         </p>
-                        <p className={cn("text-sm font-medium leading-relaxed", isDark ? "text-white" : "text-slate-950")}>{stripHtml(item.question)}</p>
+                        <p className={cn("text-sm font-medium leading-relaxed", isDark ? "text-white" : "text-slate-950")}>
+                          {summary.text || "No question content."}
+                        </p>
                       </div>
 
                       <div className="flex items-center gap-2">
@@ -394,7 +412,8 @@ export function AdminBarFinalExamsMlsMcqPage() {
                       </div>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
