@@ -587,7 +587,6 @@ body {
     @apply font-heading text-6xl leading-none;
     color: var(--color-accent);
   }
-}
 
 .connect-page {
   min-height: 100vh;
