@@ -46,6 +46,17 @@ const caseFiltersSchema = z.object({
   topicId: recordIdSchema.optional()
 });
 
+const publishedCaseFiltersSchema = z.object({
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(200).default(20),
+  caseType: z.union([z.enum(["HANDBOOK", "TEXTBOOK"]), z.literal("all")]).default("all"),
+  search: z.string().trim().max(120).default(""),
+  sortBy: z.enum(["createdAt", "title", "updatedAt", "year"]).default("updatedAt"),
+  sortOrder: z.enum(["asc", "desc"]).default("desc"),
+  subjectId: recordIdSchema.optional(),
+  topicId: recordIdSchema.optional()
+});
+
 const hierarchyQuerySchema = z.object({
   caseType: z.union([z.enum(["HANDBOOK", "TEXTBOOK"]), z.literal("all")]).default("all"),
   search: z.string().trim().max(120).default("")
@@ -129,6 +140,7 @@ const caseBulkActionSchema = z
 export type SubjectSummarySubjectFilters = z.infer<typeof subjectFiltersSchema>;
 export type SubjectSummaryTopicFilters = z.infer<typeof topicFiltersSchema>;
 export type SubjectSummaryCaseFilters = z.infer<typeof caseFiltersSchema>;
+export type PublishedSubjectSummaryCaseFilters = z.infer<typeof publishedCaseFiltersSchema>;
 export type SubjectSummaryHierarchyQuery = z.infer<typeof hierarchyQuerySchema>;
 export type SubjectSummaryAutocompleteQuery = z.infer<typeof autocompleteQuerySchema>;
 export type SubjectSummarySubjectInput = z.infer<typeof subjectInputSchema>;
@@ -697,6 +709,19 @@ export function parseSubjectSummaryCaseFilters(query: Record<string, string | st
   });
 }
 
+export function parsePublishedSubjectSummaryCaseFilters(query: Record<string, string | string[] | undefined>) {
+  return publishedCaseFiltersSchema.parse({
+    caseType: Array.isArray(query.caseType) ? query.caseType[0] : query.caseType,
+    page: Array.isArray(query.page) ? query.page[0] : query.page,
+    pageSize: Array.isArray(query.pageSize) ? query.pageSize[0] : query.pageSize,
+    search: Array.isArray(query.search) ? query.search[0] : query.search,
+    sortBy: Array.isArray(query.sortBy) ? query.sortBy[0] : query.sortBy,
+    sortOrder: Array.isArray(query.sortOrder) ? query.sortOrder[0] : query.sortOrder,
+    subjectId: Array.isArray(query.subjectId) ? query.subjectId[0] : query.subjectId,
+    topicId: Array.isArray(query.topicId) ? query.topicId[0] : query.topicId
+  });
+}
+
 export function parseSubjectSummaryHierarchyQuery(query: Record<string, string | string[] | undefined>) {
   return hierarchyQuerySchema.parse({
     caseType: Array.isArray(query.caseType) ? query.caseType[0] : query.caseType,
@@ -896,6 +921,108 @@ export async function listSubjectSummaryCases(filters: SubjectSummaryCaseFilters
     subjects,
     summary,
     topics
+  };
+}
+
+export async function listPublishedSubjectSummaryCases(filters: PublishedSubjectSummaryCaseFilters) {
+  const where: Prisma.SubjectSummaryCaseWhereInput = {
+    deletedAt: null,
+    ...buildCaseTypeWhere(filters.caseType),
+    status: SubjectSummaryCaseStatus.PUBLISHED,
+    ...(filters.subjectId ? { subjectId: filters.subjectId } : {}),
+    ...(filters.topicId ? { topicId: filters.topicId } : {}),
+    subject: {
+      deletedAt: null,
+      status: { in: publishedVisibleStatuses }
+    },
+    topic: {
+      deletedAt: null,
+      status: { in: publishedVisibleStatuses }
+    },
+    ...(filters.search
+      ? {
+          OR: [
+            { title: containsText(filters.search) },
+            { citation: containsText(filters.search) },
+            { court: containsText(filters.search) },
+            { caseSummary: containsText(filters.search) }
+          ]
+        }
+      : {})
+  };
+
+  const [items, totalItems, subjects, topics] = await Promise.all([
+    prisma.subjectSummaryCase.findMany({
+      where,
+      orderBy: {
+        [filters.sortBy]: filters.sortOrder
+      },
+      skip: (filters.page - 1) * filters.pageSize,
+      take: filters.pageSize,
+      include: {
+        subject: {
+          select: {
+            id: true,
+            name: true
+          }
+        },
+        topic: {
+          select: {
+            id: true,
+            name: true,
+            subjectId: true
+          }
+        }
+      }
+    }),
+    prisma.subjectSummaryCase.count({ where }),
+    prisma.subjectSummarySubject.findMany({
+      where: {
+        deletedAt: null,
+        status: { in: publishedVisibleStatuses }
+      },
+      orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+      select: {
+        id: true,
+        name: true
+      }
+    }),
+    prisma.subjectSummaryTopic.findMany({
+      where: {
+        deletedAt: null,
+        status: { in: publishedVisibleStatuses },
+        ...(filters.subjectId ? { subjectId: filters.subjectId } : {})
+      },
+      orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+      select: {
+        id: true,
+        name: true,
+        subjectId: true
+      }
+    })
+  ]);
+
+  return {
+    items: items.map((item) =>
+      mapCase({
+        ...item,
+        topic: {
+          id: item.topic.id,
+          name: item.topic.name
+        }
+      })
+    ),
+    pagination: {
+      page: filters.page,
+      pageSize: filters.pageSize,
+      totalItems,
+      totalPages: Math.max(1, Math.ceil(totalItems / filters.pageSize))
+    },
+    subjects,
+    topics,
+    summary: {
+      totalCases: totalItems
+    }
   };
 }
 

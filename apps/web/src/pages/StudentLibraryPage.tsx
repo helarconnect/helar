@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpenText, Bookmark, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Scale, Search } from "lucide-react";
+import { BookOpenText, Bookmark, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Eye, Scale, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
@@ -11,6 +11,7 @@ import {
   autocompletePublishedSubjectSummaries,
   fetchLibraryHelarpedia,
   fetchLibraryLawReports,
+  fetchPublishedSubjectSummaryCases,
   fetchPublishedSubjectSummaryHierarchy,
   fetchPublishedSubjectSummaryHierarchyCases,
   fetchPublishedSubjectSummaryHierarchyTopics,
@@ -820,101 +821,76 @@ export function StudentHelarpediaPage() {
 
 export function StudentSubjectSummariesPage() {
   const { isDark } = useTheme();
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [autocompleteQuery, setAutocompleteQuery] = useState("");
   const selectedCaseType: SubjectSummaryCaseType = (() => {
     const value = (searchParams.get("caseType") ?? "").trim().toLowerCase();
     if (value === "handbook") return "HANDBOOK";
     if (value === "textbook" || value === "textbooks") return "TEXTBOOK";
     return "TEXTBOOK";
   })();
-  const selectedSubjectId = searchParams.get("subjectId");
-  const selectedTopicId = searchParams.get("topicId");
-  const activeHierarchyQuery = useQuery({
-    queryFn: () => fetchPublishedSubjectSummaryHierarchy({ caseType: selectedCaseType }),
-    queryKey: queryKeys.subjectSummaryPublishedHierarchy({ caseType: selectedCaseType })
-  });
   const hierarchySummaryQuery = useQuery({
     queryFn: () => fetchPublishedSubjectSummaryHierarchy({ caseType: "all" }),
     queryKey: queryKeys.subjectSummaryPublishedHierarchy({ caseType: "all" })
   });
-  const autocompleteResultsQuery = useQuery({
-    enabled: autocompleteQuery.trim().length >= 2,
-    queryFn: () => autocompletePublishedSubjectSummaries(autocompleteQuery, 8, selectedCaseType),
-    queryKey: queryKeys.subjectSummaryPublishedAutocomplete(`${selectedCaseType}:${autocompleteQuery}`)
-  });
-  const bookmarksQuery = useQuery({
-    queryFn: () => fetchStudentStudyBookmarks({}),
-    queryKey: queryKeys.studentStudyBookmarks({})
-  });
-  const createBookmarkMutation = useMutation({
-    mutationFn: createStudentStudyBookmark,
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.studentStudyBookmarks({}) });
-    }
-  });
-  const deleteBookmarkMutation = useMutation({
-    mutationFn: deleteStudentStudyBookmark,
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.studentStudyBookmarks({}) });
-    }
+
+  const [caseFilters, setCaseFilters] = useState(() => ({
+    page: 1,
+    pageSize: 10,
+    search: "",
+    sortBy: "updatedAt" as const,
+    sortOrder: "desc" as const,
+    status: "PUBLISHED" as const,
+    subjectId: "",
+    topicId: ""
+  }));
+  useEffect(() => {
+    setCaseFilters((current) => ({
+      ...current,
+      page: 1,
+      subjectId: "",
+      topicId: ""
+    }));
+  }, [selectedCaseType]);
+
+  const casesQuery = useQuery({
+    placeholderData: keepPreviousData,
+    queryFn: () =>
+      fetchPublishedSubjectSummaryCases({
+        caseType: selectedCaseType,
+        page: caseFilters.page,
+        pageSize: caseFilters.pageSize,
+        search: caseFilters.search,
+        sortBy: caseFilters.sortBy,
+        sortOrder: caseFilters.sortOrder,
+        subjectId: caseFilters.subjectId || undefined,
+        topicId: caseFilters.topicId || undefined
+      }),
+    queryKey: queryKeys.subjectSummaryPublishedCases({
+      caseType: selectedCaseType,
+      page: caseFilters.page,
+      pageSize: caseFilters.pageSize,
+      search: caseFilters.search,
+      sortBy: caseFilters.sortBy,
+      sortOrder: caseFilters.sortOrder,
+      subjectId: caseFilters.subjectId,
+      topicId: caseFilters.topicId
+    })
   });
 
-  const hierarchyItems = activeHierarchyQuery.data?.items ?? [];
-  const totalSubjects = hierarchyItems.length;
+  const subjects = casesQuery.data?.subjects ?? [];
+  const topics = casesQuery.data?.topics ?? [];
+  const filteredTopics = topics.filter((topic) => !caseFilters.subjectId || topic.subjectId === caseFilters.subjectId);
+  const visibleRows = (casesQuery.data?.items ?? []).filter((item) => matchesCaseTypeLabel(item.jurisdiction, selectedCaseType));
   const handbookTotalCases = hierarchySummaryQuery.data?.summary?.handbookCases ?? 0;
   const textbookTotalCases = hierarchySummaryQuery.data?.summary?.textbookCases ?? 0;
-  const displayedCaseTotal = useMemo(() => hierarchyItems.reduce((sum, item) => sum + item.caseCount, 0), [hierarchyItems]);
-  const handbookDisplayedCases = selectedCaseType === "HANDBOOK" ? displayedCaseTotal : handbookTotalCases;
-  const textbookDisplayedCases = selectedCaseType === "TEXTBOOK" ? displayedCaseTotal : textbookTotalCases;
-  const bookmarks = bookmarksQuery.data?.items ?? [];
-  const bookmarkKeys = new Set(bookmarks.map((item) => item.contentKey));
+  const activeTotalCases = casesQuery.data?.summary.totalCases ?? 0;
+  const handbookDisplayedCases = selectedCaseType === "HANDBOOK" ? activeTotalCases : handbookTotalCases;
+  const textbookDisplayedCases = selectedCaseType === "TEXTBOOK" ? activeTotalCases : textbookTotalCases;
   const summaryText = useMemo(
     () =>
-      `${totalSubjects} subject${totalSubjects === 1 ? "" : "s"} currently available in ${selectedCaseType === "HANDBOOK" ? "Handbook" : "Textbook"} cases and ratios with published topics and case materials.`,
-    [selectedCaseType, totalSubjects]
+      `${activeTotalCases} published case${activeTotalCases === 1 ? "" : "s"} currently available in the ${selectedCaseType === "HANDBOOK" ? "Handbook" : "Textbook"} collection.`,
+    [activeTotalCases, selectedCaseType]
   );
-
-  function buildCasesAndRatiosPath(nextCaseType: SubjectSummaryCaseType, overrides?: { subjectId?: string | null; topicId?: string | null }) {
-    const nextParams = new URLSearchParams(searchParams);
-    nextParams.set("caseType", nextCaseType);
-    const nextSubjectId = overrides?.subjectId ?? selectedSubjectId;
-    const nextTopicId = overrides?.topicId ?? selectedTopicId;
-
-    if (nextSubjectId) {
-      nextParams.set("subjectId", nextSubjectId);
-    } else {
-      nextParams.delete("subjectId");
-    }
-
-    if (nextTopicId) {
-      nextParams.set("topicId", nextTopicId);
-    } else {
-      nextParams.delete("topicId");
-    }
-
-    return `/app/library/subject-summaries?${nextParams.toString()}`;
-  }
-
-  function toggleBookmark(payload: {
-    contentKey: string;
-    contentType: "SUBJECT_SUMMARY_SUBJECT" | "SUBJECT_SUMMARY_TOPIC";
-    path: string;
-    subjectName?: string;
-    title: string;
-    topicName?: string;
-  }) {
-    const activeBookmark = bookmarks.find((item) => item.contentKey === payload.contentKey);
-
-    if (activeBookmark) {
-      deleteBookmarkMutation.mutate(activeBookmark.id);
-      return;
-    }
-
-    createBookmarkMutation.mutate(payload);
-  }
 
   return (
     <div className="space-y-6">
@@ -931,67 +907,6 @@ export function StudentSubjectSummariesPage() {
               Explore published {selectedCaseType === "HANDBOOK" ? "handbook" : "textbook"} cases and ratios.
             </h2>
             <p className={cn("mt-3 max-w-2xl text-sm leading-7", isDark ? "text-slate-300" : "text-slate-600")}>{summaryText}</p>
-          </div>
-
-          <div className="relative z-30 w-full max-w-md">
-            <div className="mb-3">
-              <select
-                className={cn("w-full rounded-[24px] border px-4 py-3 text-sm outline-none", isDark ? "border-slate-700 bg-slate-900 text-white" : "border-slate-200 bg-slate-50 text-slate-950")}
-                onChange={(event) => {
-                  const nextCaseType = event.target.value as SubjectSummaryCaseType;
-                  const nextParams = new URLSearchParams(searchParams);
-                  nextParams.set("caseType", nextCaseType);
-                  nextParams.delete("subjectId");
-                  nextParams.delete("topicId");
-                  setSearchParams(nextParams, { replace: true });
-                }}
-                value={selectedCaseType}
-              >
-                <option value="HANDBOOK">Handbook</option>
-                <option value="TEXTBOOK">Textbook</option>
-              </select>
-            </div>
-            <div className={cn("flex items-center gap-3 rounded-[24px] border px-4 py-3", isDark ? "border-slate-700 bg-slate-900" : "border-slate-200 bg-slate-50")}>
-              <Search className={cn("h-4 w-4", isDark ? "text-slate-500" : "text-slate-400")} />
-              <input
-                className={cn("w-full bg-transparent text-sm outline-none", isDark ? "text-white placeholder:text-slate-500" : "text-slate-950 placeholder:text-slate-400")}
-                onChange={(event) => setAutocompleteQuery(event.target.value)}
-                placeholder="Search subjects, topics, and cases"
-                value={autocompleteQuery}
-              />
-            </div>
-            {autocompleteResultsQuery.data?.items.length ? (
-              <div className={cn("absolute left-0 right-0 top-[calc(100%+10px)] z-20 overflow-hidden rounded-[24px] border shadow-[0_20px_60px_rgba(15,23,42,0.12)]", isDark ? "border-slate-800 bg-slate-950" : "border-slate-200 bg-white")}>
-                {autocompleteResultsQuery.data.items.map((item) => (
-                  <button
-                    className={cn("flex w-full items-start justify-between gap-3 border-b px-4 py-3 text-left last:border-b-0", isDark ? "border-slate-800 hover:bg-slate-900" : "border-slate-100 hover:bg-slate-50")}
-                    key={`${item.type}-${item.id}`}
-                    onClick={() => {
-                      setAutocompleteQuery("");
-                      navigate(item.path);
-                    }}
-                    type="button"
-                  >
-                    <div>
-                      <p className={cn("font-medium", isDark ? "text-white" : "text-slate-950")}>{item.label}</p>
-                      <p className={cn("mt-1 text-sm", isDark ? "text-slate-400" : "text-slate-500")}>{item.subtitle}</p>
-                    </div>
-                    <span className={cn("rounded-full border px-2.5 py-1 text-xs uppercase", isDark ? "border-slate-700 text-slate-300" : "border-slate-200 text-slate-500")}>
-                      {item.type}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            ) : autocompleteQuery.trim().length >= 2 ? (
-              <div
-                className={cn(
-                  "absolute left-0 right-0 top-[calc(100%+10px)] z-20 rounded-[24px] border px-4 py-3 text-sm shadow-[0_20px_60px_rgba(15,23,42,0.12)]",
-                  isDark ? "border-slate-800 bg-slate-950 text-slate-400" : "border-slate-200 bg-white text-slate-500"
-                )}
-              >
-                {autocompleteResultsQuery.isLoading ? "Searching cases and ratios..." : "No matching subjects, topics, or cases found."}
-              </div>
-            ) : null}
           </div>
         </div>
       </section>
@@ -1012,10 +927,12 @@ export function StudentSubjectSummariesPage() {
       </section>
 
       <section className={cn("rounded-[28px] border p-6 shadow-[0_24px_70px_rgba(15,23,42,0.07)]", isDark ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-white")}>
-        <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className={cn("text-xs uppercase tracking-[0.22em]", isDark ? "text-slate-500" : "text-slate-400")}>Hierarchy</p>
-            <h3 className={cn("mt-2 font-heading text-3xl", isDark ? "text-white" : "text-slate-950")}>Cases and ratios tree</h3>
+            <p className={cn("text-xs uppercase tracking-[0.22em]", isDark ? "text-slate-500" : "text-slate-400")}>Cases</p>
+            <h3 className={cn("mt-2 font-heading text-3xl", isDark ? "text-white" : "text-slate-950")}>
+              {selectedCaseType === "HANDBOOK" ? "Handbook" : "Textbook"} cases
+            </h3>
           </div>
           <div className={cn("inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm", isDark ? "border-slate-700 bg-slate-950 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600")}>
             <BookOpenText className="h-4 w-4" />
@@ -1023,51 +940,186 @@ export function StudentSubjectSummariesPage() {
           </div>
         </div>
 
-        <div className="mt-6 space-y-4">
-          {activeHierarchyQuery.isLoading ? (
-            <p className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-500")}>Loading cases and ratios hierarchy...</p>
-          ) : activeHierarchyQuery.isError ? (
-            <div className={cn("rounded-[24px] border px-6 py-8 text-sm leading-7", isDark ? "border-slate-800 bg-slate-950 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600")}>
-              Could not load the published cases and ratios hierarchy right now.
+        <div className="mt-6 grid gap-4 md:grid-cols-6">
+          <input
+            className={cn("rounded-2xl border px-4 py-3 text-sm outline-none md:col-span-2", isDark ? "border-slate-700 bg-slate-950 text-white" : "border-slate-200 bg-slate-50 text-slate-950")}
+            onChange={(event) => setCaseFilters((current) => ({ ...current, page: 1, search: event.target.value }))}
+            placeholder="Search cases"
+            value={caseFilters.search}
+          />
+          <select
+            className={cn("rounded-2xl border px-4 py-3 text-sm outline-none", isDark ? "border-slate-700 bg-slate-950 text-white" : "border-slate-200 bg-slate-50 text-slate-950")}
+            onChange={(event) => {
+              const nextCaseType = event.target.value as SubjectSummaryCaseType;
+              const nextParams = new URLSearchParams(searchParams);
+              nextParams.set("caseType", nextCaseType);
+              nextParams.delete("subjectId");
+              nextParams.delete("topicId");
+              setSearchParams(nextParams, { replace: true });
+            }}
+            value={selectedCaseType}
+          >
+            <option value="HANDBOOK">Handbook</option>
+            <option value="TEXTBOOK">Textbook</option>
+          </select>
+          <select
+            className={cn("rounded-2xl border px-4 py-3 text-sm outline-none", isDark ? "border-slate-700 bg-slate-950 text-white" : "border-slate-200 bg-slate-50 text-slate-950")}
+            onChange={(event) => setCaseFilters((current) => ({ ...current, page: 1, subjectId: event.target.value, topicId: "" }))}
+            value={caseFilters.subjectId}
+          >
+            <option value="">All subjects</option>
+            {subjects.map((subject) => (
+              <option key={subject.id} value={subject.id}>
+                {subject.name}
+              </option>
+            ))}
+          </select>
+          <select
+            className={cn("rounded-2xl border px-4 py-3 text-sm outline-none", isDark ? "border-slate-700 bg-slate-950 text-white" : "border-slate-200 bg-slate-50 text-slate-950")}
+            onChange={(event) => setCaseFilters((current) => ({ ...current, page: 1, topicId: event.target.value }))}
+            value={caseFilters.topicId}
+          >
+            <option value="">All topics</option>
+            {filteredTopics.map((topic) => (
+              <option key={topic.id} value={topic.id}>
+                {topic.name}
+              </option>
+            ))}
+          </select>
+          <select
+            className={cn("rounded-2xl border px-4 py-3 text-sm outline-none", isDark ? "border-slate-700 bg-slate-950 text-white" : "border-slate-200 bg-slate-50 text-slate-950")}
+            disabled
+            value={caseFilters.status}
+          >
+            <option value="PUBLISHED">Published</option>
+          </select>
+          <div className="flex items-center gap-3 md:col-span-6">
+            <select
+              className={cn("w-full rounded-2xl border px-4 py-3 text-sm outline-none", isDark ? "border-slate-700 bg-slate-950 text-white" : "border-slate-200 bg-slate-50 text-slate-950")}
+              onChange={(event) => setCaseFilters((current) => ({ ...current, sortBy: event.target.value as typeof current.sortBy }))}
+              value={caseFilters.sortBy}
+            >
+              <option value="updatedAt">Sort by updated date</option>
+              <option value="createdAt">Sort by created date</option>
+              <option value="title">Sort by title</option>
+              <option value="year">Sort by year</option>
+            </select>
+            <select
+              className={cn("w-full rounded-2xl border px-4 py-3 text-sm outline-none", isDark ? "border-slate-700 bg-slate-950 text-white" : "border-slate-200 bg-slate-50 text-slate-950")}
+              onChange={(event) => setCaseFilters((current) => ({ ...current, sortOrder: event.target.value as typeof current.sortOrder }))}
+              value={caseFilters.sortOrder}
+            >
+              <option value="desc">Descending</option>
+              <option value="asc">Ascending</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="mt-6 overflow-x-auto">
+          {casesQuery.isLoading ? (
+            <div className={cn("rounded-[24px] border px-6 py-8 text-sm", isDark ? "border-slate-800 bg-slate-950 text-slate-400" : "border-slate-200 bg-slate-50 text-slate-600")}>
+              Loading cases...
             </div>
-          ) : activeHierarchyQuery.data?.items.length ? (
-            activeHierarchyQuery.data.items.map((subject) => (
-              <StudentSubjectSummarySubjectItem
-                autoExpand={selectedSubjectId === subject.id}
-                bookmarkActive={bookmarkKeys.has(`SUBJECT_SUMMARY_SUBJECT:${subject.id}`)}
-                caseType={selectedCaseType}
-                isDark={isDark}
-                key={subject.id}
-                onToggleBookmark={() =>
-                  toggleBookmark({
-                    contentKey: `SUBJECT_SUMMARY_SUBJECT:${subject.id}`,
-                    contentType: "SUBJECT_SUMMARY_SUBJECT",
-                    path: buildCasesAndRatiosPath(selectedCaseType, { subjectId: subject.id, topicId: null }),
-                    subjectName: subject.name,
-                    title: subject.name
-                  })
-                }
-                onToggleTopicBookmark={(topic) =>
-                  toggleBookmark({
-                    contentKey: `SUBJECT_SUMMARY_TOPIC:${topic.id}`,
-                    contentType: "SUBJECT_SUMMARY_TOPIC",
-                    path: buildCasesAndRatiosPath(selectedCaseType, { subjectId: subject.id, topicId: topic.id }),
-                    subjectName: subject.name,
-                    title: topic.name,
-                    topicName: topic.name
-                  })
-                }
-                selectedTopicId={selectedTopicId}
-                topicBookmarkKeys={bookmarkKeys}
-                subject={subject}
-              />
-            ))
+          ) : visibleRows.length ? (
+            <table className={cn("min-w-full text-left text-sm", isDark ? "text-slate-200" : "text-slate-700")}>
+              <thead className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-400")}>
+                <tr>
+                  <th className="px-4 py-3">Case</th>
+                  <th className="px-4 py-3">Type</th>
+                  <th className="px-4 py-3">Subject</th>
+                  <th className="px-4 py-3">Topic</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Created</th>
+                  <th className="px-4 py-3">Updated</th>
+                  <th className="px-4 py-3">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleRows.map((item) => (
+                  <tr className={cn("border-t", isDark ? "border-slate-800" : "border-slate-100")} key={item.id}>
+                    <td className="px-4 py-4">
+                      <div className="min-w-[240px]">
+                        <p className={cn("font-medium", isDark ? "text-white" : "text-slate-950")}>{item.title}</p>
+                        <p className={cn("mt-1 text-sm", isDark ? "text-slate-400" : "text-slate-500")}>{item.citation || item.court || "No citation."}</p>
+                      </div>
+                    </td>
+                    <td className="px-4 py-4">{item.jurisdiction || (selectedCaseType === "HANDBOOK" ? "Handbook" : "Textbook")}</td>
+                    <td className="px-4 py-4">{item.subject.name}</td>
+                    <td className="px-4 py-4">{item.topic.name}</td>
+                    <td className="px-4 py-4">
+                      <span
+                        className={cn(
+                          "inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold",
+                          isDark ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200" : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                        )}
+                      >
+                        Published
+                      </span>
+                    </td>
+                    <td className="px-4 py-4">{formatDate(item.createdAt)}</td>
+                    <td className="px-4 py-4">{formatDate(item.updatedAt)}</td>
+                    <td className="px-4 py-4">
+                      <Link
+                        className={cn(
+                          "inline-flex h-10 w-10 items-center justify-center rounded-2xl border shadow-sm transition",
+                          isDark
+                            ? "border-slate-700 bg-slate-950 text-slate-200 hover:border-slate-600 hover:bg-slate-900"
+                            : "border-slate-300 bg-white text-slate-900 hover:border-slate-400 hover:bg-slate-50"
+                        )}
+                        to={`/app/library/subject-summaries/cases/${item.id}?caseType=${selectedCaseType}`}
+                      >
+                        <Eye className="h-4 w-4" />
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           ) : (
             <div className={cn("rounded-[24px] border px-6 py-8 text-sm leading-7", isDark ? "border-slate-800 bg-slate-950 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600")}>
-              No published cases and ratios materials are available yet.
+              No published {selectedCaseType === "HANDBOOK" ? "handbook" : "textbook"} cases match the current filters.
             </div>
           )}
         </div>
+
+        {casesQuery.data ? (
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-500")}>
+              Page {casesQuery.data.pagination.page} of {casesQuery.data.pagination.totalPages}
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60",
+                  isDark ? "border-slate-700 bg-slate-950 text-slate-100 hover:bg-slate-900" : "border-slate-300 bg-white text-slate-900 hover:bg-slate-50"
+                )}
+                disabled={casesQuery.data.pagination.page <= 1}
+                onClick={() => setCaseFilters((current) => ({ ...current, page: Math.max(1, current.page - 1) }))}
+                type="button"
+              >
+                <ChevronLeft className="h-4 w-4" />
+                Previous
+              </button>
+              <button
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60",
+                  isDark ? "border-slate-700 bg-slate-950 text-slate-100 hover:bg-slate-900" : "border-slate-300 bg-white text-slate-900 hover:bg-slate-50"
+                )}
+                disabled={casesQuery.data.pagination.page >= casesQuery.data.pagination.totalPages}
+                onClick={() =>
+                  setCaseFilters((current) => ({
+                    ...current,
+                    page: Math.min(casesQuery.data.pagination.totalPages, current.page + 1)
+                  }))
+                }
+                type="button"
+              >
+                Next
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        ) : null}
       </section>
     </div>
   );

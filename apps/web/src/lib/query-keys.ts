@@ -34,6 +34,7 @@ export const queryKeys = {
   subjectSummaryHierarchyCases: (topicId: string, params: Record<string, unknown>) => ['subject-summary-hierarchy-cases', topicId, params] as const,
   subjectSummaryHierarchyTopics: (subjectId: string, params: Record<string, unknown>) => ['subject-summary-hierarchy-topics', subjectId, params] as const,
   subjectSummaryPublishedAutocomplete: (query: string) => ['subject-summary-published-autocomplete', query] as const,
+  subjectSummaryPublishedCases: (filters: Record<string, unknown>) => ['subject-summary-published-cases', filters] as const,
   subjectSummaryPublishedHierarchy: (params: Record<string, unknown>) => ['subject-summary-published-hierarchy', params] as const,
   subjectSummaryPublishedHierarchyCases: (topicId: string, params: Record<string, unknown>) => ['subject-summary-published-hierarchy-cases', topicId, params] as const,
   subjectSummaryPublishedHierarchyTopics: (subjectId: string, params: Record<string, unknown>) => ['subject-summary-published-hierarchy-topics', subjectId, params] as const,

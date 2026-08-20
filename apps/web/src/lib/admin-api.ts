@@ -462,6 +462,39 @@ export type SubjectSummaryCaseList = {
   }>;
 };
 
+export type PublishedSubjectSummaryCaseFilters = {
+  caseType?: "all" | SubjectSummaryCaseType;
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  sortBy?: "createdAt" | "title" | "updatedAt" | "year";
+  sortOrder?: "asc" | "desc";
+  subjectId?: string;
+  topicId?: string;
+};
+
+export type PublishedSubjectSummaryCaseList = {
+  items: SubjectSummaryCase[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    totalItems: number;
+    totalPages: number;
+  };
+  subjects: Array<{
+    id: string;
+    name: string;
+  }>;
+  topics: Array<{
+    id: string;
+    name: string;
+    subjectId: string;
+  }>;
+  summary: {
+    totalCases: number;
+  };
+};
+
 export type SubjectSummaryHierarchySubject = SubjectSummarySubject & {
   hasTopics: boolean;
 };
@@ -1617,6 +1650,35 @@ export async function fetchPublishedSubjectSummaryHierarchy(params: SubjectSumma
     }
     const response = await authenticatedHttp.get<{ success: true; data: SubjectSummaryHierarchyResponse }>(
       "/api/v1/library/subject-summaries/hierarchy",
+      {
+        params: { ...queryParams, caseType }
+      }
+    );
+    return response.data.data;
+  }
+}
+
+export async function fetchPublishedSubjectSummaryCases(filters: PublishedSubjectSummaryCaseFilters = {}) {
+  const caseType = filters.caseType ?? "all";
+  const { caseType: _caseType, ...rest } = filters;
+  const queryParams = Object.fromEntries(createQueryParams(rest).entries());
+  try {
+    const response = await authenticatedHttp.get<{ success: true; data: PublishedSubjectSummaryCaseList }>(
+      `/api/v1/library/subject-summaries/cases/type/${caseType}`,
+      {
+        params: queryParams
+      }
+    );
+    return response.data.data;
+  } catch (error) {
+    const status = error && typeof error === "object" && "response" in error
+      ? (error as { response?: { status?: number } }).response?.status ?? null
+      : null;
+    if (status !== 404) {
+      throw error;
+    }
+    const response = await authenticatedHttp.get<{ success: true; data: PublishedSubjectSummaryCaseList }>(
+      "/api/v1/library/subject-summaries/cases",
       {
         params: { ...queryParams, caseType }
       }

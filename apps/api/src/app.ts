@@ -50,12 +50,14 @@ import {
   getSubjectSummaryHierarchyCases,
   getSubjectSummaryHierarchyTopics,
   getSubjectSummaryReadingInsights,
+  listPublishedSubjectSummaryCases,
   listSubjectSummaryCases,
   listSubjectSummarySubjects,
   listSubjectSummaryTopics,
   parseSubjectSummaryAutocompleteQuery,
   parseSubjectSummaryCaseBulkAction,
   parseSubjectSummaryCaseFilters,
+  parsePublishedSubjectSummaryCaseFilters,
   parseSubjectSummaryCaseInput,
   parseSubjectSummaryHierarchyQuery,
   parseSubjectSummarySubjectBulkAction,
@@ -8399,6 +8401,105 @@ export function createApp(options: AppOptions = {}) {
           success: false,
           error: {
             code: "SUBJECT_SUMMARY_CASE_FETCH_FAILED",
+            message: "Could not load published subject summary cases."
+          }
+        });
+      }
+    }
+  );
+
+  app.get(
+    "/api/v1/library/subject-summaries/cases",
+    authenticateRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required for published subject summary cases."
+          }
+        });
+      }
+
+      try {
+        const filters = parsePublishedSubjectSummaryCaseFilters(request.query as Record<string, string | string[] | undefined>);
+        const data = await listPublishedSubjectSummaryCases(filters);
+
+        response.set("Cache-Control", "no-store");
+        response.set("Vary", "Authorization");
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return response.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "The published subject summary case list query is invalid.",
+              details: error.flatten()
+            }
+          });
+        }
+
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "SUBJECT_SUMMARY_CASE_LIST_FAILED",
+            message: "Could not load published subject summary cases."
+          }
+        });
+      }
+    }
+  );
+
+  app.get(
+    "/api/v1/library/subject-summaries/cases/type/:caseType",
+    authenticateRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required for published subject summary cases."
+          }
+        });
+      }
+
+      try {
+        const filters = parsePublishedSubjectSummaryCaseFilters({
+          ...(request.query as Record<string, string | string[] | undefined>),
+          caseType: String(request.params.caseType)
+        });
+        const data = await listPublishedSubjectSummaryCases(filters);
+
+        response.set("Cache-Control", "no-store");
+        response.set("Vary", "Authorization");
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return response.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "The published subject summary case list query is invalid.",
+              details: error.flatten()
+            }
+          });
+        }
+
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "SUBJECT_SUMMARY_CASE_LIST_FAILED",
             message: "Could not load published subject summary cases."
           }
         });
