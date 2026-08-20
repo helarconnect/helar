@@ -1002,9 +1002,6 @@ export function StudentSubjectSummariesPage() {
                   <th className="px-4 py-3">Type</th>
                   <th className="px-4 py-3">Subject</th>
                   <th className="px-4 py-3">Topic</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">Created</th>
-                  <th className="px-4 py-3">Updated</th>
                   <th className="px-4 py-3">Action</th>
                 </tr>
               </thead>
@@ -1020,18 +1017,6 @@ export function StudentSubjectSummariesPage() {
                     <td className="px-4 py-4">{item.jurisdiction || (selectedCaseType === "HANDBOOK" ? "Handbook" : "Textbook")}</td>
                     <td className="px-4 py-4">{item.subject.name}</td>
                     <td className="px-4 py-4">{item.topic.name}</td>
-                    <td className="px-4 py-4">
-                      <span
-                        className={cn(
-                          "inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold",
-                          isDark ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200" : "border-emerald-200 bg-emerald-50 text-emerald-700"
-                        )}
-                      >
-                        Published
-                      </span>
-                    </td>
-                    <td className="px-4 py-4">{formatDate(item.createdAt)}</td>
-                    <td className="px-4 py-4">{formatDate(item.updatedAt)}</td>
                     <td className="px-4 py-4">
                       <Link
                         className={cn(
