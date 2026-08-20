@@ -472,6 +472,11 @@ export type SubjectSummaryHierarchyTopic = SubjectSummaryTopic & {
 
 export type SubjectSummaryHierarchyResponse = {
   items: SubjectSummaryHierarchySubject[];
+  summary: {
+    handbookCases: number;
+    textbookCases: number;
+    totalCases: number;
+  };
 };
 
 export type SubjectSummaryHierarchyTopicResponse = {

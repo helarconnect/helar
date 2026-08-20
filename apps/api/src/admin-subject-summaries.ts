@@ -143,6 +143,11 @@ type ReadingInsight = {
 };
 
 type SubjectSummaryCaseTypeFilter = "all" | "HANDBOOK" | "TEXTBOOK";
+type SubjectSummaryHierarchySummary = {
+  handbookCases: number;
+  textbookCases: number;
+  totalCases: number;
+};
 
 function nullIfBlank(value: string) {
   return value.trim() ? value.trim() : null;
@@ -177,6 +182,34 @@ function buildCaseTypeWhere(caseType: SubjectSummaryCaseTypeFilter): Prisma.Subj
     jurisdiction: {
       in: values
     }
+  };
+}
+
+async function countCaseTypeSummary(baseWhere: Prisma.SubjectSummaryCaseWhereInput = {}): Promise<SubjectSummaryHierarchySummary> {
+  const [totalCases, handbookCases, textbookCases] = await Promise.all([
+    prisma.subjectSummaryCase.count({
+      where: {
+        ...baseWhere
+      }
+    }),
+    prisma.subjectSummaryCase.count({
+      where: {
+        ...baseWhere,
+        ...buildCaseTypeWhere("HANDBOOK")
+      }
+    }),
+    prisma.subjectSummaryCase.count({
+      where: {
+        ...baseWhere,
+        ...buildCaseTypeWhere("TEXTBOOK")
+      }
+    })
+  ]);
+
+  return {
+    handbookCases,
+    textbookCases,
+    totalCases
   };
 }
 
@@ -851,107 +884,112 @@ export async function listSubjectSummaryCases(filters: SubjectSummaryCaseFilters
 
 export async function getSubjectSummaryHierarchy(query: SubjectSummaryHierarchyQuery) {
   const caseTypeWhere = buildCaseTypeWhere(query.caseType);
-
-  const subjects = await prisma.subjectSummarySubject.findMany({
-    where: {
-      deletedAt: null,
-      ...(query.caseType === "all"
-        ? {}
-        : {
-            topics: {
-              some: {
-                deletedAt: null,
-                cases: {
-                  some: {
-                    deletedAt: null,
-                    ...caseTypeWhere
-                  }
-                }
-              }
-            }
-          }),
-      ...(query.search
-        ? {
-            OR: [
-              {
-                name: containsText(query.search)
-              },
-              {
-                description: containsText(query.search)
-              },
-              {
-                topics: {
-                  some: {
-                    deletedAt: null,
-                    OR: [
-                      {
-                        name: containsText(query.search)
-                      },
-                      {
-                        description: containsText(query.search)
-                      }
-                    ]
-                  }
-                }
-              },
-              {
-                cases: {
-                  some: {
-                    deletedAt: null,
-                    ...caseTypeWhere,
-                    OR: [
-                      {
-                        title: containsText(query.search)
-                      },
-                      {
-                        citation: containsText(query.search)
-                      },
-                      {
-                        caseSummary: containsText(query.search)
-                      }
-                    ]
-                  }
-                }
-              }
-            ]
-          }
-        : {})
-    },
-    orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
-    include: {
-      _count: {
-        select: {
-          cases: {
-            where: {
-              deletedAt: null,
-              ...caseTypeWhere
-            }
-          },
-          topics: {
-            where: {
-              deletedAt: null,
-              ...(query.caseType === "all"
-                ? {}
-                : {
-                    cases: {
-                      some: {
-                        deletedAt: null,
-                        ...caseTypeWhere
-                      }
+  const [subjects, summary] = await Promise.all([
+    prisma.subjectSummarySubject.findMany({
+      where: {
+        deletedAt: null,
+        ...(query.caseType === "all"
+          ? {}
+          : {
+              topics: {
+                some: {
+                  deletedAt: null,
+                  cases: {
+                    some: {
+                      deletedAt: null,
+                      ...caseTypeWhere
                     }
-                  })
+                  }
+                }
+              }
+            }),
+        ...(query.search
+          ? {
+              OR: [
+                {
+                  name: containsText(query.search)
+                },
+                {
+                  description: containsText(query.search)
+                },
+                {
+                  topics: {
+                    some: {
+                      deletedAt: null,
+                      OR: [
+                        {
+                          name: containsText(query.search)
+                        },
+                        {
+                          description: containsText(query.search)
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  cases: {
+                    some: {
+                      deletedAt: null,
+                      ...caseTypeWhere,
+                      OR: [
+                        {
+                          title: containsText(query.search)
+                        },
+                        {
+                          citation: containsText(query.search)
+                        },
+                        {
+                          caseSummary: containsText(query.search)
+                        }
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          : {})
+      },
+      orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+      include: {
+        _count: {
+          select: {
+            cases: {
+              where: {
+                deletedAt: null,
+                ...caseTypeWhere
+              }
+            },
+            topics: {
+              where: {
+                deletedAt: null,
+                ...(query.caseType === "all"
+                  ? {}
+                  : {
+                      cases: {
+                        some: {
+                          deletedAt: null,
+                          ...caseTypeWhere
+                        }
+                      }
+                    })
+              }
             }
           }
         }
       }
-    }
-  });
+    }),
+    countCaseTypeSummary({
+      deletedAt: null
+    })
+  ]);
 
   return {
     items: subjects.map((subject) => ({
       ...mapSubject(subject),
       hasTopics: subject._count.topics > 0
-    }))
+    })),
+    summary
   };
 }
 
@@ -1079,111 +1117,125 @@ export async function getSubjectSummaryHierarchyCases(topicId: string, query: Su
 
 export async function getPublishedSubjectSummaryHierarchy(query: SubjectSummaryHierarchyQuery) {
   const caseTypeWhere = buildCaseTypeWhere(query.caseType);
-
-  const subjects = await prisma.subjectSummarySubject.findMany({
-    where: {
-      deletedAt: null,
-      status: SubjectSummaryStatus.ACTIVE,
-      topics: {
-        some: {
-          deletedAt: null,
-          status: SubjectSummaryStatus.ACTIVE,
-          cases: {
-            some: {
-              deletedAt: null,
-              ...caseTypeWhere,
-              status: SubjectSummaryCaseStatus.PUBLISHED
+  const [subjects, summary] = await Promise.all([
+    prisma.subjectSummarySubject.findMany({
+      where: {
+        deletedAt: null,
+        status: SubjectSummaryStatus.ACTIVE,
+        topics: {
+          some: {
+            deletedAt: null,
+            status: SubjectSummaryStatus.ACTIVE,
+            cases: {
+              some: {
+                deletedAt: null,
+                ...caseTypeWhere,
+                status: SubjectSummaryCaseStatus.PUBLISHED
+              }
             }
           }
-        }
-      },
-      ...(query.search
-        ? {
-            OR: [
-              {
-                name: containsText(query.search)
-              },
-              {
-                description: containsText(query.search)
-              },
-              {
-                topics: {
-                  some: {
-                    deletedAt: null,
-                    status: SubjectSummaryStatus.ACTIVE,
-                    OR: [
-                      {
-                        name: containsText(query.search)
-                      },
-                      {
-                        description: containsText(query.search)
-                      },
-                      {
-                        cases: {
-                          some: {
-                            deletedAt: null,
-                            ...caseTypeWhere,
-                            status: SubjectSummaryCaseStatus.PUBLISHED,
-                            OR: [
-                              {
-                                title: containsText(query.search)
-                              },
-                              {
-                                citation: containsText(query.search)
-                              },
-                              {
-                                caseSummary: containsText(query.search)
-                              }
-                            ]
+        },
+        ...(query.search
+          ? {
+              OR: [
+                {
+                  name: containsText(query.search)
+                },
+                {
+                  description: containsText(query.search)
+                },
+                {
+                  topics: {
+                    some: {
+                      deletedAt: null,
+                      status: SubjectSummaryStatus.ACTIVE,
+                      OR: [
+                        {
+                          name: containsText(query.search)
+                        },
+                        {
+                          description: containsText(query.search)
+                        },
+                        {
+                          cases: {
+                            some: {
+                              deletedAt: null,
+                              ...caseTypeWhere,
+                              status: SubjectSummaryCaseStatus.PUBLISHED,
+                              OR: [
+                                {
+                                  title: containsText(query.search)
+                                },
+                                {
+                                  citation: containsText(query.search)
+                                },
+                                {
+                                  caseSummary: containsText(query.search)
+                                }
+                              ]
+                            }
                           }
                         }
-                      }
-                    ]
+                      ]
+                    }
                   }
                 }
-              }
-            ]
-          }
-        : {})
-    },
-    orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
-    include: {
-      _count: {
-        select: {
-          cases: {
-            where: {
-              deletedAt: null,
-              ...caseTypeWhere,
-              status: SubjectSummaryCaseStatus.PUBLISHED
+              ]
             }
-          },
-          topics: {
-            where: {
-              deletedAt: null,
-              status: SubjectSummaryStatus.ACTIVE,
-              ...(query.caseType === "all"
-                ? {}
-                : {
-                    cases: {
-                      some: {
-                        deletedAt: null,
-                        ...caseTypeWhere,
-                        status: SubjectSummaryCaseStatus.PUBLISHED
+          : {})
+      },
+      orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+      include: {
+        _count: {
+          select: {
+            cases: {
+              where: {
+                deletedAt: null,
+                ...caseTypeWhere,
+                status: SubjectSummaryCaseStatus.PUBLISHED
+              }
+            },
+            topics: {
+              where: {
+                deletedAt: null,
+                status: SubjectSummaryStatus.ACTIVE,
+                ...(query.caseType === "all"
+                  ? {}
+                  : {
+                      cases: {
+                        some: {
+                          deletedAt: null,
+                          ...caseTypeWhere,
+                          status: SubjectSummaryCaseStatus.PUBLISHED
+                        }
                       }
-                    }
-                  })
+                    })
+              }
             }
           }
         }
       }
-    }
-  });
+    }),
+    countCaseTypeSummary({
+      deletedAt: null,
+      status: SubjectSummaryCaseStatus.PUBLISHED,
+      subject: {
+        deletedAt: null,
+        status: SubjectSummaryStatus.ACTIVE
+      },
+      topic: {
+        deletedAt: null,
+        status: SubjectSummaryStatus.ACTIVE
+      }
+    })
+  ]);
 
   return {
     items: subjects.map((subject) => ({
       ...mapSubject(subject),
       hasTopics: subject._count.topics > 0
-    }))
+    })),
+    summary
   };
 }
 

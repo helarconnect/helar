@@ -1416,25 +1416,6 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
     queryFn: () => fetchSubjectSummaryCases(caseFilters),
     queryKey: queryKeys.subjectSummaryCases(caseFilters)
   });
-  const handbookCasesSummaryQuery = useQuery({
-    queryFn: () =>
-      fetchSubjectSummaryCases({
-        ...defaultCaseFilters,
-        caseType: "HANDBOOK",
-        pageSize: 1
-      }),
-    queryKey: queryKeys.subjectSummaryCases({ ...defaultCaseFilters, caseType: "HANDBOOK", pageSize: 1 })
-  });
-  const textbookCasesSummaryQuery = useQuery({
-    queryFn: () =>
-      fetchSubjectSummaryCases({
-        ...defaultCaseFilters,
-        caseType: "TEXTBOOK",
-        pageSize: 1
-      }),
-    queryKey: queryKeys.subjectSummaryCases({ ...defaultCaseFilters, caseType: "TEXTBOOK", pageSize: 1 })
-  });
-
   const listSubjectsQuery = useQuery({
     enabled: mode === "subjects",
     queryFn: () => fetchSubjectSummarySubjects(subjectFilters),
@@ -1697,15 +1678,16 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
 
   const overviewStats = useMemo(() => {
     const items = hierarchyQuery.data?.items ?? [];
+    const summary = hierarchyQuery.data?.summary;
 
     return {
-      handbookCaseCount: handbookCasesSummaryQuery.data?.summary.totalCases ?? 0,
-      textbookCaseCount: textbookCasesSummaryQuery.data?.summary.totalCases ?? 0,
-      totalCases: items.reduce((sum, item) => sum + item.caseCount, 0),
+      handbookCaseCount: summary?.handbookCases ?? 0,
+      textbookCaseCount: summary?.textbookCases ?? 0,
+      totalCases: summary?.totalCases ?? 0,
       totalSubjects: items.length,
       totalTopics: items.reduce((sum, item) => sum + item.topicCount, 0)
     };
-  }, [handbookCasesSummaryQuery.data?.summary.totalCases, hierarchyQuery.data?.items, textbookCasesSummaryQuery.data?.summary.totalCases]);
+  }, [hierarchyQuery.data?.items, hierarchyQuery.data?.summary]);
 
   useEffect(() => {
     const editCaseId = searchParams.get("editCase");

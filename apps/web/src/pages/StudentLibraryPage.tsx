@@ -816,21 +816,11 @@ export function StudentSubjectSummariesPage() {
   const selectedCaseType: SubjectSummaryCaseType = searchParams.get("caseType") === "HANDBOOK" ? "HANDBOOK" : "TEXTBOOK";
   const selectedSubjectId = searchParams.get("subjectId");
   const selectedTopicId = searchParams.get("topicId");
-  const handbookParams = useMemo(() => ({ caseType: "HANDBOOK" as const }), []);
-  const textbookParams = useMemo(() => ({ caseType: "TEXTBOOK" as const }), []);
   const activeHierarchyParams = useMemo(() => ({ caseType: selectedCaseType }), [selectedCaseType]);
 
   const hierarchyQuery = useQuery({
     queryFn: () => fetchPublishedSubjectSummaryHierarchy(activeHierarchyParams),
     queryKey: queryKeys.subjectSummaryPublishedHierarchy(activeHierarchyParams)
-  });
-  const handbookHierarchyQuery = useQuery({
-    queryFn: () => fetchPublishedSubjectSummaryHierarchy(handbookParams),
-    queryKey: queryKeys.subjectSummaryPublishedHierarchy(handbookParams)
-  });
-  const textbookHierarchyQuery = useQuery({
-    queryFn: () => fetchPublishedSubjectSummaryHierarchy(textbookParams),
-    queryKey: queryKeys.subjectSummaryPublishedHierarchy(textbookParams)
   });
   const autocompleteResultsQuery = useQuery({
     enabled: autocompleteQuery.trim().length >= 2,
@@ -855,14 +845,8 @@ export function StudentSubjectSummariesPage() {
   });
 
   const totalSubjects = hierarchyQuery.data?.items.length ?? 0;
-  const handbookTotalCases = useMemo(
-    () => (handbookHierarchyQuery.data?.items ?? []).reduce((sum, item) => sum + item.caseCount, 0),
-    [handbookHierarchyQuery.data?.items]
-  );
-  const textbookTotalCases = useMemo(
-    () => (textbookHierarchyQuery.data?.items ?? []).reduce((sum, item) => sum + item.caseCount, 0),
-    [textbookHierarchyQuery.data?.items]
-  );
+  const handbookTotalCases = hierarchyQuery.data?.summary.handbookCases ?? 0;
+  const textbookTotalCases = hierarchyQuery.data?.summary.textbookCases ?? 0;
   const bookmarks = bookmarksQuery.data?.items ?? [];
   const bookmarkKeys = new Set(bookmarks.map((item) => item.contentKey));
   const summaryText = useMemo(
