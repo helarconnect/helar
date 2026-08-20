@@ -70,7 +70,7 @@ export function StudentBarFinalExamQuestionPage() {
             <button
               className={cn(
                 "inline-flex h-11 items-center justify-center gap-2 rounded-2xl border px-4 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60",
-                isDark ? "border-white/10 bg-white text-slate-950 hover:bg-slate-100" : "border-slate-200 bg-slate-950 text-white hover:bg-slate-900"
+                isDark ? "border-slate-700 bg-slate-900 text-slate-100 hover:bg-slate-800" : "border-slate-300 bg-white text-slate-900 hover:bg-slate-50"
               )}
               disabled={!previousQuestionId}
               onClick={() => navigate(`/app/bar-final-exams-nls-mcq/${subjectId}/questions/${previousQuestionId}`)}
@@ -82,7 +82,7 @@ export function StudentBarFinalExamQuestionPage() {
             <button
               className={cn(
                 "inline-flex h-11 items-center justify-center gap-2 rounded-2xl border px-4 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60",
-                isDark ? "border-white/10 bg-white text-slate-950 hover:bg-slate-100" : "border-slate-200 bg-slate-950 text-white hover:bg-slate-900"
+                isDark ? "border-slate-700 bg-slate-900 text-slate-100 hover:bg-slate-800" : "border-slate-300 bg-white text-slate-900 hover:bg-slate-50"
               )}
               disabled={!nextQuestionId}
               onClick={() => navigate(`/app/bar-final-exams-nls-mcq/${subjectId}/questions/${nextQuestionId}`)}

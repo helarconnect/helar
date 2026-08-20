@@ -11,6 +11,8 @@ import { containsText } from "./lib/text-search.js";
 import { getPremiumContentAccess, truncateWords, PREMIUM_PREVIEW_WORD_LIMIT } from "./premium-access.js";
 import { runBatchTransaction } from "./lib/transactions.js";
 
+const publishedVisibleStatuses: SubjectSummaryStatus[] = [SubjectSummaryStatus.ACTIVE, SubjectSummaryStatus.INACTIVE];
+
 const subjectFiltersSchema = z.object({
   page: z.coerce.number().int().min(1).max(10_000).default(1),
   // Max 500 per page supports reference dropdowns and bulk selection workflows
@@ -1134,11 +1136,11 @@ export async function getPublishedSubjectSummaryHierarchy(query: SubjectSummaryH
     prisma.subjectSummarySubject.findMany({
       where: {
         deletedAt: null,
-        status: SubjectSummaryStatus.ACTIVE,
+        status: { in: publishedVisibleStatuses },
         topics: {
           some: {
             deletedAt: null,
-            status: SubjectSummaryStatus.ACTIVE,
+            status: { in: publishedVisibleStatuses },
             cases: {
               some: {
                 deletedAt: null,
@@ -1161,7 +1163,7 @@ export async function getPublishedSubjectSummaryHierarchy(query: SubjectSummaryH
                   topics: {
                     some: {
                       deletedAt: null,
-                      status: SubjectSummaryStatus.ACTIVE,
+                      status: { in: publishedVisibleStatuses },
                       OR: [
                         {
                           name: containsText(query.search)
@@ -1211,7 +1213,7 @@ export async function getPublishedSubjectSummaryHierarchy(query: SubjectSummaryH
             topics: {
               where: {
                 deletedAt: null,
-                status: SubjectSummaryStatus.ACTIVE,
+                status: { in: publishedVisibleStatuses },
                 ...(query.caseType === "all"
                   ? {}
                   : {
@@ -1234,11 +1236,11 @@ export async function getPublishedSubjectSummaryHierarchy(query: SubjectSummaryH
       status: SubjectSummaryCaseStatus.PUBLISHED,
       subject: {
         deletedAt: null,
-        status: SubjectSummaryStatus.ACTIVE
+        status: { in: publishedVisibleStatuses }
       },
       topic: {
         deletedAt: null,
-        status: SubjectSummaryStatus.ACTIVE
+        status: { in: publishedVisibleStatuses }
       }
     })
   ]);
@@ -1258,7 +1260,7 @@ export async function getPublishedSubjectSummaryHierarchyTopics(subjectId: strin
   const topics = await prisma.subjectSummaryTopic.findMany({
     where: {
       deletedAt: null,
-      status: SubjectSummaryStatus.ACTIVE,
+      status: { in: publishedVisibleStatuses },
       subjectId,
       cases: {
         some: {
@@ -1269,7 +1271,7 @@ export async function getPublishedSubjectSummaryHierarchyTopics(subjectId: strin
       },
       subject: {
         deletedAt: null,
-        status: SubjectSummaryStatus.ACTIVE
+        status: { in: publishedVisibleStatuses }
       },
       ...(query.search
         ? {
@@ -1340,11 +1342,11 @@ export async function getPublishedSubjectSummaryHierarchyCases(topicId: string, 
       topicId,
       subject: {
         deletedAt: null,
-        status: SubjectSummaryStatus.ACTIVE
+        status: { in: publishedVisibleStatuses }
       },
       topic: {
         deletedAt: null,
-        status: SubjectSummaryStatus.ACTIVE
+        status: { in: publishedVisibleStatuses }
       },
       ...(query.search
         ? {
@@ -1420,11 +1422,11 @@ export async function getPublishedSubjectSummaryCaseDetail(caseId: string, userI
       status: SubjectSummaryCaseStatus.PUBLISHED,
       subject: {
         deletedAt: null,
-        status: SubjectSummaryStatus.ACTIVE
+        status: { in: publishedVisibleStatuses }
       },
       topic: {
         deletedAt: null,
-        status: SubjectSummaryStatus.ACTIVE
+        status: { in: publishedVisibleStatuses }
       }
     },
     include: {
@@ -1743,11 +1745,11 @@ export async function autocompletePublishedSubjectSummaries(query: SubjectSummar
     prisma.subjectSummarySubject.findMany({
       where: {
         deletedAt: null,
-        status: SubjectSummaryStatus.ACTIVE,
+        status: { in: publishedVisibleStatuses },
         topics: {
           some: {
             deletedAt: null,
-            status: SubjectSummaryStatus.ACTIVE,
+            status: { in: publishedVisibleStatuses },
             cases: {
               some: {
                 deletedAt: null,
@@ -1776,7 +1778,7 @@ export async function autocompletePublishedSubjectSummaries(query: SubjectSummar
     prisma.subjectSummaryTopic.findMany({
       where: {
         deletedAt: null,
-        status: SubjectSummaryStatus.ACTIVE,
+        status: { in: publishedVisibleStatuses },
         cases: {
           some: {
             deletedAt: null,
@@ -1786,7 +1788,7 @@ export async function autocompletePublishedSubjectSummaries(query: SubjectSummar
         },
         subject: {
           deletedAt: null,
-          status: SubjectSummaryStatus.ACTIVE
+          status: { in: publishedVisibleStatuses }
         },
         OR: [
           {
@@ -1814,11 +1816,11 @@ export async function autocompletePublishedSubjectSummaries(query: SubjectSummar
         status: SubjectSummaryCaseStatus.PUBLISHED,
         subject: {
           deletedAt: null,
-          status: SubjectSummaryStatus.ACTIVE
+          status: { in: publishedVisibleStatuses }
         },
         topic: {
           deletedAt: null,
-          status: SubjectSummaryStatus.ACTIVE
+          status: { in: publishedVisibleStatuses }
         },
         OR: [
           {

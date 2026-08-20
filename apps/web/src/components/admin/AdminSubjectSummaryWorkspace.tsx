@@ -2231,7 +2231,7 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
             ) : null}
             <div className="mt-6 overflow-x-auto">
               {listSubjectsQuery.data?.items.length ? (
-                <table className="min-w-full text-left text-sm">
+                <table className={cn("min-w-full text-left text-sm", isDark ? "text-slate-200" : "text-slate-700")}>
                   <thead className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-400")}>
                     <tr>
                       <th className="px-4 py-3">
@@ -2374,7 +2374,7 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
             ) : null}
             <div className="mt-6 overflow-x-auto">
               {listTopicsQuery.data?.items.length ? (
-                <table className="min-w-full text-left text-sm">
+                <table className={cn("min-w-full text-left text-sm", isDark ? "text-slate-200" : "text-slate-700")}>
                   <thead className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-400")}>
                     <tr>
                       <th className="px-4 py-3">
@@ -2538,7 +2538,7 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
             ) : null}
             <div className="mt-6 overflow-x-auto">
               {visibleCaseRows.length ? (
-                <table className="min-w-full text-left text-sm">
+                <table className={cn("min-w-full text-left text-sm", isDark ? "text-slate-200" : "text-slate-700")}>
                   <thead className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-400")}>
                     <tr>
                       <th className="px-4 py-3">
