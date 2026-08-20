@@ -1599,14 +1599,30 @@ export async function fetchSubjectSummaryHierarchy(params: SubjectSummaryHierarc
 export async function fetchPublishedSubjectSummaryHierarchy(params: SubjectSummaryHierarchyQuery = {}) {
   const caseType = params.caseType ?? "all";
   const { caseType: _caseType, ...rest } = params;
-  const response = await authenticatedHttp.get<{ success: true; data: SubjectSummaryHierarchyResponse }>(
-    `/api/v1/library/subject-summaries/hierarchy/type/${caseType}`,
-    {
-      params: Object.fromEntries(createQueryParams(rest).entries())
+  const queryParams = Object.fromEntries(createQueryParams(rest).entries());
+  try {
+    const response = await authenticatedHttp.get<{ success: true; data: SubjectSummaryHierarchyResponse }>(
+      `/api/v1/library/subject-summaries/hierarchy/type/${caseType}`,
+      {
+        params: queryParams
+      }
+    );
+    return response.data.data;
+  } catch (error) {
+    const status = error && typeof error === "object" && "response" in error
+      ? (error as { response?: { status?: number } }).response?.status ?? null
+      : null;
+    if (status !== 404) {
+      throw error;
     }
-  );
-
-  return response.data.data;
+    const response = await authenticatedHttp.get<{ success: true; data: SubjectSummaryHierarchyResponse }>(
+      "/api/v1/library/subject-summaries/hierarchy",
+      {
+        params: { ...queryParams, caseType }
+      }
+    );
+    return response.data.data;
+  }
 }
 
 export async function fetchSubjectSummaryHierarchyTopics(subjectId: string, params: SubjectSummaryHierarchyQuery = {}) {
@@ -1625,14 +1641,30 @@ export async function fetchSubjectSummaryHierarchyTopics(subjectId: string, para
 export async function fetchPublishedSubjectSummaryHierarchyTopics(subjectId: string, params: SubjectSummaryHierarchyQuery = {}) {
   const caseType = params.caseType ?? "all";
   const { caseType: _caseType, ...rest } = params;
-  const response = await authenticatedHttp.get<{ success: true; data: SubjectSummaryHierarchyTopicResponse }>(
-    `/api/v1/library/subject-summaries/hierarchy/subjects/${subjectId}/topics/type/${caseType}`,
-    {
-      params: Object.fromEntries(createQueryParams(rest).entries())
+  const queryParams = Object.fromEntries(createQueryParams(rest).entries());
+  try {
+    const response = await authenticatedHttp.get<{ success: true; data: SubjectSummaryHierarchyTopicResponse }>(
+      `/api/v1/library/subject-summaries/hierarchy/subjects/${subjectId}/topics/type/${caseType}`,
+      {
+        params: queryParams
+      }
+    );
+    return response.data.data;
+  } catch (error) {
+    const status = error && typeof error === "object" && "response" in error
+      ? (error as { response?: { status?: number } }).response?.status ?? null
+      : null;
+    if (status !== 404) {
+      throw error;
     }
-  );
-
-  return response.data.data;
+    const response = await authenticatedHttp.get<{ success: true; data: SubjectSummaryHierarchyTopicResponse }>(
+      `/api/v1/library/subject-summaries/hierarchy/subjects/${subjectId}/topics`,
+      {
+        params: { ...queryParams, caseType }
+      }
+    );
+    return response.data.data;
+  }
 }
 
 export async function fetchSubjectSummaryHierarchyCases(topicId: string, params: SubjectSummaryHierarchyQuery = {}) {
@@ -1651,14 +1683,30 @@ export async function fetchSubjectSummaryHierarchyCases(topicId: string, params:
 export async function fetchPublishedSubjectSummaryHierarchyCases(topicId: string, params: SubjectSummaryHierarchyQuery = {}) {
   const caseType = params.caseType ?? "all";
   const { caseType: _caseType, ...rest } = params;
-  const response = await authenticatedHttp.get<{ success: true; data: SubjectSummaryHierarchyCaseResponse }>(
-    `/api/v1/library/subject-summaries/hierarchy/topics/${topicId}/cases/type/${caseType}`,
-    {
-      params: Object.fromEntries(createQueryParams(rest).entries())
+  const queryParams = Object.fromEntries(createQueryParams(rest).entries());
+  try {
+    const response = await authenticatedHttp.get<{ success: true; data: SubjectSummaryHierarchyCaseResponse }>(
+      `/api/v1/library/subject-summaries/hierarchy/topics/${topicId}/cases/type/${caseType}`,
+      {
+        params: queryParams
+      }
+    );
+    return response.data.data;
+  } catch (error) {
+    const status = error && typeof error === "object" && "response" in error
+      ? (error as { response?: { status?: number } }).response?.status ?? null
+      : null;
+    if (status !== 404) {
+      throw error;
     }
-  );
-
-  return response.data.data;
+    const response = await authenticatedHttp.get<{ success: true; data: SubjectSummaryHierarchyCaseResponse }>(
+      `/api/v1/library/subject-summaries/hierarchy/topics/${topicId}/cases`,
+      {
+        params: { ...queryParams, caseType }
+      }
+    );
+    return response.data.data;
+  }
 }
 
 export async function autocompleteSubjectSummaries(query: string, limit = 8, caseType: "all" | SubjectSummaryCaseType = "all") {

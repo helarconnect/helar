@@ -194,9 +194,11 @@ function buildCaseTypeWhere(caseType: SubjectSummaryCaseTypeFilter): Prisma.Subj
   }
 
   return {
-    jurisdiction: {
-      in: values
-    }
+    OR: values.map((value) => ({
+      jurisdiction: {
+        contains: value
+      }
+    }))
   };
 }
 
