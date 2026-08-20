@@ -4865,6 +4865,58 @@ export function createApp(options: AppOptions = {}) {
   );
 
   app.get(
+    "/api/v1/admin/subject-summaries/hierarchy/type/:caseType",
+    authenticateRequest,
+    requireAdminRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required for the subject summaries workspace."
+          }
+        });
+      }
+
+      try {
+        const query = parseSubjectSummaryHierarchyQuery({
+          ...(request.query as Record<string, string | string[] | undefined>),
+          caseType: String(request.params.caseType)
+        });
+        const data = await getSubjectSummaryHierarchy(query);
+
+        response.set("Cache-Control", "no-store");
+        response.set("Vary", "Authorization");
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return response.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "The subject summaries hierarchy query is invalid.",
+              details: error.flatten()
+            }
+          });
+        }
+
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "SUBJECT_SUMMARY_HIERARCHY_FAILED",
+            message: "Could not load the subject summary hierarchy."
+          }
+        });
+      }
+    }
+  );
+
+  app.get(
     "/api/v1/admin/subject-summaries/hierarchy/subjects/:subjectId/topics",
     authenticateRequest,
     requireAdminRequest,
@@ -4914,6 +4966,58 @@ export function createApp(options: AppOptions = {}) {
   );
 
   app.get(
+    "/api/v1/admin/subject-summaries/hierarchy/subjects/:subjectId/topics/type/:caseType",
+    authenticateRequest,
+    requireAdminRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required for subject summary topics."
+          }
+        });
+      }
+
+      try {
+        const query = parseSubjectSummaryHierarchyQuery({
+          ...(request.query as Record<string, string | string[] | undefined>),
+          caseType: String(request.params.caseType)
+        });
+        const data = await getSubjectSummaryHierarchyTopics(String(request.params.subjectId), query);
+
+        response.set("Cache-Control", "no-store");
+        response.set("Vary", "Authorization");
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return response.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "The subject summary topic query is invalid.",
+              details: error.flatten()
+            }
+          });
+        }
+
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "SUBJECT_SUMMARY_TOPIC_FETCH_FAILED",
+            message: "Could not load subject summary topics."
+          }
+        });
+      }
+    }
+  );
+
+  app.get(
     "/api/v1/admin/subject-summaries/hierarchy/topics/:topicId/cases",
     authenticateRequest,
     requireAdminRequest,
@@ -4930,6 +5034,58 @@ export function createApp(options: AppOptions = {}) {
 
       try {
         const query = parseSubjectSummaryHierarchyQuery(request.query as Record<string, string | string[] | undefined>);
+        const data = await getSubjectSummaryHierarchyCases(String(request.params.topicId), query);
+
+        response.set("Cache-Control", "no-store");
+        response.set("Vary", "Authorization");
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return response.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "The subject summary case query is invalid.",
+              details: error.flatten()
+            }
+          });
+        }
+
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "SUBJECT_SUMMARY_CASE_FETCH_FAILED",
+            message: "Could not load subject summary cases."
+          }
+        });
+      }
+    }
+  );
+
+  app.get(
+    "/api/v1/admin/subject-summaries/hierarchy/topics/:topicId/cases/type/:caseType",
+    authenticateRequest,
+    requireAdminRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required for subject summary cases."
+          }
+        });
+      }
+
+      try {
+        const query = parseSubjectSummaryHierarchyQuery({
+          ...(request.query as Record<string, string | string[] | undefined>),
+          caseType: String(request.params.caseType)
+        });
         const data = await getSubjectSummaryHierarchyCases(String(request.params.topicId), query);
 
         response.set("Cache-Control", "no-store");
@@ -8002,6 +8158,57 @@ export function createApp(options: AppOptions = {}) {
   );
 
   app.get(
+    "/api/v1/library/subject-summaries/hierarchy/type/:caseType",
+    authenticateRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required for the subject summaries workspace."
+          }
+        });
+      }
+
+      try {
+        const query = parseSubjectSummaryHierarchyQuery({
+          ...(request.query as Record<string, string | string[] | undefined>),
+          caseType: String(request.params.caseType)
+        });
+        const data = await getPublishedSubjectSummaryHierarchy(query);
+
+        response.set("Cache-Control", "no-store");
+        response.set("Vary", "Authorization");
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return response.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "The published subject summaries hierarchy query is invalid.",
+              details: error.flatten()
+            }
+          });
+        }
+
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "SUBJECT_SUMMARY_HIERARCHY_FAILED",
+            message: "Could not load the published subject summary hierarchy."
+          }
+        });
+      }
+    }
+  );
+
+  app.get(
     "/api/v1/library/subject-summaries/hierarchy/subjects/:subjectId/topics",
     authenticateRequest,
     async (request: AuthenticatedRequest, response: Response) => {
@@ -8050,6 +8257,57 @@ export function createApp(options: AppOptions = {}) {
   );
 
   app.get(
+    "/api/v1/library/subject-summaries/hierarchy/subjects/:subjectId/topics/type/:caseType",
+    authenticateRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required for published subject summary topics."
+          }
+        });
+      }
+
+      try {
+        const query = parseSubjectSummaryHierarchyQuery({
+          ...(request.query as Record<string, string | string[] | undefined>),
+          caseType: String(request.params.caseType)
+        });
+        const data = await getPublishedSubjectSummaryHierarchyTopics(String(request.params.subjectId), query);
+
+        response.set("Cache-Control", "no-store");
+        response.set("Vary", "Authorization");
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return response.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "The published subject summary topic query is invalid.",
+              details: error.flatten()
+            }
+          });
+        }
+
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "SUBJECT_SUMMARY_TOPIC_FETCH_FAILED",
+            message: "Could not load published subject summary topics."
+          }
+        });
+      }
+    }
+  );
+
+  app.get(
     "/api/v1/library/subject-summaries/hierarchy/topics/:topicId/cases",
     authenticateRequest,
     async (request: AuthenticatedRequest, response: Response) => {
@@ -8065,6 +8323,57 @@ export function createApp(options: AppOptions = {}) {
 
       try {
         const query = parseSubjectSummaryHierarchyQuery(request.query as Record<string, string | string[] | undefined>);
+        const data = await getPublishedSubjectSummaryHierarchyCases(String(request.params.topicId), query);
+
+        response.set("Cache-Control", "no-store");
+        response.set("Vary", "Authorization");
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return response.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "The published subject summary case query is invalid.",
+              details: error.flatten()
+            }
+          });
+        }
+
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "SUBJECT_SUMMARY_CASE_FETCH_FAILED",
+            message: "Could not load published subject summary cases."
+          }
+        });
+      }
+    }
+  );
+
+  app.get(
+    "/api/v1/library/subject-summaries/hierarchy/topics/:topicId/cases/type/:caseType",
+    authenticateRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required for published subject summary cases."
+          }
+        });
+      }
+
+      try {
+        const query = parseSubjectSummaryHierarchyQuery({
+          ...(request.query as Record<string, string | string[] | undefined>),
+          caseType: String(request.params.caseType)
+        });
         const data = await getPublishedSubjectSummaryHierarchyCases(String(request.params.topicId), query);
 
         response.set("Cache-Control", "no-store");

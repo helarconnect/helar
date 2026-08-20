@@ -1584,10 +1584,12 @@ export async function fetchAdminUsers(filters: AdminUserListFilters) {
 }
 
 export async function fetchSubjectSummaryHierarchy(params: SubjectSummaryHierarchyQuery = {}) {
+  const caseType = params.caseType ?? "all";
+  const { caseType: _caseType, ...rest } = params;
   const response = await authenticatedHttp.get<{ success: true; data: SubjectSummaryHierarchyResponse }>(
-    "/api/v1/admin/subject-summaries/hierarchy",
+    `/api/v1/admin/subject-summaries/hierarchy/type/${caseType}`,
     {
-      params: Object.fromEntries(createQueryParams(params).entries())
+      params: Object.fromEntries(createQueryParams(rest).entries())
     }
   );
 
@@ -1595,10 +1597,12 @@ export async function fetchSubjectSummaryHierarchy(params: SubjectSummaryHierarc
 }
 
 export async function fetchPublishedSubjectSummaryHierarchy(params: SubjectSummaryHierarchyQuery = {}) {
+  const caseType = params.caseType ?? "all";
+  const { caseType: _caseType, ...rest } = params;
   const response = await authenticatedHttp.get<{ success: true; data: SubjectSummaryHierarchyResponse }>(
-    "/api/v1/library/subject-summaries/hierarchy",
+    `/api/v1/library/subject-summaries/hierarchy/type/${caseType}`,
     {
-      params: Object.fromEntries(createQueryParams(params).entries())
+      params: Object.fromEntries(createQueryParams(rest).entries())
     }
   );
 
@@ -1606,10 +1610,12 @@ export async function fetchPublishedSubjectSummaryHierarchy(params: SubjectSumma
 }
 
 export async function fetchSubjectSummaryHierarchyTopics(subjectId: string, params: SubjectSummaryHierarchyQuery = {}) {
+  const caseType = params.caseType ?? "all";
+  const { caseType: _caseType, ...rest } = params;
   const response = await authenticatedHttp.get<{ success: true; data: SubjectSummaryHierarchyTopicResponse }>(
-    `/api/v1/admin/subject-summaries/hierarchy/subjects/${subjectId}/topics`,
+    `/api/v1/admin/subject-summaries/hierarchy/subjects/${subjectId}/topics/type/${caseType}`,
     {
-      params: Object.fromEntries(createQueryParams(params).entries())
+      params: Object.fromEntries(createQueryParams(rest).entries())
     }
   );
 
@@ -1617,10 +1623,12 @@ export async function fetchSubjectSummaryHierarchyTopics(subjectId: string, para
 }
 
 export async function fetchPublishedSubjectSummaryHierarchyTopics(subjectId: string, params: SubjectSummaryHierarchyQuery = {}) {
+  const caseType = params.caseType ?? "all";
+  const { caseType: _caseType, ...rest } = params;
   const response = await authenticatedHttp.get<{ success: true; data: SubjectSummaryHierarchyTopicResponse }>(
-    `/api/v1/library/subject-summaries/hierarchy/subjects/${subjectId}/topics`,
+    `/api/v1/library/subject-summaries/hierarchy/subjects/${subjectId}/topics/type/${caseType}`,
     {
-      params: Object.fromEntries(createQueryParams(params).entries())
+      params: Object.fromEntries(createQueryParams(rest).entries())
     }
   );
 
@@ -1628,10 +1636,12 @@ export async function fetchPublishedSubjectSummaryHierarchyTopics(subjectId: str
 }
 
 export async function fetchSubjectSummaryHierarchyCases(topicId: string, params: SubjectSummaryHierarchyQuery = {}) {
+  const caseType = params.caseType ?? "all";
+  const { caseType: _caseType, ...rest } = params;
   const response = await authenticatedHttp.get<{ success: true; data: SubjectSummaryHierarchyCaseResponse }>(
-    `/api/v1/admin/subject-summaries/hierarchy/topics/${topicId}/cases`,
+    `/api/v1/admin/subject-summaries/hierarchy/topics/${topicId}/cases/type/${caseType}`,
     {
-      params: Object.fromEntries(createQueryParams(params).entries())
+      params: Object.fromEntries(createQueryParams(rest).entries())
     }
   );
 
@@ -1639,10 +1649,12 @@ export async function fetchSubjectSummaryHierarchyCases(topicId: string, params:
 }
 
 export async function fetchPublishedSubjectSummaryHierarchyCases(topicId: string, params: SubjectSummaryHierarchyQuery = {}) {
+  const caseType = params.caseType ?? "all";
+  const { caseType: _caseType, ...rest } = params;
   const response = await authenticatedHttp.get<{ success: true; data: SubjectSummaryHierarchyCaseResponse }>(
-    `/api/v1/library/subject-summaries/hierarchy/topics/${topicId}/cases`,
+    `/api/v1/library/subject-summaries/hierarchy/topics/${topicId}/cases/type/${caseType}`,
     {
-      params: Object.fromEntries(createQueryParams(params).entries())
+      params: Object.fromEntries(createQueryParams(rest).entries())
     }
   );
 
