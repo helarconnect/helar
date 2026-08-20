@@ -61,6 +61,20 @@ function stripHtml(value: string) {
     .trim();
 }
 
+function matchesCaseTypeLabel(value: string | null | undefined, caseType: SubjectSummaryCaseType) {
+  const normalizedValue = value?.trim().toLowerCase();
+
+  if (caseType === "HANDBOOK") {
+    return normalizedValue === "handbook";
+  }
+
+  return normalizedValue === "textbook" || normalizedValue === "textbooks";
+}
+
+function countHierarchyCases(items: SubjectSummaryHierarchySubject[] | undefined) {
+  return (items ?? []).reduce((sum, item) => sum + item.caseCount, 0);
+}
+
 function BookmarkButton({
   active,
   isDark,
@@ -122,6 +136,7 @@ function StudentSubjectSummaryTopicItem({
     queryFn: () => fetchPublishedSubjectSummaryHierarchyCases(topic.id, { caseType }),
     queryKey: queryKeys.subjectSummaryPublishedHierarchyCases(topic.id, { caseType })
   });
+  const visibleCases = (casesQuery.data?.items ?? []).filter((item) => matchesCaseTypeLabel(item.jurisdiction, caseType));
 
   return (
     <div
@@ -153,9 +168,9 @@ function StudentSubjectSummaryTopicItem({
         <div className={cn("border-t px-4 py-4", isDark ? "border-slate-800" : "border-slate-200")}>
           {casesQuery.isLoading ? (
             <p className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-500")}>Loading cases...</p>
-          ) : casesQuery.data?.items.length ? (
+          ) : visibleCases.length ? (
             <div className="space-y-3">
-              {casesQuery.data.items.map((item) => (
+              {visibleCases.map((item) => (
                 <Link
                   className={cn("block rounded-[20px] border px-4 py-3 transition", isDark ? "border-slate-800 bg-slate-950 hover:border-slate-700" : "border-slate-200 bg-slate-50 hover:border-slate-300")}
                   key={item.id}
@@ -816,12 +831,15 @@ export function StudentSubjectSummariesPage() {
   const selectedCaseType: SubjectSummaryCaseType = searchParams.get("caseType") === "HANDBOOK" ? "HANDBOOK" : "TEXTBOOK";
   const selectedSubjectId = searchParams.get("subjectId");
   const selectedTopicId = searchParams.get("topicId");
-  const activeHierarchyParams = useMemo(() => ({ caseType: selectedCaseType }), [selectedCaseType]);
-
-  const hierarchyQuery = useQuery({
-    queryFn: () => fetchPublishedSubjectSummaryHierarchy(activeHierarchyParams),
-    queryKey: queryKeys.subjectSummaryPublishedHierarchy(activeHierarchyParams)
+  const handbookHierarchyQuery = useQuery({
+    queryFn: () => fetchPublishedSubjectSummaryHierarchy({ caseType: "HANDBOOK" }),
+    queryKey: queryKeys.subjectSummaryPublishedHierarchy({ caseType: "HANDBOOK" })
   });
+  const textbookHierarchyQuery = useQuery({
+    queryFn: () => fetchPublishedSubjectSummaryHierarchy({ caseType: "TEXTBOOK" }),
+    queryKey: queryKeys.subjectSummaryPublishedHierarchy({ caseType: "TEXTBOOK" })
+  });
+  const activeHierarchyQuery = selectedCaseType === "HANDBOOK" ? handbookHierarchyQuery : textbookHierarchyQuery;
   const autocompleteResultsQuery = useQuery({
     enabled: autocompleteQuery.trim().length >= 2,
     queryFn: () => autocompletePublishedSubjectSummaries(autocompleteQuery, 8, selectedCaseType),
@@ -844,11 +862,10 @@ export function StudentSubjectSummariesPage() {
     }
   });
 
-  const hierarchyItems = hierarchyQuery.data?.items ?? [];
+  const hierarchyItems = activeHierarchyQuery.data?.items ?? [];
   const totalSubjects = hierarchyItems.length;
-  const hierarchySummary = hierarchyQuery.data?.summary;
-  const handbookTotalCases = hierarchySummary?.handbookCases ?? 0;
-  const textbookTotalCases = hierarchySummary?.textbookCases ?? 0;
+  const handbookTotalCases = countHierarchyCases(handbookHierarchyQuery.data?.items);
+  const textbookTotalCases = countHierarchyCases(textbookHierarchyQuery.data?.items);
   const bookmarks = bookmarksQuery.data?.items ?? [];
   const bookmarkKeys = new Set(bookmarks.map((item) => item.contentKey));
   const summaryText = useMemo(
@@ -1004,14 +1021,14 @@ export function StudentSubjectSummariesPage() {
         </div>
 
         <div className="mt-6 space-y-4">
-          {hierarchyQuery.isLoading ? (
+          {activeHierarchyQuery.isLoading ? (
             <p className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-500")}>Loading cases and ratios hierarchy...</p>
-          ) : hierarchyQuery.isError ? (
+          ) : activeHierarchyQuery.isError ? (
             <div className={cn("rounded-[24px] border px-6 py-8 text-sm leading-7", isDark ? "border-slate-800 bg-slate-950 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600")}>
               Could not load the published cases and ratios hierarchy right now.
             </div>
-          ) : hierarchyQuery.data?.items.length ? (
-            hierarchyQuery.data.items.map((subject) => (
+          ) : activeHierarchyQuery.data?.items.length ? (
+            activeHierarchyQuery.data.items.map((subject) => (
               <StudentSubjectSummarySubjectItem
                 autoExpand={selectedSubjectId === subject.id}
                 bookmarkActive={bookmarkKeys.has(`SUBJECT_SUMMARY_SUBJECT:${subject.id}`)}

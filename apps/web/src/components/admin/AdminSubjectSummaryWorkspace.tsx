@@ -192,6 +192,18 @@ function normalizeCaseTypeLabel(value: string | null | undefined): "Handbook" | 
     : "Handbook";
 }
 
+function matchesSelectedCaseType(value: string | null | undefined, caseType: "all" | SubjectSummaryCaseType) {
+  if (caseType === "all") {
+    return true;
+  }
+
+  return normalizeCaseTypeLabel(value) === (caseType === "HANDBOOK" ? "Handbook" : "Textbook");
+}
+
+function countHierarchyCases(items: Array<{ caseCount: number }> | undefined) {
+  return (items ?? []).reduce((sum, item) => sum + item.caseCount, 0);
+}
+
 function ToastViewport({
   isDark,
   onDismiss,
@@ -1049,6 +1061,7 @@ function HierarchyTopicItem({
     queryFn: () => fetchSubjectSummaryHierarchyCases(topic.id, { caseType }),
     queryKey: queryKeys.subjectSummaryHierarchyCases(topic.id, { caseType })
   });
+  const visibleCases = (casesQuery.data?.items ?? []).filter((item) => matchesSelectedCaseType(item.jurisdiction, caseType));
   const selection = {
     subjectId: topic.subjectId,
     subjectName: topic.subject.name,
@@ -1129,9 +1142,9 @@ function HierarchyTopicItem({
           ) : null}
           {casesQuery.isLoading ? (
             <p className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-500")}>Loading cases...</p>
-          ) : casesQuery.data?.items.length ? (
+          ) : visibleCases.length ? (
             <div className="space-y-3">
-              {casesQuery.data.items.map((item) => (
+              {visibleCases.map((item) => (
                 <div
                   className={cn(
                     "flex items-center justify-between gap-3 rounded-[20px] border px-4 py-3",
@@ -1373,6 +1386,14 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
     queryFn: () => fetchSubjectSummaryHierarchy({ caseType: selectedCaseType }),
     queryKey: queryKeys.subjectSummaryHierarchy({ caseType: selectedCaseType })
   });
+  const handbookHierarchyQuery = useQuery({
+    queryFn: () => fetchSubjectSummaryHierarchy({ caseType: "HANDBOOK" }),
+    queryKey: queryKeys.subjectSummaryHierarchy({ caseType: "HANDBOOK" })
+  });
+  const textbookHierarchyQuery = useQuery({
+    queryFn: () => fetchSubjectSummaryHierarchy({ caseType: "TEXTBOOK" }),
+    queryKey: queryKeys.subjectSummaryHierarchy({ caseType: "TEXTBOOK" })
+  });
 
   const readingInsightsQuery = useQuery({
     queryFn: fetchSubjectSummaryReadingInsights,
@@ -1433,6 +1454,7 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
     queryFn: () => fetchSubjectSummaryCases(caseFilters),
     queryKey: queryKeys.subjectSummaryCases(caseFilters)
   });
+  const visibleCaseRows = (casesQuery.data?.items ?? []).filter((item) => matchesSelectedCaseType(item.jurisdiction, caseFilters.caseType));
   const listSubjectsQuery = useQuery({
     enabled: mode === "subjects",
     queryFn: () => fetchSubjectSummarySubjects(subjectFilters),
@@ -1695,16 +1717,17 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
 
   const overviewStats = useMemo(() => {
     const items = hierarchyQuery.data?.items ?? [];
-    const summary = hierarchyQuery.data?.summary;
+    const handbookCaseCount = countHierarchyCases(handbookHierarchyQuery.data?.items);
+    const textbookCaseCount = countHierarchyCases(textbookHierarchyQuery.data?.items);
 
     return {
-      handbookCaseCount: summary?.handbookCases ?? 0,
-      textbookCaseCount: summary?.textbookCases ?? 0,
-      totalCases: summary?.totalCases ?? 0,
+      handbookCaseCount,
+      textbookCaseCount,
+      totalCases: handbookCaseCount + textbookCaseCount,
       totalSubjects: items.length,
       totalTopics: items.reduce((sum, item) => sum + item.topicCount, 0)
     };
-  }, [hierarchyQuery.data?.items, hierarchyQuery.data?.summary]);
+  }, [handbookHierarchyQuery.data?.items, hierarchyQuery.data?.items, textbookHierarchyQuery.data?.items]);
 
   useEffect(() => {
     setCaseFilters((current) =>
@@ -2480,14 +2503,14 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
               </div>
             ) : null}
             <div className="mt-6 overflow-x-auto">
-              {casesQuery.data?.items.length ? (
+              {visibleCaseRows.length ? (
                 <table className="min-w-full text-left text-sm">
                   <thead className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-400")}>
                     <tr>
                       <th className="px-4 py-3">
                         <input
-                          checked={selectedCaseIds.length > 0 && selectedCaseIds.length === casesQuery.data.items.length}
-                          onChange={(event) => setSelectedCaseIds(event.target.checked ? casesQuery.data.items.map((item) => item.id) : [])}
+                          checked={visibleCaseRows.length > 0 && visibleCaseRows.every((item) => selectedCaseIds.includes(item.id))}
+                          onChange={(event) => setSelectedCaseIds(event.target.checked ? visibleCaseRows.map((item) => item.id) : [])}
                           type="checkbox"
                         />
                       </th>
@@ -2502,7 +2525,7 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {casesQuery.data.items.map((item) => (
+                    {visibleCaseRows.map((item) => (
                       <tr className={cn("border-t", isDark ? "border-slate-800" : "border-slate-100")} key={item.id}>
                         <td className="px-4 py-4">
                           <input
