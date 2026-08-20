@@ -846,9 +846,9 @@ export function StudentSubjectSummariesPage() {
 
   const hierarchyItems = hierarchyQuery.data?.items ?? [];
   const totalSubjects = hierarchyItems.length;
-  const fallbackVisibleCaseCount = hierarchyItems.reduce((sum, item) => sum + item.caseCount, 0);
-  const handbookTotalCases = hierarchyQuery.data?.summary?.handbookCases ?? (selectedCaseType === "HANDBOOK" ? fallbackVisibleCaseCount : 0);
-  const textbookTotalCases = hierarchyQuery.data?.summary?.textbookCases ?? (selectedCaseType === "TEXTBOOK" ? fallbackVisibleCaseCount : 0);
+  const hierarchySummary = hierarchyQuery.data?.summary;
+  const handbookTotalCases = hierarchySummary?.handbookCases ?? 0;
+  const textbookTotalCases = hierarchySummary?.textbookCases ?? 0;
   const bookmarks = bookmarksQuery.data?.items ?? [];
   const bookmarkKeys = new Set(bookmarks.map((item) => item.contentKey));
   const summaryText = useMemo(

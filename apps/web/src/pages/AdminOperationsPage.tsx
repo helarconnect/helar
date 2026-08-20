@@ -1074,7 +1074,7 @@ export function AdminContentReviewDetailPage() {
           facts: draftSnapshot.facts ?? original.facts ?? '',
           issues: draftSnapshot.issues ?? original.issues ?? '',
           judges: original.judges ?? [],
-          jurisdiction: original.jurisdiction ?? '',
+          jurisdiction: original.jurisdiction === 'Textbook' || original.jurisdiction === 'Textbooks' ? 'Textbook' : 'Handbook',
           keywords: draftSnapshot.keywords ?? original.keywords ?? [],
           legalPrinciples: draftSnapshot.legalPrinciples ?? original.legalPrinciples ?? [],
           obiterDicta: draftSnapshot.obiterDicta ?? original.obiterDicta ?? '',

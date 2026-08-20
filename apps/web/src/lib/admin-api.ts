@@ -387,7 +387,7 @@ export type SubjectSummaryCaseInput = {
   facts: string;
   issues: string;
   judges: string[];
-  jurisdiction: string;
+  jurisdiction: "Handbook" | "Textbook";
   keywords: string[];
   legalPrinciples: string[];
   obiterDicta: string;

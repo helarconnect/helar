@@ -171,7 +171,7 @@ function createCaseDraft(subjectId = "", topicId = ""): SubjectSummaryCaseInput 
     facts: "",
     issues: "",
     judges: [],
-    jurisdiction: "",
+    jurisdiction: "Handbook",
     keywords: [],
     legalPrinciples: [],
     obiterDicta: "",
@@ -184,6 +184,12 @@ function createCaseDraft(subjectId = "", topicId = ""): SubjectSummaryCaseInput 
     topicId,
     year: null
   };
+}
+
+function normalizeCaseTypeLabel(value: string | null | undefined): "Handbook" | "Textbook" {
+  return value?.trim().toLowerCase() === "textbook" || value?.trim().toLowerCase() === "textbooks"
+    ? "Textbook"
+    : "Handbook";
 }
 
 function ToastViewport({
@@ -1791,7 +1797,7 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
             facts: item.facts,
             issues: item.issues,
             judges: item.judges,
-            jurisdiction: item.jurisdiction === "Textbooks" ? "Textbook" : item.jurisdiction,
+            jurisdiction: normalizeCaseTypeLabel(item.jurisdiction),
             keywords: item.keywords,
             legalPrinciples: item.legalPrinciples,
             obiterDicta: item.obiterDicta,
@@ -2528,7 +2534,7 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
                             ) : null}
                           </div>
                         </td>
-                        <td className="px-4 py-4">{item.jurisdiction === "Textbooks" ? "Textbook" : item.jurisdiction || "Unassigned"}</td>
+                        <td className="px-4 py-4">{item.jurisdiction}</td>
                         <td className="px-4 py-4">{item.subject.name}</td>
                         <td className="px-4 py-4">{item.topic.name}</td>
                         <td className="px-4 py-4"><StatusBadge isDark={isDark} value={item.status} /></td>

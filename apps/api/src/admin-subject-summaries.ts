@@ -75,6 +75,7 @@ const topicInputSchema = z
   .strict();
 
 const stringListFieldSchema = z.array(z.string().trim().min(1).max(500)).max(50).default([]);
+const caseTypeValueSchema = z.enum(["Handbook", "Textbook"]).optional().default("Handbook");
 
 const caseInputSchema = z
   .object({
@@ -87,7 +88,7 @@ const caseInputSchema = z
     facts: z.string().trim().max(80_000).optional().default(""),
     issues: z.string().trim().max(80_000).optional().default(""),
     judges: stringListFieldSchema,
-    jurisdiction: z.string().trim().max(200).optional().default(""),
+    jurisdiction: caseTypeValueSchema,
     keywords: stringListFieldSchema,
     legalPrinciples: stringListFieldSchema,
     obiterDicta: z.string().trim().max(80_000).optional().default(""),
@@ -157,14 +158,26 @@ function normalizeStringList(values: string[]) {
   return values.map((value) => value.trim()).filter(Boolean);
 }
 
+function normalizeStoredCaseType(value: string | null | undefined): "Handbook" | "Textbook" | null {
+  const normalizedValue = value?.trim().toLowerCase();
+
+  if (normalizedValue === "handbook") {
+    return "Handbook";
+  }
+
+  if (normalizedValue === "textbook" || normalizedValue === "textbooks") {
+    return "Textbook";
+  }
+
+  return null;
+}
+
 function resolveCaseTypeValues(caseType: SubjectSummaryCaseTypeFilter) {
   if (caseType === "HANDBOOK") {
     return ["Handbook"];
   }
 
   if (caseType === "TEXTBOOK") {
-    // Keep both spellings so older rows stored as "Textbooks" remain visible
-    // while the new UI consistently presents the singular "Textbook".
     return ["Textbook", "Textbooks"];
   }
 
@@ -328,7 +341,7 @@ function mapCase(item: {
     id: item.id,
     issues: item.issues ?? "",
     judges: item.judges,
-    jurisdiction: item.jurisdiction ?? "",
+    jurisdiction: normalizeStoredCaseType(item.jurisdiction) ?? "",
     keywords: item.keywords,
     legalPrinciples: item.legalPrinciples,
     obiterDicta: item.obiterDicta ?? "",
@@ -2182,7 +2195,7 @@ export async function createSubjectSummaryCase(
       facts: nullIfBlank(input.facts),
       issues: nullIfBlank(input.issues),
       judges: normalizeStringList(input.judges),
-      jurisdiction: nullIfBlank(input.jurisdiction),
+      jurisdiction: input.jurisdiction,
       keywords: normalizeStringList(input.keywords),
       legalPrinciples: normalizeStringList(input.legalPrinciples),
       obiterDicta: nullIfBlank(input.obiterDicta),
@@ -2258,7 +2271,7 @@ export async function updateSubjectSummaryCase(
       facts: nullIfBlank(input.facts),
       issues: nullIfBlank(input.issues),
       judges: normalizeStringList(input.judges),
-      jurisdiction: nullIfBlank(input.jurisdiction),
+      jurisdiction: input.jurisdiction,
       keywords: normalizeStringList(input.keywords),
       legalPrinciples: normalizeStringList(input.legalPrinciples),
       obiterDicta: nullIfBlank(input.obiterDicta),
