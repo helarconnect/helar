@@ -111,7 +111,10 @@ export function StudentBarFinalExamQuestionPage() {
                     Question
                   </p>
                   <div
-                    className={cn("prose prose-sm mt-3 max-w-none leading-7", isDark ? "prose-invert text-slate-200" : "text-slate-900")}
+                    // Use our project-standard .rich-text-content class for
+                    // professional styling (Libre Baskerville headings,
+                    // blockquotes with accent bar, styled code blocks, etc.)
+                    className={cn("mt-3 text-sm leading-8 rich-text-content", isDark ? "text-slate-200" : "text-slate-900")}
                     dangerouslySetInnerHTML={{ __html: currentQuestion.question }}
                   />
                 </div>
@@ -128,7 +131,10 @@ export function StudentBarFinalExamQuestionPage() {
                     Answer
                   </p>
                   <div
-                    className={cn("prose prose-sm mt-3 max-w-none leading-7", isDark ? "prose-invert text-slate-100" : "text-slate-800")}
+                    // Rich-text answer rendering inherits the emerald-tinted
+                    // card's background while using the shared rich-text
+                    // typography system.
+                    className={cn("mt-3 text-sm leading-8 rich-text-content", isDark ? "text-slate-100" : "text-slate-800")}
                     dangerouslySetInnerHTML={{ __html: currentQuestion.answer }}
                   />
                 </div>

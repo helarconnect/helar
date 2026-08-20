@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AxiosError } from "axios";
-import { CheckCircle2, ChevronRight, Circle, Eye, Pencil, Plus, Search, Trash2, X, XCircle } from "lucide-react";
+import { CheckCircle2, ChevronRight, Circle, Eye, Lock, Pencil, Plus, Search, Trash2, X, XCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
+import { RichTextEditor } from "@/components/ui/RichTextEditor";
 import { useTheme } from "@/hooks/useTheme";
 import {
   createAdminBarFinalExamMcqQuestion,
@@ -47,6 +48,79 @@ function truncateWords(value: string, maxWords: number) {
   }
 
   return { isTruncated: true, text: `${words.slice(0, maxWords).join(" ")}…` };
+}
+
+// --- MCQ Attempt Tracking (Answer Gating) -----------------------------------
+// Answers for each question are only revealed once the student has attempted
+// EVERY question in the selected subject. Attempt records are persisted to
+// localStorage under a per-subject composite key so the gating survives
+// page refreshes and browser restarts.
+
+const MCQ_ATTEMPT_STORAGE_PREFIX = "bar-final-mcq:attempts:";
+
+function buildAttemptStorageKey(subjectId: string) {
+  return `${MCQ_ATTEMPT_STORAGE_PREFIX}${subjectId}`;
+}
+
+function readAttemptedQuestionIds(subjectId: string): Set<string> {
+  if (typeof window === "undefined" || !subjectId) {
+    return new Set();
+  }
+
+  try {
+    const raw = window.localStorage.getItem(buildAttemptStorageKey(subjectId));
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return new Set(parsed.filter((item) => typeof item === "string"));
+    return new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function writeAttemptedQuestionId(subjectId: string, questionId: string) {
+  if (typeof window === "undefined" || !subjectId || !questionId) {
+    return;
+  }
+
+  const current = readAttemptedQuestionIds(subjectId);
+  if (current.has(questionId)) return;
+  current.add(questionId);
+  try {
+    window.localStorage.setItem(buildAttemptStorageKey(subjectId), JSON.stringify(Array.from(current)));
+  } catch {
+    // Ignore quota / disabled localStorage errors.
+  }
+}
+
+function useMcqAnswerGating(subjectId: string, allQuestionIds: string[]): {
+  allAttempted: boolean;
+  attemptedCount: number;
+  totalQuestions: number;
+  attemptedSet: Set<string>;
+  registerAttempt: (questionId: string) => void;
+} {
+  const [attemptedSet, setAttemptedSet] = useState<Set<string>>(() => readAttemptedQuestionIds(subjectId));
+
+  useEffect(() => {
+    setAttemptedSet(readAttemptedQuestionIds(subjectId));
+  }, [subjectId]);
+
+  const totalQuestions = allQuestionIds.length;
+  const attemptedCount = allQuestionIds.reduce((acc, id) => (attemptedSet.has(id) ? acc + 1 : acc), 0);
+  const allAttempted = totalQuestions > 0 && attemptedCount >= totalQuestions;
+
+  function registerAttempt(questionId: string) {
+    writeAttemptedQuestionId(subjectId, questionId);
+    setAttemptedSet((current) => {
+      if (current.has(questionId)) return current;
+      const next = new Set(current);
+      next.add(questionId);
+      return next;
+    });
+  }
+
+  return { allAttempted, attemptedCount, totalQuestions, attemptedSet, registerAttempt };
 }
 
 function statusLabel(status: BarFinalExamQuestionStatus) {
@@ -534,18 +608,15 @@ export function AdminBarFinalExamsMcqPage() {
                   </label>
                 </div>
 
-                <label className="space-y-2">
-                  <span className={cn("text-xs font-medium uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Question</span>
-                  <textarea
-                    className={cn(
-                      "min-h-[140px] w-full rounded-2xl border px-4 py-3 text-sm outline-none transition",
-                      isDark ? "border-slate-700 bg-slate-900 text-white" : "border-slate-200 bg-slate-50 text-slate-950"
-                    )}
-                    onChange={(event) => setDraft((current) => ({ ...current, question: event.target.value }))}
-                    placeholder="Type the question..."
-                    value={draft.question}
-                  />
-                </label>
+                <RichTextEditor
+                  isDark={isDark}
+                  label="Question"
+                  minHeight={180}
+                  maxHeight={300}
+                  onChange={(value) => setDraft((current) => ({ ...current, question: value }))}
+                  placeholder="Type the multiple choice question. Use headings, bullet points, and formatting as needed."
+                  value={draft.question}
+                />
 
                 <div className="space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-3">
@@ -577,7 +648,7 @@ export function AdminBarFinalExamsMcqPage() {
                       <div className="grid gap-2 sm:grid-cols-[auto_minmax(0,1fr)_auto]" key={index}>
                         <button
                           className={cn(
-                            "inline-flex h-11 w-11 items-center justify-center rounded-2xl border transition",
+                            "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border transition self-start mt-2",
                             isDark ? "border-slate-800 bg-slate-950/40 text-slate-200" : "border-slate-200 bg-white text-slate-700",
                             draft.correctOptionIndex === index
                               ? isDark
@@ -591,18 +662,18 @@ export function AdminBarFinalExamsMcqPage() {
                         >
                           {draft.correctOptionIndex === index ? <CheckCircle2 className="h-4 w-4" /> : <Circle className="h-4 w-4" />}
                         </button>
-                        <input
-                          className={cn(
-                            "w-full rounded-2xl border px-4 py-3 text-sm outline-none transition",
-                            isDark ? "border-slate-700 bg-slate-900 text-white" : "border-slate-200 bg-slate-50 text-slate-950"
-                          )}
-                          onChange={(event) => setOptionValue(index, event.target.value)}
-                          placeholder={`Option ${index + 1}`}
+                        <RichTextEditor
+                          isDark={isDark}
+                          label={`Option ${index + 1}`}
+                          minHeight={72}
+                          maxHeight={160}
+                          onChange={(value) => setOptionValue(index, value)}
+                          placeholder={`Option ${index + 1} — supports bold, italics, and lists`}
                           value={option}
                         />
                         <button
                           className={cn(
-                            "inline-flex h-11 w-11 items-center justify-center rounded-2xl border transition",
+                            "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border transition self-start mt-8",
                             draft.options.length <= 2
                               ? isDark
                                 ? "cursor-not-allowed border-slate-800 bg-slate-950/40 text-slate-600"
@@ -730,7 +801,13 @@ export function StudentBarFinalExamsMcqPage() {
 
   const subjects = subjectsQuery.data?.subjects ?? [];
   const questions = questionsQuery.data?.items ?? [];
+  const allQuestionIds = useMemo(() => questions.map((item) => item.id), [questions]);
   const activeSubject = subjects.find((subject) => subject.id === selectedSubjectId) ?? null;
+
+  // Use the same attempt gating hook on the list page so per-question
+  // badges and the subject-level progress bar update live as the student
+  // works through the exam.
+  const gating = useMcqAnswerGating(selectedSubjectId, allQuestionIds);
 
   useEffect(() => {
     if (!selectedSubjectId) {
@@ -842,10 +919,55 @@ export function StudentBarFinalExamsMcqPage() {
                 No published MCQ questions yet for this subject.
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-4">
+                {/* Subject-level answer-unlock progress summary */}
+                <div className={cn("rounded-2xl border px-4 py-3", isDark ? "border-slate-800 bg-slate-950/30" : "border-slate-200 bg-slate-50")}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Progress</span>
+                      <span className={cn("text-xs font-semibold", isDark ? "text-white" : "text-slate-950")}>
+                        {gating.attemptedCount}/{gating.totalQuestions} attempted
+                      </span>
+                    </div>
+                    <span
+                      className={cn(
+                        "inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]",
+                        gating.allAttempted
+                          ? isDark
+                            ? "bg-emerald-500/15 text-emerald-200"
+                            : "bg-emerald-50 text-emerald-700"
+                          : isDark
+                            ? "bg-amber-500/15 text-amber-200"
+                            : "bg-amber-50 text-amber-700"
+                      )}
+                    >
+                      {gating.allAttempted ? "Answers unlocked" : "Attempt all to unlock"}
+                    </span>
+                  </div>
+                  <div className={cn("mt-2.5 h-2 w-full overflow-hidden rounded-full", isDark ? "bg-slate-800" : "bg-slate-200")}>
+                    <div
+                      className={cn(
+                        "h-full rounded-full transition-all duration-500",
+                        gating.allAttempted
+                          ? isDark
+                            ? "bg-emerald-500"
+                            : "bg-emerald-600"
+                          : isDark
+                            ? "bg-amber-500"
+                            : "bg-amber-500"
+                      )}
+                      style={{
+                        width: `${gating.totalQuestions > 0 ? Math.max(0, Math.min(100, (gating.attemptedCount / gating.totalQuestions) * 100)) : 0}%`
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-3">
                 {questions.map((item, index) => {
                   const isActive = item.id === activeQuestionId;
-                  const preview = truncateWords(stripHtml(item.question), 100);
+                  const hasContent = stripHtml(item.question).length > 0;
+                  const attempted = gating.attemptedSet.has(item.id);
 
                   return (
                     <div
@@ -868,10 +990,49 @@ export function StudentBarFinalExamsMcqPage() {
                       <div className="flex flex-col gap-3">
                         <div className="space-y-3">
                           <div className="space-y-1">
-                            <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>
-                              {activeSubject?.name ?? "Subject"} • Question {index + 1}
-                            </p>
-                            <p className={cn("text-sm leading-7", isDark ? "text-slate-200" : "text-slate-900")}>{preview.text}</p>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>
+                                {activeSubject?.name ?? "Subject"} • Question {index + 1}
+                              </p>
+                              {/* Per-question status badge — Attempted / Not
+                                  yet attempted. When all are attempted a
+                                  global unlock badge shows above and per-
+                                  question answer colors display in reader. */}
+                              <span
+                                className={cn(
+                                  "inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]",
+                                  attempted
+                                    ? isDark
+                                      ? "bg-sky-500/15 text-sky-200"
+                                      : "bg-sky-50 text-sky-700"
+                                    : isDark
+                                      ? "bg-slate-700/60 text-slate-300"
+                                      : "bg-slate-100 text-slate-600"
+                                )}
+                              >
+                                {attempted ? "Attempted" : "Not attempted"}
+                              </span>
+                            </div>
+                            {hasContent ? (
+                              // Render rich text preview with controlled height
+                              // for professional card layout.
+                              <div
+                                className={cn(
+                                  "overflow-hidden text-sm leading-7 rich-text-preview rich-text-content",
+                                  isDark ? "text-slate-200" : "text-slate-900"
+                                )}
+                                style={{
+                                  display: "-webkit-box",
+                                  WebkitLineClamp: 5,
+                                  WebkitBoxOrient: "vertical",
+                                  maxHeight: "9rem",
+                                  overflow: "hidden"
+                                }}
+                                dangerouslySetInnerHTML={{ __html: item.question }}
+                              />
+                            ) : (
+                              <p className={cn("text-sm leading-7 italic", isDark ? "text-slate-500" : "text-slate-500")}>No question content.</p>
+                            )}
                             <p className={cn("text-xs", isDark ? "text-slate-400" : "text-slate-600")}>{item.options.length} options</p>
                           </div>
 
@@ -888,7 +1049,7 @@ export function StudentBarFinalExamsMcqPage() {
                               type="button"
                             >
                               <Eye className="h-4 w-4" />
-                              Attempt question
+                              {attempted ? "Review question" : "Attempt question"}
                             </button>
                           </div>
                         </div>
@@ -896,6 +1057,7 @@ export function StudentBarFinalExamsMcqPage() {
                     </div>
                   );
                 })}
+              </div>
               </div>
             )}
           </div>
@@ -972,6 +1134,15 @@ export function StudentBarFinalExamMcqQuestionPage() {
 
   const subjects = subjectsQuery.data?.subjects ?? [];
   const questions = questionsQuery.data?.items ?? [];
+  const allQuestionIds = useMemo(() => questions.map((item) => item.id), [questions]);
+
+  // Answer gating: answers are revealed only when EVERY question in the
+  // selected subject has been attempted. Individual submissions are still
+  // graded server-side; but the UI only shows correct/incorrect styling
+  // once the full set is complete.
+  const gating = useMcqAnswerGating(subjectId, allQuestionIds);
+  const canRevealAnswers = gating.allAttempted;
+
   const activeSubject = subjects.find((subject) => subject.id === subjectId) ?? null;
   const currentIndex = questions.findIndex((item) => item.id === questionId);
   const currentQuestion = currentIndex >= 0 ? questions[currentIndex] : null;
@@ -987,6 +1158,8 @@ export function StudentBarFinalExamMcqQuestionPage() {
         isCorrect: data.isCorrect,
         selectedOptionIndex: data.selectedOptionIndex
       });
+      // Persist attempt so answer gating can progress subject-wide.
+      gating.registerAttempt(questionId);
     }
   });
 
@@ -1056,16 +1229,26 @@ export function StudentBarFinalExamMcqQuestionPage() {
               <div className="space-y-5">
                 <div className={cn("rounded-3xl border p-5", isDark ? "border-slate-800 bg-slate-950/30" : "border-slate-200 bg-slate-50")}>
                   <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Question</p>
-                  <div className={cn("mt-3 whitespace-pre-wrap text-sm leading-7", isDark ? "text-slate-200" : "text-slate-900")}>
-                    {currentQuestion.question}
-                  </div>
+                  {stripHtml(currentQuestion.question) ? (
+                    // Rich-text question rendering with professional typography
+                    // (headings, lists, blockquotes all styled via .rich-text-content).
+                    <div
+                      className={cn("mt-3 text-sm leading-8 rich-text-content", isDark ? "text-slate-200" : "text-slate-900")}
+                      dangerouslySetInnerHTML={{ __html: currentQuestion.question }}
+                    />
+                  ) : (
+                    <p className={cn("mt-3 text-sm leading-7 italic", isDark ? "text-slate-500" : "text-slate-500")}>No question content available.</p>
+                  )}
                 </div>
 
                 <div className="space-y-2">
                   {currentQuestion.options.map((option, index) => {
                     const isSelected = selectedOptionIndex === index;
-                    const isCorrect = result?.correctOptionIndex === index;
-                    const isWrongSelection = result && result.selectedOptionIndex === index && !result.isCorrect;
+                    // Only apply correct/incorrect styling if all questions
+                    // in the subject have been attempted (answer gating).
+                    // Otherwise we show the user's selection but no result.
+                    const isCorrect = canRevealAnswers && result?.correctOptionIndex === index;
+                    const isWrongSelection = canRevealAnswers && result && result.selectedOptionIndex === index && !result.isCorrect;
 
                     return (
                       <button
@@ -1073,24 +1256,35 @@ export function StudentBarFinalExamMcqQuestionPage() {
                           "flex w-full items-start gap-3 rounded-3xl border px-4 py-4 text-left text-sm transition",
                           isDark ? "border-slate-800 bg-slate-950/30 text-slate-200" : "border-slate-200 bg-white text-slate-900",
                           isSelected ? (isDark ? "border-white/15 bg-white/10" : "border-slate-950 bg-slate-950 text-white") : null,
-                          result && isCorrect ? (isDark ? "border-emerald-500/40" : "border-emerald-200") : null,
-                          result && isWrongSelection ? (isDark ? "border-rose-500/40" : "border-rose-200") : null
+                          canRevealAnswers && isCorrect ? (isDark ? "border-emerald-500/40" : "border-emerald-200") : null,
+                          canRevealAnswers && isWrongSelection ? (isDark ? "border-rose-500/40" : "border-rose-200") : null
                         )}
                         disabled={attemptMutation.isPending}
                         key={index}
                         onClick={() => setSelectedOptionIndex(index)}
                         type="button"
                       >
-                        <span className={cn("mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded-full border text-xs font-semibold", isDark ? "border-slate-700" : "border-slate-200")}>
+                        <span className={cn("mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs font-semibold", isDark ? "border-slate-700" : "border-slate-200")}>
                           {index + 1}
                         </span>
-                        <span className="whitespace-pre-wrap leading-7">{option}</span>
+                        {stripHtml(option) ? (
+                          // Rich-text option rendering so admins can format
+                          // options with bold/italic for legal terminology.
+                          <div
+                            className={cn("min-w-0 flex-1 leading-7 rich-text-content rich-text-preview", isSelected ? "text-inherit" : "")}
+                            dangerouslySetInnerHTML={{ __html: option }}
+                          />
+                        ) : (
+                          <span className="leading-7 italic opacity-70">Empty option</span>
+                        )}
                       </button>
                     );
                   })}
                 </div>
 
-                {result ? (
+                {canRevealAnswers && result ? (
+                  // Full answer reveal card — visible only when every question
+                  // in the subject has been attempted.
                   <div
                     className={cn(
                       "rounded-3xl border p-4",
@@ -1107,11 +1301,73 @@ export function StudentBarFinalExamMcqQuestionPage() {
                     <p className="mt-2 text-sm">
                       Correct option: <span className="font-semibold">{result.correctOptionIndex + 1}</span>
                     </p>
+                    {result.isCorrect ? null : (
+                      <p className="mt-1 text-xs opacity-90">
+                        You selected option {result.selectedOptionIndex + 1}.
+                      </p>
+                    )}
+                  </div>
+                ) : !canRevealAnswers && result ? (
+                  // Attempt recorded, but other questions remain. Encourage
+                  // the student to complete all questions to see results.
+                  <div
+                    className={cn(
+                      "rounded-3xl border p-4",
+                      isDark
+                        ? "border-sky-500/25 bg-sky-500/10 text-sky-100"
+                        : "border-sky-200 bg-sky-50 text-sky-800"
+                    )}
+                  >
+                    <div className="flex items-start gap-2">
+                      <Lock className="mt-0.5 h-4 w-4 shrink-0" />
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.18em]">Answer locked</p>
+                        <p className="mt-2 text-sm">
+                          Your attempt was saved. To reveal correct answers for ALL questions in this subject, attempt the remaining{" "}
+                          <span className="font-semibold">{gating.totalQuestions - gating.attemptedCount}</span> question
+                          {gating.totalQuestions - gating.attemptedCount === 1 ? "" : "s"}.
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 ) : null}
               </div>
 
               <div className="space-y-3">
+                <div className={cn("rounded-3xl border px-4 py-4", isDark ? "border-slate-800 bg-slate-950/30" : "border-slate-200 bg-slate-50")}>
+                  <p className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Progress</p>
+                  <div className="mt-3 flex items-center justify-between text-sm">
+                    <span className={cn(isDark ? "text-slate-400" : "text-slate-600")}>Questions attempted</span>
+                    <span className={cn("font-semibold", isDark ? "text-white" : "text-slate-950")}>
+                      {gating.attemptedCount} / {gating.totalQuestions}
+                    </span>
+                  </div>
+                  {/* Compact progress bar — emerald when fully complete (answers
+                      unlocked), amber until then. */}
+                  <div className={cn("mt-3 h-2 w-full overflow-hidden rounded-full", isDark ? "bg-slate-800" : "bg-slate-200")}>
+                    <div
+                      className={cn(
+                        "h-full rounded-full transition-all duration-500",
+                        canRevealAnswers
+                          ? isDark
+                            ? "bg-emerald-500"
+                            : "bg-emerald-600"
+                          : isDark
+                            ? "bg-amber-500"
+                            : "bg-amber-500"
+                      )}
+                      style={{
+                        width: `${gating.totalQuestions > 0 ? Math.max(0, Math.min(100, (gating.attemptedCount / gating.totalQuestions) * 100)) : 0}%`
+                      }}
+                    />
+                  </div>
+                  <p className={cn("mt-2 text-xs", isDark ? "text-slate-400" : "text-slate-600")}>
+                    {canRevealAnswers
+                      ? "All questions attempted — answers are unlocked."
+                      : "Attempt all questions in this subject to reveal correct answers."}
+                  </p>
+                </div>
+
                 <div className={cn("rounded-3xl border px-4 py-4", isDark ? "border-slate-800 bg-slate-950/30" : "border-slate-200 bg-slate-50")}>
                   <p className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Controls</p>
                   <button
@@ -1136,7 +1392,7 @@ export function StudentBarFinalExamMcqQuestionPage() {
                   >
                     {attemptMutation.isPending ? (
                       <span>Submitting...</span>
-                    ) : result ? (
+                    ) : canRevealAnswers && result ? (
                       <>
                         {result.isCorrect ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
                         <span>Submit answer</span>

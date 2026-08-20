@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AxiosError } from "axios";
 import { CheckCircle2, ChevronRight, Eye, Pencil, Plus, Search, Trash2, X, XCircle } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -90,29 +90,6 @@ function stripHtml(value: string) {
     .replace(/&nbsp;/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function truncateWords(value: string, maxWords: number) {
-  const normalized = value.trim();
-  if (!normalized) {
-    return {
-      isTruncated: false,
-      text: ""
-    };
-  }
-
-  const words = normalized.split(/\s+/).filter(Boolean);
-  if (words.length <= maxWords) {
-    return {
-      isTruncated: false,
-      text: words.join(" ")
-    };
-  }
-
-  return {
-    isTruncated: true,
-    text: `${words.slice(0, maxWords).join(" ")}…`
-  };
 }
 
 function buildDefaultDraft(subjectId: string): BarFinalExamQuestionInput {
@@ -745,7 +722,7 @@ export function StudentBarFinalExamsMlsMcqPage() {
 
               {questions.map((item, index) => {
                 const isActive = item.id === activeQuestionId;
-                const preview = truncateWords(stripHtml(item.question), 100);
+                const hasContent = stripHtml(item.question).length > 0;
 
                 return (
                   <div
@@ -769,9 +746,28 @@ export function StudentBarFinalExamsMlsMcqPage() {
                           <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>
                             Question {index + 1}
                           </p>
-                          <p className={cn("text-sm leading-7", isDark ? "text-slate-200" : "text-slate-900")}>
-                            {preview.text}
-                          </p>
+                          {hasContent ? (
+                            // Render rich text preview with controlled height
+                            // to maintain professional card layout.
+                            <div
+                              className={cn(
+                                "overflow-hidden text-sm leading-7 rich-text-preview rich-text-content",
+                                isDark ? "text-slate-200" : "text-slate-900"
+                              )}
+                              style={{
+                                display: "-webkit-box",
+                                WebkitLineClamp: 5,
+                                WebkitBoxOrient: "vertical",
+                                maxHeight: "9rem",
+                                overflow: "hidden"
+                              }}
+                              dangerouslySetInnerHTML={{ __html: item.question }}
+                            />
+                          ) : (
+                            <p className={cn("text-sm leading-7 italic", isDark ? "text-slate-500" : "text-slate-500")}>
+                              No question content.
+                            </p>
+                          )}
                         </div>
 
                         <div className="flex flex-wrap items-center justify-end gap-2">
