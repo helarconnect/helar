@@ -4834,6 +4834,8 @@ export function createApp(options: AppOptions = {}) {
         const query = parseSubjectSummaryHierarchyQuery(request.query as Record<string, string | string[] | undefined>);
         const data = await getSubjectSummaryHierarchy(query);
 
+        response.set("Cache-Control", "no-store");
+        response.set("Vary", "Authorization");
         return response.json({
           success: true,
           data
@@ -4881,6 +4883,8 @@ export function createApp(options: AppOptions = {}) {
         const query = parseSubjectSummaryHierarchyQuery(request.query as Record<string, string | string[] | undefined>);
         const data = await getSubjectSummaryHierarchyTopics(String(request.params.subjectId), query);
 
+        response.set("Cache-Control", "no-store");
+        response.set("Vary", "Authorization");
         return response.json({
           success: true,
           data
@@ -4928,6 +4932,8 @@ export function createApp(options: AppOptions = {}) {
         const query = parseSubjectSummaryHierarchyQuery(request.query as Record<string, string | string[] | undefined>);
         const data = await getSubjectSummaryHierarchyCases(String(request.params.topicId), query);
 
+        response.set("Cache-Control", "no-store");
+        response.set("Vary", "Authorization");
         return response.json({
           success: true,
           data
@@ -7965,6 +7971,8 @@ export function createApp(options: AppOptions = {}) {
         const query = parseSubjectSummaryHierarchyQuery(request.query as Record<string, string | string[] | undefined>);
         const data = await getPublishedSubjectSummaryHierarchy(query);
 
+        response.set("Cache-Control", "no-store");
+        response.set("Vary", "Authorization");
         return response.json({
           success: true,
           data
@@ -8011,6 +8019,8 @@ export function createApp(options: AppOptions = {}) {
         const query = parseSubjectSummaryHierarchyQuery(request.query as Record<string, string | string[] | undefined>);
         const data = await getPublishedSubjectSummaryHierarchyTopics(String(request.params.subjectId), query);
 
+        response.set("Cache-Control", "no-store");
+        response.set("Vary", "Authorization");
         return response.json({
           success: true,
           data
@@ -8057,6 +8067,8 @@ export function createApp(options: AppOptions = {}) {
         const query = parseSubjectSummaryHierarchyQuery(request.query as Record<string, string | string[] | undefined>);
         const data = await getPublishedSubjectSummaryHierarchyCases(String(request.params.topicId), query);
 
+        response.set("Cache-Control", "no-store");
+        response.set("Vary", "Authorization");
         return response.json({
           success: true,
           data

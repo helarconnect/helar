@@ -200,10 +200,6 @@ function matchesSelectedCaseType(value: string | null | undefined, caseType: "al
   return normalizeCaseTypeLabel(value) === (caseType === "HANDBOOK" ? "Handbook" : "Textbook");
 }
 
-function countHierarchyCases(items: Array<{ caseCount: number }> | undefined) {
-  return (items ?? []).reduce((sum, item) => sum + item.caseCount, 0);
-}
-
 function ToastViewport({
   isDark,
   onDismiss,
@@ -1386,13 +1382,9 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
     queryFn: () => fetchSubjectSummaryHierarchy({ caseType: selectedCaseType }),
     queryKey: queryKeys.subjectSummaryHierarchy({ caseType: selectedCaseType })
   });
-  const handbookHierarchyQuery = useQuery({
-    queryFn: () => fetchSubjectSummaryHierarchy({ caseType: "HANDBOOK" }),
-    queryKey: queryKeys.subjectSummaryHierarchy({ caseType: "HANDBOOK" })
-  });
-  const textbookHierarchyQuery = useQuery({
-    queryFn: () => fetchSubjectSummaryHierarchy({ caseType: "TEXTBOOK" }),
-    queryKey: queryKeys.subjectSummaryHierarchy({ caseType: "TEXTBOOK" })
+  const hierarchySummaryQuery = useQuery({
+    queryFn: () => fetchSubjectSummaryHierarchy({ caseType: "all" }),
+    queryKey: queryKeys.subjectSummaryHierarchy({ caseType: "all" })
   });
 
   const readingInsightsQuery = useQuery({
@@ -1717,17 +1709,16 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
 
   const overviewStats = useMemo(() => {
     const items = hierarchyQuery.data?.items ?? [];
-    const handbookCaseCount = countHierarchyCases(handbookHierarchyQuery.data?.items);
-    const textbookCaseCount = countHierarchyCases(textbookHierarchyQuery.data?.items);
+    const summary = hierarchySummaryQuery.data?.summary;
 
     return {
-      handbookCaseCount,
-      textbookCaseCount,
-      totalCases: handbookCaseCount + textbookCaseCount,
+      handbookCaseCount: summary?.handbookCases ?? 0,
+      textbookCaseCount: summary?.textbookCases ?? 0,
+      totalCases: summary?.totalCases ?? 0,
       totalSubjects: items.length,
       totalTopics: items.reduce((sum, item) => sum + item.topicCount, 0)
     };
-  }, [handbookHierarchyQuery.data?.items, hierarchyQuery.data?.items, textbookHierarchyQuery.data?.items]);
+  }, [hierarchyQuery.data?.items, hierarchySummaryQuery.data?.summary]);
 
   useEffect(() => {
     setCaseFilters((current) =>

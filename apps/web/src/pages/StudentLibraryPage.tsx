@@ -71,10 +71,6 @@ function matchesCaseTypeLabel(value: string | null | undefined, caseType: Subjec
   return normalizedValue === "textbook" || normalizedValue === "textbooks";
 }
 
-function countHierarchyCases(items: SubjectSummaryHierarchySubject[] | undefined) {
-  return (items ?? []).reduce((sum, item) => sum + item.caseCount, 0);
-}
-
 function BookmarkButton({
   active,
   isDark,
@@ -831,15 +827,14 @@ export function StudentSubjectSummariesPage() {
   const selectedCaseType: SubjectSummaryCaseType = searchParams.get("caseType") === "HANDBOOK" ? "HANDBOOK" : "TEXTBOOK";
   const selectedSubjectId = searchParams.get("subjectId");
   const selectedTopicId = searchParams.get("topicId");
-  const handbookHierarchyQuery = useQuery({
-    queryFn: () => fetchPublishedSubjectSummaryHierarchy({ caseType: "HANDBOOK" }),
-    queryKey: queryKeys.subjectSummaryPublishedHierarchy({ caseType: "HANDBOOK" })
+  const activeHierarchyQuery = useQuery({
+    queryFn: () => fetchPublishedSubjectSummaryHierarchy({ caseType: selectedCaseType }),
+    queryKey: queryKeys.subjectSummaryPublishedHierarchy({ caseType: selectedCaseType })
   });
-  const textbookHierarchyQuery = useQuery({
-    queryFn: () => fetchPublishedSubjectSummaryHierarchy({ caseType: "TEXTBOOK" }),
-    queryKey: queryKeys.subjectSummaryPublishedHierarchy({ caseType: "TEXTBOOK" })
+  const hierarchySummaryQuery = useQuery({
+    queryFn: () => fetchPublishedSubjectSummaryHierarchy({ caseType: "all" }),
+    queryKey: queryKeys.subjectSummaryPublishedHierarchy({ caseType: "all" })
   });
-  const activeHierarchyQuery = selectedCaseType === "HANDBOOK" ? handbookHierarchyQuery : textbookHierarchyQuery;
   const autocompleteResultsQuery = useQuery({
     enabled: autocompleteQuery.trim().length >= 2,
     queryFn: () => autocompletePublishedSubjectSummaries(autocompleteQuery, 8, selectedCaseType),
@@ -864,8 +859,8 @@ export function StudentSubjectSummariesPage() {
 
   const hierarchyItems = activeHierarchyQuery.data?.items ?? [];
   const totalSubjects = hierarchyItems.length;
-  const handbookTotalCases = countHierarchyCases(handbookHierarchyQuery.data?.items);
-  const textbookTotalCases = countHierarchyCases(textbookHierarchyQuery.data?.items);
+  const handbookTotalCases = hierarchySummaryQuery.data?.summary?.handbookCases ?? 0;
+  const textbookTotalCases = hierarchySummaryQuery.data?.summary?.textbookCases ?? 0;
   const bookmarks = bookmarksQuery.data?.items ?? [];
   const bookmarkKeys = new Set(bookmarks.map((item) => item.contentKey));
   const summaryText = useMemo(
