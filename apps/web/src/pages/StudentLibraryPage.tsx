@@ -15,6 +15,7 @@ import {
   fetchPublishedSubjectSummaryHierarchyCases,
   fetchPublishedSubjectSummaryHierarchyTopics,
   type AdminLibraryFilters,
+  type SubjectSummaryCaseType,
   type SubjectSummaryHierarchySubject,
   type SubjectSummaryHierarchyTopic
 } from "@/lib/admin-api";
@@ -93,6 +94,7 @@ function BookmarkButton({
 function StudentSubjectSummaryTopicItem({
   autoExpand,
   bookmarkActive,
+  caseType,
   isDark,
   onToggleBookmark,
   selectedTopicId,
@@ -100,6 +102,7 @@ function StudentSubjectSummaryTopicItem({
 }: {
   autoExpand: boolean;
   bookmarkActive: boolean;
+  caseType: SubjectSummaryCaseType;
   isDark: boolean;
   onToggleBookmark: () => void;
   selectedTopicId: string | null;
@@ -116,8 +119,8 @@ function StudentSubjectSummaryTopicItem({
 
   const casesQuery = useQuery({
     enabled: isExpanded,
-    queryFn: () => fetchPublishedSubjectSummaryHierarchyCases(topic.id),
-    queryKey: queryKeys.subjectSummaryPublishedHierarchyCases(topic.id, "")
+    queryFn: () => fetchPublishedSubjectSummaryHierarchyCases(topic.id, { caseType }),
+    queryKey: queryKeys.subjectSummaryPublishedHierarchyCases(topic.id, { caseType })
   });
 
   return (
@@ -180,6 +183,7 @@ function StudentSubjectSummaryTopicItem({
 function StudentSubjectSummarySubjectItem({
   autoExpand,
   bookmarkActive,
+  caseType,
   isDark,
   onToggleBookmark,
   onToggleTopicBookmark,
@@ -189,6 +193,7 @@ function StudentSubjectSummarySubjectItem({
 }: {
   autoExpand: boolean;
   bookmarkActive: boolean;
+  caseType: SubjectSummaryCaseType;
   isDark: boolean;
   onToggleBookmark: () => void;
   onToggleTopicBookmark: (topic: SubjectSummaryHierarchyTopic) => void;
@@ -206,8 +211,8 @@ function StudentSubjectSummarySubjectItem({
 
   const topicsQuery = useQuery({
     enabled: isExpanded,
-    queryFn: () => fetchPublishedSubjectSummaryHierarchyTopics(subject.id),
-    queryKey: queryKeys.subjectSummaryPublishedHierarchyTopics(subject.id, "")
+    queryFn: () => fetchPublishedSubjectSummaryHierarchyTopics(subject.id, { caseType }),
+    queryKey: queryKeys.subjectSummaryPublishedHierarchyTopics(subject.id, { caseType })
   });
 
   return (
@@ -239,6 +244,7 @@ function StudentSubjectSummarySubjectItem({
               <StudentSubjectSummaryTopicItem
                 autoExpand={selectedTopicId === topic.id}
                 bookmarkActive={topicBookmarkKeys.has(`SUBJECT_SUMMARY_TOPIC:${topic.id}`)}
+                caseType={caseType}
                 isDark={isDark}
                 key={topic.id}
                 onToggleBookmark={() => onToggleTopicBookmark(topic)}
@@ -805,19 +811,31 @@ export function StudentSubjectSummariesPage() {
   const { isDark } = useTheme();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [autocompleteQuery, setAutocompleteQuery] = useState("");
+  const selectedCaseType: SubjectSummaryCaseType = searchParams.get("caseType") === "HANDBOOK" ? "HANDBOOK" : "TEXTBOOK";
   const selectedSubjectId = searchParams.get("subjectId");
   const selectedTopicId = searchParams.get("topicId");
+  const handbookParams = useMemo(() => ({ caseType: "HANDBOOK" as const }), []);
+  const textbookParams = useMemo(() => ({ caseType: "TEXTBOOK" as const }), []);
+  const activeHierarchyParams = useMemo(() => ({ caseType: selectedCaseType }), [selectedCaseType]);
 
   const hierarchyQuery = useQuery({
-    queryFn: () => fetchPublishedSubjectSummaryHierarchy(),
-    queryKey: queryKeys.subjectSummaryPublishedHierarchy("")
+    queryFn: () => fetchPublishedSubjectSummaryHierarchy(activeHierarchyParams),
+    queryKey: queryKeys.subjectSummaryPublishedHierarchy(activeHierarchyParams)
+  });
+  const handbookHierarchyQuery = useQuery({
+    queryFn: () => fetchPublishedSubjectSummaryHierarchy(handbookParams),
+    queryKey: queryKeys.subjectSummaryPublishedHierarchy(handbookParams)
+  });
+  const textbookHierarchyQuery = useQuery({
+    queryFn: () => fetchPublishedSubjectSummaryHierarchy(textbookParams),
+    queryKey: queryKeys.subjectSummaryPublishedHierarchy(textbookParams)
   });
   const autocompleteResultsQuery = useQuery({
     enabled: autocompleteQuery.trim().length >= 2,
-    queryFn: () => autocompletePublishedSubjectSummaries(autocompleteQuery),
-    queryKey: queryKeys.subjectSummaryPublishedAutocomplete(autocompleteQuery)
+    queryFn: () => autocompletePublishedSubjectSummaries(autocompleteQuery, 8, selectedCaseType),
+    queryKey: queryKeys.subjectSummaryPublishedAutocomplete(`${selectedCaseType}:${autocompleteQuery}`)
   });
   const bookmarksQuery = useQuery({
     queryFn: () => fetchStudentStudyBookmarks({}),
@@ -837,12 +855,42 @@ export function StudentSubjectSummariesPage() {
   });
 
   const totalSubjects = hierarchyQuery.data?.items.length ?? 0;
+  const handbookTotalCases = useMemo(
+    () => (handbookHierarchyQuery.data?.items ?? []).reduce((sum, item) => sum + item.caseCount, 0),
+    [handbookHierarchyQuery.data?.items]
+  );
+  const textbookTotalCases = useMemo(
+    () => (textbookHierarchyQuery.data?.items ?? []).reduce((sum, item) => sum + item.caseCount, 0),
+    [textbookHierarchyQuery.data?.items]
+  );
   const bookmarks = bookmarksQuery.data?.items ?? [];
   const bookmarkKeys = new Set(bookmarks.map((item) => item.contentKey));
   const summaryText = useMemo(
-    () => `${totalSubjects} subject${totalSubjects === 1 ? "" : "s"} currently available in cases and ratios with published topics and case materials.`,
-    [totalSubjects]
+    () =>
+      `${totalSubjects} subject${totalSubjects === 1 ? "" : "s"} currently available in ${selectedCaseType === "HANDBOOK" ? "Handbook" : "Textbook"} cases and ratios with published topics and case materials.`,
+    [selectedCaseType, totalSubjects]
   );
+
+  function buildCasesAndRatiosPath(nextCaseType: SubjectSummaryCaseType, overrides?: { subjectId?: string | null; topicId?: string | null }) {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("caseType", nextCaseType);
+    const nextSubjectId = overrides?.subjectId ?? selectedSubjectId;
+    const nextTopicId = overrides?.topicId ?? selectedTopicId;
+
+    if (nextSubjectId) {
+      nextParams.set("subjectId", nextSubjectId);
+    } else {
+      nextParams.delete("subjectId");
+    }
+
+    if (nextTopicId) {
+      nextParams.set("topicId", nextTopicId);
+    } else {
+      nextParams.delete("topicId");
+    }
+
+    return `/app/library/subject-summaries?${nextParams.toString()}`;
+  }
 
   function toggleBookmark(payload: {
     contentKey: string;
@@ -874,12 +922,29 @@ export function StudentSubjectSummariesPage() {
           <div className="max-w-3xl">
             <p className={cn("text-xs uppercase tracking-[0.24em]", isDark ? "text-slate-500" : "text-slate-400")}>Student library</p>
             <h2 className={cn("mt-3 font-heading text-3xl leading-tight", isDark ? "text-white" : "text-slate-950")}>
-              Explore published cases and ratios, topics, and cases.
+              Explore published {selectedCaseType === "HANDBOOK" ? "handbook" : "textbook"} cases and ratios.
             </h2>
             <p className={cn("mt-3 max-w-2xl text-sm leading-7", isDark ? "text-slate-300" : "text-slate-600")}>{summaryText}</p>
           </div>
 
           <div className="relative z-30 w-full max-w-md">
+            <div className="mb-3">
+              <select
+                className={cn("w-full rounded-[24px] border px-4 py-3 text-sm outline-none", isDark ? "border-slate-700 bg-slate-900 text-white" : "border-slate-200 bg-slate-50 text-slate-950")}
+                onChange={(event) => {
+                  const nextCaseType = event.target.value as SubjectSummaryCaseType;
+                  const nextParams = new URLSearchParams(searchParams);
+                  nextParams.set("caseType", nextCaseType);
+                  nextParams.delete("subjectId");
+                  nextParams.delete("topicId");
+                  setSearchParams(nextParams, { replace: true });
+                }}
+                value={selectedCaseType}
+              >
+                <option value="HANDBOOK">Handbook</option>
+                <option value="TEXTBOOK">Textbook</option>
+              </select>
+            </div>
             <div className={cn("flex items-center gap-3 rounded-[24px] border px-4 py-3", isDark ? "border-slate-700 bg-slate-900" : "border-slate-200 bg-slate-50")}>
               <Search className={cn("h-4 w-4", isDark ? "text-slate-500" : "text-slate-400")} />
               <input
@@ -925,6 +990,21 @@ export function StudentSubjectSummariesPage() {
         </div>
       </section>
 
+      <section className="grid gap-4 md:grid-cols-2">
+        {[
+          { label: "Handbook Cases", value: handbookTotalCases },
+          { label: "Textbook Cases", value: textbookTotalCases }
+        ].map((item) => (
+          <div
+            className={cn("rounded-[24px] border px-5 py-5", isDark ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-white")}
+            key={item.label}
+          >
+            <p className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-400")}>{item.label}</p>
+            <p className={cn("mt-3 font-heading text-3xl", isDark ? "text-white" : "text-slate-950")}>{item.value}</p>
+          </div>
+        ))}
+      </section>
+
       <section className={cn("rounded-[28px] border p-6 shadow-[0_24px_70px_rgba(15,23,42,0.07)]", isDark ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-white")}>
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -949,13 +1029,14 @@ export function StudentSubjectSummariesPage() {
               <StudentSubjectSummarySubjectItem
                 autoExpand={selectedSubjectId === subject.id}
                 bookmarkActive={bookmarkKeys.has(`SUBJECT_SUMMARY_SUBJECT:${subject.id}`)}
+                caseType={selectedCaseType}
                 isDark={isDark}
                 key={subject.id}
                 onToggleBookmark={() =>
                   toggleBookmark({
                     contentKey: `SUBJECT_SUMMARY_SUBJECT:${subject.id}`,
                     contentType: "SUBJECT_SUMMARY_SUBJECT",
-                    path: `/app/library/subject-summaries?subjectId=${subject.id}`,
+                    path: buildCasesAndRatiosPath(selectedCaseType, { subjectId: subject.id, topicId: null }),
                     subjectName: subject.name,
                     title: subject.name
                   })
@@ -964,7 +1045,7 @@ export function StudentSubjectSummariesPage() {
                   toggleBookmark({
                     contentKey: `SUBJECT_SUMMARY_TOPIC:${topic.id}`,
                     contentType: "SUBJECT_SUMMARY_TOPIC",
-                    path: `/app/library/subject-summaries?subjectId=${subject.id}&topicId=${topic.id}`,
+                    path: buildCasesAndRatiosPath(selectedCaseType, { subjectId: subject.id, topicId: topic.id }),
                     subjectName: subject.name,
                     title: topic.name,
                     topicName: topic.name

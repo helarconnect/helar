@@ -38,6 +38,7 @@ import {
   fetchSubjectSummaryTopics,
   type SubjectSummaryCase,
   type SubjectSummaryCaseFilters,
+  type SubjectSummaryCaseType,
   type SubjectSummaryCaseInput,
   type SubjectSummaryCaseStatus,
   type SubjectSummaryReadingInsight,
@@ -78,6 +79,7 @@ const defaultTopicFilters: Required<SubjectSummaryTopicFilters> = {
 };
 
 const defaultCaseFilters: Required<SubjectSummaryCaseFilters> = {
+  caseType: "all",
   page: 1,
   pageSize: 10,
   search: "",
@@ -266,6 +268,8 @@ function ReadingInsightsSection({
   insights: SubjectSummaryReadingInsight[];
   isDark: boolean;
   overviewStats: {
+    handbookCaseCount: number;
+    textbookCaseCount: number;
     totalCases: number;
     totalSubjects: number;
     totalTopics: number;
@@ -361,7 +365,9 @@ function ReadingInsightsSection({
             { icon: Eye, label: "Total reads", value: String(totalReads) },
             { icon: FolderPlus, label: "Subjects", value: String(overviewStats.totalSubjects) },
             { icon: Plus, label: "Topics", value: String(overviewStats.totalTopics) },
-            { icon: FilePlus2, label: "Cases", value: String(overviewStats.totalCases) }
+          { icon: FilePlus2, label: "Cases", value: String(overviewStats.totalCases) },
+          { icon: FilePlus2, label: "Handbook Cases", value: String(overviewStats.handbookCaseCount) },
+          { icon: FilePlus2, label: "Textbook Cases", value: String(overviewStats.textbookCaseCount) }
           ].map((item) => (
             <article
               className={cn(
@@ -817,7 +823,7 @@ function CaseModal({
   }
 
   const availableTopics = draft.subjectId ? topics.filter((topic) => topic.subjectId === draft.subjectId) : topics;
-  const caseTypeOptions = ["Handbook", "Textbooks"] as const;
+  const caseTypeOptions = ["Handbook", "Textbook"] as const;
   const hasCustomCaseType = Boolean(draft.jurisdiction) && !caseTypeOptions.includes(draft.jurisdiction as (typeof caseTypeOptions)[number]);
 
   return createPortal(
@@ -1033,7 +1039,7 @@ function HierarchyTopicItem({
   const casesQuery = useQuery({
     enabled: isExpanded,
     queryFn: () => fetchSubjectSummaryHierarchyCases(topic.id),
-    queryKey: queryKeys.subjectSummaryHierarchyCases(topic.id, "")
+    queryKey: queryKeys.subjectSummaryHierarchyCases(topic.id, {})
   });
   const selection = {
     subjectId: topic.subjectId,
@@ -1201,7 +1207,7 @@ function HierarchySubjectItem({
   const topicsQuery = useQuery({
     enabled: isExpanded,
     queryFn: () => fetchSubjectSummaryHierarchyTopics(subject.id),
-    queryKey: queryKeys.subjectSummaryHierarchyTopics(subject.id, "")
+    queryKey: queryKeys.subjectSummaryHierarchyTopics(subject.id, {})
   });
 
   return (
@@ -1348,7 +1354,7 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
 
   const hierarchyQuery = useQuery({
     queryFn: () => fetchSubjectSummaryHierarchy(),
-    queryKey: queryKeys.subjectSummaryHierarchy("")
+    queryKey: queryKeys.subjectSummaryHierarchy({})
   });
 
   const readingInsightsQuery = useQuery({
@@ -1409,6 +1415,24 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
     enabled: mode === "cases",
     queryFn: () => fetchSubjectSummaryCases(caseFilters),
     queryKey: queryKeys.subjectSummaryCases(caseFilters)
+  });
+  const handbookCasesSummaryQuery = useQuery({
+    queryFn: () =>
+      fetchSubjectSummaryCases({
+        ...defaultCaseFilters,
+        caseType: "HANDBOOK",
+        pageSize: 1
+      }),
+    queryKey: queryKeys.subjectSummaryCases({ ...defaultCaseFilters, caseType: "HANDBOOK", pageSize: 1 })
+  });
+  const textbookCasesSummaryQuery = useQuery({
+    queryFn: () =>
+      fetchSubjectSummaryCases({
+        ...defaultCaseFilters,
+        caseType: "TEXTBOOK",
+        pageSize: 1
+      }),
+    queryKey: queryKeys.subjectSummaryCases({ ...defaultCaseFilters, caseType: "TEXTBOOK", pageSize: 1 })
   });
 
   const listSubjectsQuery = useQuery({
@@ -1675,11 +1699,13 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
     const items = hierarchyQuery.data?.items ?? [];
 
     return {
+      handbookCaseCount: handbookCasesSummaryQuery.data?.summary.totalCases ?? 0,
+      textbookCaseCount: textbookCasesSummaryQuery.data?.summary.totalCases ?? 0,
       totalCases: items.reduce((sum, item) => sum + item.caseCount, 0),
       totalSubjects: items.length,
       totalTopics: items.reduce((sum, item) => sum + item.topicCount, 0)
     };
-  }, [hierarchyQuery.data?.items]);
+  }, [handbookCasesSummaryQuery.data?.summary.totalCases, hierarchyQuery.data?.items, textbookCasesSummaryQuery.data?.summary.totalCases]);
 
   useEffect(() => {
     const editCaseId = searchParams.get("editCase");
@@ -1760,7 +1786,7 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
             facts: item.facts,
             issues: item.issues,
             judges: item.judges,
-            jurisdiction: item.jurisdiction,
+            jurisdiction: item.jurisdiction === "Textbooks" ? "Textbook" : item.jurisdiction,
             keywords: item.keywords,
             legalPrinciples: item.legalPrinciples,
             obiterDicta: item.obiterDicta,
@@ -2370,6 +2396,15 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
               />
               <select
                 className={cn("rounded-2xl border px-4 py-3 text-sm outline-none", isDark ? "border-slate-700 bg-slate-900 text-white" : "border-slate-200 bg-slate-50 text-slate-950")}
+                onChange={(event) => setCaseFilters((current) => ({ ...current, caseType: event.target.value as "all" | SubjectSummaryCaseType, page: 1 }))}
+                value={caseFilters.caseType}
+              >
+                <option value="all">All types</option>
+                <option value="HANDBOOK">Handbook</option>
+                <option value="TEXTBOOK">Textbook</option>
+              </select>
+              <select
+                className={cn("rounded-2xl border px-4 py-3 text-sm outline-none", isDark ? "border-slate-700 bg-slate-900 text-white" : "border-slate-200 bg-slate-50 text-slate-950")}
                 onChange={(event) => setCaseFilters((current) => ({ ...current, page: 1, subjectId: event.target.value, topicId: "" }))}
                 value={caseFilters.subjectId}
               >
@@ -2445,6 +2480,7 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
                         />
                       </th>
                       <th className="px-4 py-3">Case</th>
+                      <th className="px-4 py-3">Type</th>
                       <th className="px-4 py-3">Subject</th>
                       <th className="px-4 py-3">Topic</th>
                       <th className="px-4 py-3">Status</th>
@@ -2486,6 +2522,7 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
                             ) : null}
                           </div>
                         </td>
+                        <td className="px-4 py-4">{item.jurisdiction === "Textbooks" ? "Textbook" : item.jurisdiction || "Unassigned"}</td>
                         <td className="px-4 py-4">{item.subject.name}</td>
                         <td className="px-4 py-4">{item.topic.name}</td>
                         <td className="px-4 py-4"><StatusBadge isDark={isDark} value={item.status} /></td>

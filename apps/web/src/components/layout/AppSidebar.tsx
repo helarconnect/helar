@@ -103,9 +103,12 @@ export function AppSidebar() {
   const [isBarFinalExamOpen, setIsBarFinalExamOpen] = useState(
     location.pathname.startsWith('/app/bar-final-exams') || location.pathname.startsWith('/app/admin/bar-final-exams'),
   )
-  const [isSubjectSummariesOpen, setIsSubjectSummariesOpen] = useState(
-    location.pathname === '/app/admin/library/cases-and-ratios' || location.pathname === '/app/library/cases-and-ratios',
-  )
+  const [openLibraryGroups, setOpenLibraryGroups] = useState<Record<string, boolean>>({
+    'Cases and Ratios':
+      location.pathname.startsWith('/app/admin/library/subject-summaries') || location.pathname.startsWith('/app/library/subject-summaries'),
+    'Subject Summaries':
+      location.pathname.startsWith('/app/admin/library/cases-and-ratios') || location.pathname.startsWith('/app/library/cases-and-ratios'),
+  })
 
   useEffect(() => {
     if (location.pathname.startsWith('/app/admin/library') || location.pathname.startsWith('/app/library')) {
@@ -117,8 +120,11 @@ export function AppSidebar() {
     if (location.pathname.startsWith('/app/bar-final-exams') || location.pathname.startsWith('/app/admin/bar-final-exams')) {
       setIsBarFinalExamOpen(true)
     }
-    if (location.pathname === '/app/admin/library/cases-and-ratios' || location.pathname === '/app/library/cases-and-ratios') {
-      setIsSubjectSummariesOpen(true)
+    if (location.pathname.startsWith('/app/admin/library/subject-summaries') || location.pathname.startsWith('/app/library/subject-summaries')) {
+      setOpenLibraryGroups((current) => ({ ...current, 'Cases and Ratios': true }))
+    }
+    if (location.pathname.startsWith('/app/admin/library/cases-and-ratios') || location.pathname.startsWith('/app/library/cases-and-ratios')) {
+      setOpenLibraryGroups((current) => ({ ...current, 'Subject Summaries': true }))
     }
   }, [location.pathname])
 
@@ -127,12 +133,22 @@ export function AppSidebar() {
     if (location.pathname !== url.pathname) {
       return false
     }
-    const expectedModuleType = url.searchParams.get('moduleType')
-    if (!expectedModuleType) {
+    if (![...url.searchParams.keys()].length) {
       return true
     }
-    const currentModuleType = new URLSearchParams(location.search).get('moduleType')
-    return (currentModuleType || 'FACULTY') === expectedModuleType
+
+    const currentParams = new URLSearchParams(location.search)
+    return [...url.searchParams.entries()].every(([key, value]) => {
+      if (key === 'moduleType') {
+        return (currentParams.get(key) || 'FACULTY') === value
+      }
+
+      if (key === 'caseType') {
+        return (currentParams.get(key) || 'TEXTBOOK') === value
+      }
+
+      return currentParams.get(key) === value
+    })
   }
 
   function isBarFinalExamHrefActive(href: string) {
@@ -147,7 +163,13 @@ export function AppSidebar() {
     ? [
         { href: '/app/admin/library/law-reports', label: 'Law Reports' },
         { href: '/app/admin/library/helarpedia', label: 'Helarpedia' },
-        { href: '/app/admin/library/subject-summaries', label: 'Cases and Ratios' },
+        {
+          label: 'Cases and Ratios',
+          children: [
+            { href: '/app/admin/library/subject-summaries?caseType=HANDBOOK', label: 'Handbook' },
+            { href: '/app/admin/library/subject-summaries?caseType=TEXTBOOK', label: 'Textbook' },
+          ],
+        },
         {
           label: 'Subject Summaries',
           children: [
@@ -159,7 +181,13 @@ export function AppSidebar() {
     : [
         { href: '/app/library/law-reports', label: 'Law Reports' },
         { href: '/app/library/helarpedia', label: 'Helarpedia' },
-        { href: '/app/library/subject-summaries', label: 'Cases and Ratios' },
+        {
+          label: 'Cases and Ratios',
+          children: [
+            { href: '/app/library/subject-summaries?caseType=HANDBOOK', label: 'Handbook' },
+            { href: '/app/library/subject-summaries?caseType=TEXTBOOK', label: 'Textbook' },
+          ],
+        },
         {
           label: 'Subject Summaries',
           children: [
@@ -361,14 +389,19 @@ export function AppSidebar() {
                                 libraryItem.children.some((child) => isLibraryHrefActive(child.href)) &&
                                   (isDark ? 'border-white/10 bg-white/10 text-white' : 'border-slate-200 bg-white text-slate-950'),
                               )}
-                              onClick={() => setIsSubjectSummariesOpen((current) => !current)}
+                              onClick={() =>
+                                setOpenLibraryGroups((current) => ({
+                                  ...current,
+                                  [libraryItem.label]: !current[libraryItem.label],
+                                }))
+                              }
                               type="button"
                             >
                               <span>{libraryItem.label}</span>
-                              <ChevronDown className={cn('h-4 w-4 transition', isSubjectSummariesOpen ? 'rotate-180' : '')} />
+                              <ChevronDown className={cn('h-4 w-4 transition', openLibraryGroups[libraryItem.label] ? 'rotate-180' : '')} />
                             </button>
 
-                            {isSubjectSummariesOpen ? (
+                            {openLibraryGroups[libraryItem.label] ? (
                               <div className="space-y-2 pl-4">
                                 {libraryItem.children.map((child) => (
                                   <NavLink

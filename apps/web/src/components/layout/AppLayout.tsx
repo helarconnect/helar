@@ -102,11 +102,16 @@ export function AppLayout() {
                           ? 'Content Review'
                         : 'Workspace')
   const moduleType = new URLSearchParams(location.search).get('moduleType') === 'NLS' ? 'NLS' : 'FACULTY'
+  const caseType = new URLSearchParams(location.search).get('caseType') === 'HANDBOOK' ? 'HANDBOOK' : 'TEXTBOOK'
   const modulePageTitle =
     moduleType === 'NLS' ? 'NLS Summaries' : 'Faculty Summaries'
+  const casesAndRatiosPageTitle =
+    caseType === 'HANDBOOK' ? 'Handbook Cases and Ratios' : 'Textbook Cases and Ratios'
   const resolvedPageTitle =
     location.pathname === '/app/library/cases-and-ratios' || location.pathname === '/app/admin/library/cases-and-ratios'
       ? modulePageTitle
+      : location.pathname === '/app/library/subject-summaries' || location.pathname === '/app/admin/library/subject-summaries'
+        ? casesAndRatiosPageTitle
       : pageTitle
   const userName = session?.user.fullName ?? 'Helar learner'
 

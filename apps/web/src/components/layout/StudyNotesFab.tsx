@@ -663,7 +663,7 @@ export function StudyNotesFab({ isAdminWorkspace }: { isAdminWorkspace: boolean 
         return response.items.map((item) => ({ id: item.id, name: item.name }));
       }
 
-      const response = await fetchPublishedSubjectSummaryHierarchy("");
+      const response = await fetchPublishedSubjectSummaryHierarchy();
       return response.items.map((item) => ({ id: item.id, name: item.name }));
     },
     queryKey: ["study-notes-subjects", isAdminWorkspace]
@@ -689,7 +689,7 @@ export function StudyNotesFab({ isAdminWorkspace }: { isAdminWorkspace: boolean 
         return response.items.map((item) => ({ id: item.id, name: item.name }));
       }
 
-      const response = await fetchPublishedSubjectSummaryHierarchyTopics(draft.subjectId, "");
+      const response = await fetchPublishedSubjectSummaryHierarchyTopics(draft.subjectId);
       return response.items.map((item) => ({ id: item.id, name: item.name }));
     },
     queryKey: ["study-notes-topics", isAdminWorkspace, draft.subjectId]

@@ -111,8 +111,8 @@ enum SubjectSummaryDifficulty {
 }
 
 enum SubjectSummaryModuleType {
-  FACULTY
-  NLS
+  HANDBOOK
+  TEXTBOOK
 }
 
 enum BarFinalExamQuestionStatus {

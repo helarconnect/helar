@@ -26,7 +26,7 @@ const entryFiltersSchema = z.object({
   sortOrder: z.enum(["asc", "desc"]).default("desc"),
   status: z.union([z.nativeEnum(SubjectSummaryCaseStatus), z.literal("all")]).default("all"),
   subjectId: recordIdSchema.optional(),
-  moduleType: z.nativeEnum(SubjectSummaryModuleType).default(SubjectSummaryModuleType.FACULTY),
+  moduleType: z.nativeEnum(SubjectSummaryModuleType).default(SubjectSummaryModuleType.TEXTBOOK),
   topic: z.string().trim().optional().default("")
 });
 
@@ -44,7 +44,7 @@ const entryInputSchema = z
     status: z.nativeEnum(SubjectSummaryCaseStatus).default(SubjectSummaryCaseStatus.DRAFT),
     subjectId: recordIdSchema,
     tags: z.array(z.string().trim().min(1).max(120)).max(50).default([]),
-    moduleType: z.nativeEnum(SubjectSummaryModuleType).default(SubjectSummaryModuleType.FACULTY),
+    moduleType: z.nativeEnum(SubjectSummaryModuleType).default(SubjectSummaryModuleType.TEXTBOOK),
     topic: z.string().trim().optional().default("")
   })
   .strict();
@@ -65,7 +65,7 @@ const topicBulkEntrySchema = z
 
 const topicBulkInputSchema = z
   .object({
-    moduleType: z.nativeEnum(SubjectSummaryModuleType).default(SubjectSummaryModuleType.FACULTY),
+    moduleType: z.nativeEnum(SubjectSummaryModuleType).default(SubjectSummaryModuleType.TEXTBOOK),
     subjectId: recordIdSchema,
     topic: z.string().trim().min(2),
     status: z.nativeEnum(SubjectSummaryCaseStatus).default(SubjectSummaryCaseStatus.DRAFT),
@@ -75,7 +75,7 @@ const topicBulkInputSchema = z
 
 const studentSubjectsQuerySchema = z.object({
   search: z.string().trim().max(120).default(""),
-  moduleType: z.nativeEnum(SubjectSummaryModuleType).default(SubjectSummaryModuleType.FACULTY)
+  moduleType: z.nativeEnum(SubjectSummaryModuleType).default(SubjectSummaryModuleType.TEXTBOOK)
 });
 
 const studentEntriesQuerySchema = z.object({
@@ -86,7 +86,7 @@ const studentEntriesQuerySchema = z.object({
   filter: z.enum(["all", "bookmarked", "difficult", "easy", "read", "recentlyViewed", "unread"]).default("all"),
   query: z.string().trim().max(160).default(""),
   subjectId: recordIdSchema,
-  moduleType: z.nativeEnum(SubjectSummaryModuleType).default(SubjectSummaryModuleType.FACULTY),
+  moduleType: z.nativeEnum(SubjectSummaryModuleType).default(SubjectSummaryModuleType.TEXTBOOK),
   topic: z.string().trim().optional().default("")
 });
 
@@ -96,13 +96,13 @@ type TopicBulkInput = z.infer<typeof topicBulkInputSchema>;
 type StudentEntriesQuery = z.infer<typeof studentEntriesQuerySchema>;
 
 const topicsQuerySchema = z.object({
-  moduleType: z.nativeEnum(SubjectSummaryModuleType).default(SubjectSummaryModuleType.FACULTY),
+  moduleType: z.nativeEnum(SubjectSummaryModuleType).default(SubjectSummaryModuleType.TEXTBOOK),
   subjectId: recordIdSchema,
   status: z.union([z.nativeEnum(SubjectSummaryCaseStatus), z.literal("all")]).default("all")
 });
 
 const studentTopicsQuerySchema = z.object({
-  moduleType: z.nativeEnum(SubjectSummaryModuleType).default(SubjectSummaryModuleType.FACULTY),
+  moduleType: z.nativeEnum(SubjectSummaryModuleType).default(SubjectSummaryModuleType.TEXTBOOK),
   subjectId: recordIdSchema
 });
 
@@ -711,7 +711,7 @@ export async function getSubjectSummaryEntryFormOptions(subjectId?: string) {
 }
 
 function formatSubjectSummarySerialNumber(moduleType: SubjectSummaryModuleType, value: number) {
-  const prefix = moduleType === "NLS" ? "Helar-NLS-" : "Helar-FAC-";
+  const prefix = moduleType === "HANDBOOK" ? "Helar-HBK-" : "Helar-TXT-";
   return `${prefix}${value}`;
 }
 

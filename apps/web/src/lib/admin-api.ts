@@ -207,6 +207,7 @@ export type AdminLibraryMaterialInput = {
 
 export type SubjectSummaryStatus = "ACTIVE" | "INACTIVE" | "ARCHIVED";
 export type SubjectSummaryCaseStatus = "DRAFT" | "PENDING_APPROVAL" | "PUBLISHED" | "ARCHIVED";
+export type SubjectSummaryCaseType = "HANDBOOK" | "TEXTBOOK";
 
 export type AdminNotificationItemType =
   | "library_material"
@@ -350,6 +351,7 @@ export type SubjectSummaryTopicFilters = {
 };
 
 export type SubjectSummaryCaseFilters = {
+  caseType?: "all" | SubjectSummaryCaseType;
   page?: number;
   pageSize?: number;
   search?: string;
@@ -490,6 +492,11 @@ export type SubjectSummaryAutocompleteResult = {
 
 export type SubjectSummaryAutocompleteResponse = {
   items: SubjectSummaryAutocompleteResult[];
+};
+
+export type SubjectSummaryHierarchyQuery = {
+  caseType?: "all" | SubjectSummaryCaseType;
+  search?: string;
 };
 
 export type SubjectSummaryReadingInsight = {
@@ -1571,88 +1578,88 @@ export async function fetchAdminUsers(filters: AdminUserListFilters) {
   return response.data.data;
 }
 
-export async function fetchSubjectSummaryHierarchy(search = "") {
+export async function fetchSubjectSummaryHierarchy(params: SubjectSummaryHierarchyQuery = {}) {
   const response = await authenticatedHttp.get<{ success: true; data: SubjectSummaryHierarchyResponse }>(
     "/api/v1/admin/subject-summaries/hierarchy",
     {
-      params: Object.fromEntries(createQueryParams({ search }).entries())
+      params: Object.fromEntries(createQueryParams(params).entries())
     }
   );
 
   return response.data.data;
 }
 
-export async function fetchPublishedSubjectSummaryHierarchy(search = "") {
+export async function fetchPublishedSubjectSummaryHierarchy(params: SubjectSummaryHierarchyQuery = {}) {
   const response = await authenticatedHttp.get<{ success: true; data: SubjectSummaryHierarchyResponse }>(
     "/api/v1/library/subject-summaries/hierarchy",
     {
-      params: Object.fromEntries(createQueryParams({ search }).entries())
+      params: Object.fromEntries(createQueryParams(params).entries())
     }
   );
 
   return response.data.data;
 }
 
-export async function fetchSubjectSummaryHierarchyTopics(subjectId: string, search = "") {
+export async function fetchSubjectSummaryHierarchyTopics(subjectId: string, params: SubjectSummaryHierarchyQuery = {}) {
   const response = await authenticatedHttp.get<{ success: true; data: SubjectSummaryHierarchyTopicResponse }>(
     `/api/v1/admin/subject-summaries/hierarchy/subjects/${subjectId}/topics`,
     {
-      params: Object.fromEntries(createQueryParams({ search }).entries())
+      params: Object.fromEntries(createQueryParams(params).entries())
     }
   );
 
   return response.data.data;
 }
 
-export async function fetchPublishedSubjectSummaryHierarchyTopics(subjectId: string, search = "") {
+export async function fetchPublishedSubjectSummaryHierarchyTopics(subjectId: string, params: SubjectSummaryHierarchyQuery = {}) {
   const response = await authenticatedHttp.get<{ success: true; data: SubjectSummaryHierarchyTopicResponse }>(
     `/api/v1/library/subject-summaries/hierarchy/subjects/${subjectId}/topics`,
     {
-      params: Object.fromEntries(createQueryParams({ search }).entries())
+      params: Object.fromEntries(createQueryParams(params).entries())
     }
   );
 
   return response.data.data;
 }
 
-export async function fetchSubjectSummaryHierarchyCases(topicId: string, search = "") {
+export async function fetchSubjectSummaryHierarchyCases(topicId: string, params: SubjectSummaryHierarchyQuery = {}) {
   const response = await authenticatedHttp.get<{ success: true; data: SubjectSummaryHierarchyCaseResponse }>(
     `/api/v1/admin/subject-summaries/hierarchy/topics/${topicId}/cases`,
     {
-      params: Object.fromEntries(createQueryParams({ search }).entries())
+      params: Object.fromEntries(createQueryParams(params).entries())
     }
   );
 
   return response.data.data;
 }
 
-export async function fetchPublishedSubjectSummaryHierarchyCases(topicId: string, search = "") {
+export async function fetchPublishedSubjectSummaryHierarchyCases(topicId: string, params: SubjectSummaryHierarchyQuery = {}) {
   const response = await authenticatedHttp.get<{ success: true; data: SubjectSummaryHierarchyCaseResponse }>(
     `/api/v1/library/subject-summaries/hierarchy/topics/${topicId}/cases`,
     {
-      params: Object.fromEntries(createQueryParams({ search }).entries())
+      params: Object.fromEntries(createQueryParams(params).entries())
     }
   );
 
   return response.data.data;
 }
 
-export async function autocompleteSubjectSummaries(query: string, limit = 8) {
+export async function autocompleteSubjectSummaries(query: string, limit = 8, caseType: "all" | SubjectSummaryCaseType = "all") {
   const response = await authenticatedHttp.get<{ success: true; data: SubjectSummaryAutocompleteResponse }>(
     "/api/v1/admin/subject-summaries/autocomplete",
     {
-      params: { limit, query }
+      params: { caseType, limit, query }
     }
   );
 
   return response.data.data;
 }
 
-export async function autocompletePublishedSubjectSummaries(query: string, limit = 8) {
+export async function autocompletePublishedSubjectSummaries(query: string, limit = 8, caseType: "all" | SubjectSummaryCaseType = "all") {
   const response = await authenticatedHttp.get<{ success: true; data: SubjectSummaryAutocompleteResponse }>(
     "/api/v1/library/subject-summaries/autocomplete",
     {
-      params: { limit, query }
+      params: { caseType, limit, query }
     }
   );
 

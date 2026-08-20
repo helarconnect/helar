@@ -35,6 +35,7 @@ const topicFiltersSchema = z.object({
 const caseFiltersSchema = z.object({
   page: z.coerce.number().int().min(1).max(10_000).default(1),
   pageSize: z.coerce.number().int().min(1).max(500).default(10),
+  caseType: z.union([z.enum(["HANDBOOK", "TEXTBOOK"]), z.literal("all")]).default("all"),
   search: z.string().trim().max(120).default(""),
   sortBy: z.enum(["createdAt", "title", "updatedAt", "year"]).default("updatedAt"),
   sortOrder: z.enum(["asc", "desc"]).default("desc"),
@@ -44,10 +45,12 @@ const caseFiltersSchema = z.object({
 });
 
 const hierarchyQuerySchema = z.object({
+  caseType: z.union([z.enum(["HANDBOOK", "TEXTBOOK"]), z.literal("all")]).default("all"),
   search: z.string().trim().max(120).default("")
 });
 
 const autocompleteQuerySchema = z.object({
+  caseType: z.union([z.enum(["HANDBOOK", "TEXTBOOK"]), z.literal("all")]).default("all"),
   limit: z.coerce.number().int().min(1).max(20).default(8),
   query: z.string().trim().min(2).max(120)
 });
@@ -139,12 +142,42 @@ type ReadingInsight = {
   reads: number;
 };
 
+type SubjectSummaryCaseTypeFilter = "all" | "HANDBOOK" | "TEXTBOOK";
+
 function nullIfBlank(value: string) {
   return value.trim() ? value.trim() : null;
 }
 
 function normalizeStringList(values: string[]) {
   return values.map((value) => value.trim()).filter(Boolean);
+}
+
+function resolveCaseTypeValues(caseType: SubjectSummaryCaseTypeFilter) {
+  if (caseType === "HANDBOOK") {
+    return ["Handbook"];
+  }
+
+  if (caseType === "TEXTBOOK") {
+    // Keep both spellings so older rows stored as "Textbooks" remain visible
+    // while the new UI consistently presents the singular "Textbook".
+    return ["Textbook", "Textbooks"];
+  }
+
+  return [];
+}
+
+function buildCaseTypeWhere(caseType: SubjectSummaryCaseTypeFilter): Prisma.SubjectSummaryCaseWhereInput {
+  const values = resolveCaseTypeValues(caseType);
+
+  if (!values.length) {
+    return {};
+  }
+
+  return {
+    jurisdiction: {
+      in: values
+    }
+  };
 }
 
 function resolveCaseStatus(inputStatus: SubjectSummaryCaseStatus, actorRoleCodes: string[] = []) {
@@ -401,29 +434,35 @@ async function countTopicStatuses() {
   };
 }
 
-async function countCaseStatuses() {
+async function countCaseStatuses(caseType: SubjectSummaryCaseTypeFilter = "all") {
+  const caseTypeWhere = buildCaseTypeWhere(caseType);
+
   const [archivedCount, draftCount, pendingApprovalCount, publishedCount] = await Promise.all([
     prisma.subjectSummaryCase.count({
       where: {
         deletedAt: null,
+        ...caseTypeWhere,
         status: SubjectSummaryCaseStatus.ARCHIVED
       }
     }),
     prisma.subjectSummaryCase.count({
       where: {
         deletedAt: null,
+        ...caseTypeWhere,
         status: SubjectSummaryCaseStatus.DRAFT
       }
     }),
     prisma.subjectSummaryCase.count({
       where: {
         deletedAt: null,
+        ...caseTypeWhere,
         status: SubjectSummaryCaseStatus.PENDING_APPROVAL
       }
     }),
     prisma.subjectSummaryCase.count({
       where: {
         deletedAt: null,
+        ...caseTypeWhere,
         status: SubjectSummaryCaseStatus.PUBLISHED
       }
     })
@@ -510,6 +549,7 @@ function buildCaseWhere(filters: SubjectSummaryCaseFilters): Prisma.SubjectSumma
     topic: {
       deletedAt: null
     },
+    ...buildCaseTypeWhere(filters.caseType),
     ...(filters.subjectId ? { subjectId: filters.subjectId } : {}),
     ...(filters.topicId ? { topicId: filters.topicId } : {}),
     ...(filters.status === "all" ? {} : { status: filters.status }),
@@ -595,6 +635,7 @@ export function parseSubjectSummaryTopicFilters(query: Record<string, string | s
 
 export function parseSubjectSummaryCaseFilters(query: Record<string, string | string[] | undefined>) {
   return caseFiltersSchema.parse({
+    caseType: Array.isArray(query.caseType) ? query.caseType[0] : query.caseType,
     page: Array.isArray(query.page) ? query.page[0] : query.page,
     pageSize: Array.isArray(query.pageSize) ? query.pageSize[0] : query.pageSize,
     search: Array.isArray(query.search) ? query.search[0] : query.search,
@@ -608,12 +649,14 @@ export function parseSubjectSummaryCaseFilters(query: Record<string, string | st
 
 export function parseSubjectSummaryHierarchyQuery(query: Record<string, string | string[] | undefined>) {
   return hierarchyQuerySchema.parse({
+    caseType: Array.isArray(query.caseType) ? query.caseType[0] : query.caseType,
     search: Array.isArray(query.search) ? query.search[0] : query.search
   });
 }
 
 export function parseSubjectSummaryAutocompleteQuery(query: Record<string, string | string[] | undefined>) {
   return autocompleteQuerySchema.parse({
+    caseType: Array.isArray(query.caseType) ? query.caseType[0] : query.caseType,
     limit: Array.isArray(query.limit) ? query.limit[0] : query.limit,
     query: Array.isArray(query.query) ? query.query[0] : query.query
   });
@@ -789,7 +832,7 @@ export async function listSubjectSummaryCases(filters: SubjectSummaryCaseFilters
         subjectId: true
       }
     }),
-    countCaseStatuses()
+    countCaseStatuses(filters.caseType)
   ]);
 
   return {
@@ -807,9 +850,26 @@ export async function listSubjectSummaryCases(filters: SubjectSummaryCaseFilters
 }
 
 export async function getSubjectSummaryHierarchy(query: SubjectSummaryHierarchyQuery) {
+  const caseTypeWhere = buildCaseTypeWhere(query.caseType);
+
   const subjects = await prisma.subjectSummarySubject.findMany({
     where: {
       deletedAt: null,
+      ...(query.caseType === "all"
+        ? {}
+        : {
+            topics: {
+              some: {
+                deletedAt: null,
+                cases: {
+                  some: {
+                    deletedAt: null,
+                    ...caseTypeWhere
+                  }
+                }
+              }
+            }
+          }),
       ...(query.search
         ? {
             OR: [
@@ -838,6 +898,7 @@ export async function getSubjectSummaryHierarchy(query: SubjectSummaryHierarchyQ
                 cases: {
                   some: {
                     deletedAt: null,
+                    ...caseTypeWhere,
                     OR: [
                       {
                         title: containsText(query.search)
@@ -862,12 +923,23 @@ export async function getSubjectSummaryHierarchy(query: SubjectSummaryHierarchyQ
         select: {
           cases: {
             where: {
-              deletedAt: null
+              deletedAt: null,
+              ...caseTypeWhere
             }
           },
           topics: {
             where: {
-              deletedAt: null
+              deletedAt: null,
+              ...(query.caseType === "all"
+                ? {}
+                : {
+                    cases: {
+                      some: {
+                        deletedAt: null,
+                        ...caseTypeWhere
+                      }
+                    }
+                  })
             }
           }
         }
@@ -884,10 +956,22 @@ export async function getSubjectSummaryHierarchy(query: SubjectSummaryHierarchyQ
 }
 
 export async function getSubjectSummaryHierarchyTopics(subjectId: string, query: SubjectSummaryHierarchyQuery) {
+  const caseTypeWhere = buildCaseTypeWhere(query.caseType);
+
   const topics = await prisma.subjectSummaryTopic.findMany({
     where: {
       deletedAt: null,
       subjectId,
+      ...(query.caseType === "all"
+        ? {}
+        : {
+            cases: {
+              some: {
+                deletedAt: null,
+                ...caseTypeWhere
+              }
+            }
+          }),
       ...(query.search
         ? {
             OR: [
@@ -901,6 +985,7 @@ export async function getSubjectSummaryHierarchyTopics(subjectId: string, query:
                 cases: {
                   some: {
                     deletedAt: null,
+                    ...caseTypeWhere,
                     OR: [
                       {
                         title: containsText(query.search)
@@ -928,7 +1013,8 @@ export async function getSubjectSummaryHierarchyTopics(subjectId: string, query:
         select: {
           cases: {
             where: {
-              deletedAt: null
+              deletedAt: null,
+              ...caseTypeWhere
             }
           }
         }
@@ -948,6 +1034,7 @@ export async function getSubjectSummaryHierarchyCases(topicId: string, query: Su
   const items = await prisma.subjectSummaryCase.findMany({
     where: {
       deletedAt: null,
+      ...buildCaseTypeWhere(query.caseType),
       topicId,
       ...(query.search
         ? {
@@ -991,6 +1078,8 @@ export async function getSubjectSummaryHierarchyCases(topicId: string, query: Su
 }
 
 export async function getPublishedSubjectSummaryHierarchy(query: SubjectSummaryHierarchyQuery) {
+  const caseTypeWhere = buildCaseTypeWhere(query.caseType);
+
   const subjects = await prisma.subjectSummarySubject.findMany({
     where: {
       deletedAt: null,
@@ -1002,6 +1091,7 @@ export async function getPublishedSubjectSummaryHierarchy(query: SubjectSummaryH
           cases: {
             some: {
               deletedAt: null,
+              ...caseTypeWhere,
               status: SubjectSummaryCaseStatus.PUBLISHED
             }
           }
@@ -1032,6 +1122,7 @@ export async function getPublishedSubjectSummaryHierarchy(query: SubjectSummaryH
                         cases: {
                           some: {
                             deletedAt: null,
+                            ...caseTypeWhere,
                             status: SubjectSummaryCaseStatus.PUBLISHED,
                             OR: [
                               {
@@ -1062,13 +1153,25 @@ export async function getPublishedSubjectSummaryHierarchy(query: SubjectSummaryH
           cases: {
             where: {
               deletedAt: null,
+              ...caseTypeWhere,
               status: SubjectSummaryCaseStatus.PUBLISHED
             }
           },
           topics: {
             where: {
               deletedAt: null,
-              status: SubjectSummaryStatus.ACTIVE
+              status: SubjectSummaryStatus.ACTIVE,
+              ...(query.caseType === "all"
+                ? {}
+                : {
+                    cases: {
+                      some: {
+                        deletedAt: null,
+                        ...caseTypeWhere,
+                        status: SubjectSummaryCaseStatus.PUBLISHED
+                      }
+                    }
+                  })
             }
           }
         }
@@ -1085,6 +1188,8 @@ export async function getPublishedSubjectSummaryHierarchy(query: SubjectSummaryH
 }
 
 export async function getPublishedSubjectSummaryHierarchyTopics(subjectId: string, query: SubjectSummaryHierarchyQuery) {
+  const caseTypeWhere = buildCaseTypeWhere(query.caseType);
+
   const topics = await prisma.subjectSummaryTopic.findMany({
     where: {
       deletedAt: null,
@@ -1093,6 +1198,7 @@ export async function getPublishedSubjectSummaryHierarchyTopics(subjectId: strin
       cases: {
         some: {
           deletedAt: null,
+          ...caseTypeWhere,
           status: SubjectSummaryCaseStatus.PUBLISHED
         }
       },
@@ -1113,6 +1219,7 @@ export async function getPublishedSubjectSummaryHierarchyTopics(subjectId: strin
                 cases: {
                   some: {
                     deletedAt: null,
+                    ...caseTypeWhere,
                     status: SubjectSummaryCaseStatus.PUBLISHED,
                     OR: [
                       {
@@ -1142,6 +1249,7 @@ export async function getPublishedSubjectSummaryHierarchyTopics(subjectId: strin
           cases: {
             where: {
               deletedAt: null,
+              ...caseTypeWhere,
               status: SubjectSummaryCaseStatus.PUBLISHED
             }
           }
@@ -1162,6 +1270,7 @@ export async function getPublishedSubjectSummaryHierarchyCases(topicId: string, 
   const items = await prisma.subjectSummaryCase.findMany({
     where: {
       deletedAt: null,
+      ...buildCaseTypeWhere(query.caseType),
       status: SubjectSummaryCaseStatus.PUBLISHED,
       topicId,
       subject: {
@@ -1429,10 +1538,28 @@ export async function getSubjectSummaryReadingInsights() {
 }
 
 export async function autocompleteSubjectSummaries(query: SubjectSummaryAutocompleteQuery) {
+  const caseTypeWhere = buildCaseTypeWhere(query.caseType);
+  const caseTypeParam = query.caseType === "all" ? "" : `&caseType=${query.caseType}`;
+
   const [subjects, topics, cases] = await Promise.all([
     prisma.subjectSummarySubject.findMany({
       where: {
         deletedAt: null,
+        ...(query.caseType === "all"
+          ? {}
+          : {
+              topics: {
+                some: {
+                  deletedAt: null,
+                  cases: {
+                    some: {
+                      deletedAt: null,
+                      ...caseTypeWhere
+                    }
+                  }
+                }
+              }
+            }),
         OR: [
           {
             name: containsText(query.query)
@@ -1452,6 +1579,16 @@ export async function autocompleteSubjectSummaries(query: SubjectSummaryAutocomp
     prisma.subjectSummaryTopic.findMany({
       where: {
         deletedAt: null,
+        ...(query.caseType === "all"
+          ? {}
+          : {
+              cases: {
+                some: {
+                  deletedAt: null,
+                  ...caseTypeWhere
+                }
+              }
+            }),
         OR: [
           {
             name: containsText(query.query)
@@ -1474,6 +1611,7 @@ export async function autocompleteSubjectSummaries(query: SubjectSummaryAutocomp
     prisma.subjectSummaryCase.findMany({
       where: {
         deletedAt: null,
+        ...caseTypeWhere,
         OR: [
           {
             title: containsText(query.query)
@@ -1508,14 +1646,14 @@ export async function autocompleteSubjectSummaries(query: SubjectSummaryAutocomp
       ...subjects.map((subject) => ({
         id: subject.id,
         label: subject.name,
-        path: `/app/admin/library/subject-summaries/subjects?subjectId=${subject.id}`,
+        path: `/app/admin/library/subject-summaries/subjects?subjectId=${subject.id}${caseTypeParam}`,
         subtitle: "Subject",
         type: "subject" as const
       })),
       ...topics.map((topic) => ({
         id: topic.id,
         label: topic.name,
-        path: `/app/admin/library/subject-summaries/topics?subjectId=${topic.subjectId}`,
+        path: `/app/admin/library/subject-summaries/topics?subjectId=${topic.subjectId}${caseTypeParam}`,
         subtitle: `Topic in ${topic.subject.name}`,
         type: "topic" as const
       })),
@@ -1531,6 +1669,9 @@ export async function autocompleteSubjectSummaries(query: SubjectSummaryAutocomp
 }
 
 export async function autocompletePublishedSubjectSummaries(query: SubjectSummaryAutocompleteQuery) {
+  const caseTypeWhere = buildCaseTypeWhere(query.caseType);
+  const caseTypeParam = query.caseType === "all" ? "" : `&caseType=${query.caseType}`;
+
   const [subjects, topics, cases] = await Promise.all([
     prisma.subjectSummarySubject.findMany({
       where: {
@@ -1543,6 +1684,7 @@ export async function autocompletePublishedSubjectSummaries(query: SubjectSummar
             cases: {
               some: {
                 deletedAt: null,
+                ...caseTypeWhere,
                 status: SubjectSummaryCaseStatus.PUBLISHED
               }
             }
@@ -1571,6 +1713,7 @@ export async function autocompletePublishedSubjectSummaries(query: SubjectSummar
         cases: {
           some: {
             deletedAt: null,
+            ...caseTypeWhere,
             status: SubjectSummaryCaseStatus.PUBLISHED
           }
         },
@@ -1600,6 +1743,7 @@ export async function autocompletePublishedSubjectSummaries(query: SubjectSummar
     prisma.subjectSummaryCase.findMany({
       where: {
         deletedAt: null,
+        ...caseTypeWhere,
         status: SubjectSummaryCaseStatus.PUBLISHED,
         subject: {
           deletedAt: null,
@@ -1643,14 +1787,14 @@ export async function autocompletePublishedSubjectSummaries(query: SubjectSummar
       ...subjects.map((subject) => ({
         id: subject.id,
         label: subject.name,
-        path: `/app/library/subject-summaries?subjectId=${subject.id}`,
+        path: `/app/library/subject-summaries?subjectId=${subject.id}${caseTypeParam}`,
         subtitle: "Subject",
         type: "subject" as const
       })),
       ...topics.map((topic) => ({
         id: topic.id,
         label: topic.name,
-        path: `/app/library/subject-summaries?subjectId=${topic.subjectId}&topicId=${topic.id}`,
+        path: `/app/library/subject-summaries?subjectId=${topic.subjectId}&topicId=${topic.id}${caseTypeParam}`,
         subtitle: `Topic in ${topic.subject.name}`,
         type: "topic" as const
       })),
