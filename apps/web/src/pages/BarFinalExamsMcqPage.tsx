@@ -990,19 +990,25 @@ export function StudentBarFinalExamsMcqPage() {
               </div>
             ) : (
               <div className="space-y-4">
-                {/* Subject-level answer-unlock progress summary */}
+                {/* Subject-level answer-unlock progress summary.
+                    Per spec: answers unlock once the student has VIEWED every
+                    question in order (signalled by reaching the LAST question),
+                    regardless of whether they submitted attempts. */}
                 <div className={cn("rounded-2xl border px-4 py-3", isDark ? "border-slate-800 bg-slate-950/30" : "border-slate-200 bg-slate-50")}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <span className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Progress</span>
                       <span className={cn("text-xs font-semibold", isDark ? "text-white" : "text-slate-950")}>
-                        {gating.attemptedCount}/{gating.totalQuestions} attempted
+                        {gating.viewedCount}/{gating.totalQuestions} viewed
+                      </span>
+                      <span className={cn("text-[11px]", isDark ? "text-slate-500" : "text-slate-500")}>
+                        · {gating.attemptedCount} attempted
                       </span>
                     </div>
                     <span
                       className={cn(
                         "inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]",
-                        gating.allAttempted
+                        gating.allViewed
                           ? isDark
                             ? "bg-emerald-500/15 text-emerald-200"
                             : "bg-emerald-50 text-emerald-700"
@@ -1011,14 +1017,14 @@ export function StudentBarFinalExamsMcqPage() {
                             : "bg-amber-50 text-amber-700"
                       )}
                     >
-                      {gating.allAttempted ? "Answers unlocked" : "Attempt all to unlock"}
+                      {gating.allViewed ? "Answers unlocked" : "View all to unlock"}
                     </span>
                   </div>
                   <div className={cn("mt-2.5 h-2 w-full overflow-hidden rounded-full", isDark ? "bg-slate-800" : "bg-slate-200")}>
                     <div
                       className={cn(
                         "h-full rounded-full transition-all duration-500",
-                        gating.allAttempted
+                        gating.allViewed
                           ? isDark
                             ? "bg-emerald-500"
                             : "bg-emerald-600"
@@ -1027,7 +1033,7 @@ export function StudentBarFinalExamsMcqPage() {
                             : "bg-amber-500"
                       )}
                       style={{
-                        width: `${gating.totalQuestions > 0 ? Math.max(0, Math.min(100, (gating.attemptedCount / gating.totalQuestions) * 100)) : 0}%`
+                        width: `${gating.totalQuestions > 0 ? Math.max(0, Math.min(100, (gating.viewedCount / gating.totalQuestions) * 100)) : 0}%`
                       }}
                     />
                   </div>
@@ -1037,6 +1043,7 @@ export function StudentBarFinalExamsMcqPage() {
                 {questions.map((item, index) => {
                   const isActive = item.id === activeQuestionId;
                   const hasContent = stripHtml(item.question).length > 0;
+                  const viewed = gating.viewedSet.has(item.id);
                   const attempted = gating.attemptedSet.has(item.id);
 
                   return (
@@ -1064,17 +1071,31 @@ export function StudentBarFinalExamsMcqPage() {
                               <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>
                                 {activeSubject?.name ?? "Subject"} • Question {index + 1}
                               </p>
-                              {/* Per-question status badge — Attempted / Not
-                                  yet attempted. When all are attempted a
-                                  global unlock badge shows above and per-
-                                  question answer colors display in reader. */}
+                              {/* Per-question status badges:
+                                    1. Viewed — drives answer unlock gating
+                                    2. Attempted — informational only (student
+                                       submitted a selection for this one). */}
+                              <span
+                                className={cn(
+                                  "inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]",
+                                  viewed
+                                    ? isDark
+                                      ? "bg-sky-500/15 text-sky-200"
+                                      : "bg-sky-50 text-sky-700"
+                                    : isDark
+                                      ? "bg-slate-700/60 text-slate-300"
+                                      : "bg-slate-100 text-slate-600"
+                                )}
+                              >
+                                {viewed ? "Viewed" : "Not viewed"}
+                              </span>
                               <span
                                 className={cn(
                                   "inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]",
                                   attempted
                                     ? isDark
-                                      ? "bg-sky-500/15 text-sky-200"
-                                      : "bg-sky-50 text-sky-700"
+                                      ? "bg-emerald-500/15 text-emerald-200"
+                                      : "bg-emerald-50 text-emerald-700"
                                     : isDark
                                       ? "bg-slate-700/60 text-slate-300"
                                       : "bg-slate-100 text-slate-600"
@@ -1119,7 +1140,7 @@ export function StudentBarFinalExamsMcqPage() {
                               type="button"
                             >
                               <Eye className="h-4 w-4" />
-                              {attempted ? "Review question" : "Attempt question"}
+                              {attempted ? "Review question" : viewed ? "Read question" : "Read and attempt question"}
                             </button>
                           </div>
                         </div>
@@ -1206,18 +1227,29 @@ export function StudentBarFinalExamMcqQuestionPage() {
   const questions = questionsQuery.data?.items ?? [];
   const allQuestionIds = useMemo(() => questions.map((item) => item.id), [questions]);
 
-  // Answer gating: answers are revealed only when EVERY question in the
-  // selected subject has been attempted. Individual submissions are still
-  // graded server-side; but the UI only shows correct/incorrect styling
-  // once the full set is complete.
+  // Answer gating: answers are revealed once the student has VIEWED every
+  // question in the subject (specifically: once the LAST question has been
+  // opened). Attempting (submitting) answers is optional.
   const gating = useMcqAnswerGating(subjectId, allQuestionIds);
-  const canRevealAnswers = gating.allAttempted;
+  const canRevealAnswers = gating.canRevealAnswers;
 
   const activeSubject = subjects.find((subject) => subject.id === subjectId) ?? null;
   const currentIndex = questions.findIndex((item) => item.id === questionId);
   const currentQuestion = currentIndex >= 0 ? questions[currentIndex] : null;
   const previousQuestionId = currentIndex > 0 ? questions[currentIndex - 1]?.id ?? "" : "";
   const nextQuestionId = currentIndex >= 0 && currentIndex < questions.length - 1 ? questions[currentIndex + 1]?.id ?? "" : "";
+
+  // Register this question as "VIEWED" the moment the reader mounts (or the
+  // URL moves to a different question). Visiting the final question unlocks
+  // answers globally (per spec).
+  useEffect(() => {
+    if (!subjectId || !questionId) return;
+    gating.registerView(questionId);
+    // NOTE: gating.registerView identity is stable per subjectId/questionId.
+    // We intentionally re-run only when subject/question change (not on every
+    // gating object update).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subjectId, questionId]);
 
   const attemptMutation = useMutation({
     mutationFn: (payload: { questionId: string; selectedOptionIndex: number }) =>
@@ -1228,7 +1260,8 @@ export function StudentBarFinalExamMcqQuestionPage() {
         isCorrect: data.isCorrect,
         selectedOptionIndex: data.selectedOptionIndex
       });
-      // Persist attempt so answer gating can progress subject-wide.
+      // Persist attempt so per-question "Attempted" badges stay in sync.
+      // (Answers are unlocked by views, not by attempts.)
       gating.registerAttempt(questionId);
     }
   });
@@ -1314,9 +1347,10 @@ export function StudentBarFinalExamMcqQuestionPage() {
                 <div className="space-y-2">
                   {currentQuestion.options.map((option, index) => {
                     const isSelected = selectedOptionIndex === index;
-                    // Only apply correct/incorrect styling if all questions
-                    // in the subject have been attempted (answer gating).
-                    // Otherwise we show the user's selection but no result.
+                    // Only apply correct/incorrect styling if the student has
+                    // viewed ALL questions in the subject (reached the last
+                    // one). Otherwise we show the user's selection but NO
+                    // answer coloring.
                     const isCorrect = canRevealAnswers && result?.correctOptionIndex === index;
                     const isWrongSelection = canRevealAnswers && result && result.selectedOptionIndex === index && !result.isCorrect;
 
@@ -1353,8 +1387,8 @@ export function StudentBarFinalExamMcqQuestionPage() {
                 </div>
 
                 {canRevealAnswers && result ? (
-                  // Full answer reveal card — visible only when every question
-                  // in the subject has been attempted.
+                  // Full answer reveal card — visible once the student has
+                  // viewed every question in the subject.
                   <div
                     className={cn(
                       "rounded-3xl border p-4",
@@ -1378,8 +1412,9 @@ export function StudentBarFinalExamMcqQuestionPage() {
                     )}
                   </div>
                 ) : !canRevealAnswers && result ? (
-                  // Attempt recorded, but other questions remain. Encourage
-                  // the student to complete all questions to see results.
+                  // Attempt recorded but answer gating is still active because
+                  // the student hasn't viewed every question in the subject
+                  // yet (specifically: hasn't opened the last question).
                   <div
                     className={cn(
                       "rounded-3xl border p-4",
@@ -1393,9 +1428,10 @@ export function StudentBarFinalExamMcqQuestionPage() {
                       <div>
                         <p className="text-xs uppercase tracking-[0.18em]">Answer locked</p>
                         <p className="mt-2 text-sm">
-                          Your attempt was saved. To reveal correct answers for ALL questions in this subject, attempt the remaining{" "}
-                          <span className="font-semibold">{gating.totalQuestions - gating.attemptedCount}</span> question
-                          {gating.totalQuestions - gating.attemptedCount === 1 ? "" : "s"}.
+                          Your attempt was saved. To reveal correct answers for ALL questions in this subject, view the remaining{" "}
+                          <span className="font-semibold">{gating.totalQuestions - gating.viewedCount}</span> question
+                          {gating.totalQuestions - gating.viewedCount === 1 ? "" : "s"}
+                          {gating.totalQuestions - gating.viewedCount === 1 ? " (including the final question)." : " (finishing by opening the final question unlocks all answers)."}
                         </p>
                       </div>
                     </div>
@@ -1407,12 +1443,18 @@ export function StudentBarFinalExamMcqQuestionPage() {
                 <div className={cn("rounded-3xl border px-4 py-4", isDark ? "border-slate-800 bg-slate-950/30" : "border-slate-200 bg-slate-50")}>
                   <p className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Progress</p>
                   <div className="mt-3 flex items-center justify-between text-sm">
-                    <span className={cn(isDark ? "text-slate-400" : "text-slate-600")}>Questions attempted</span>
+                    <span className={cn(isDark ? "text-slate-400" : "text-slate-600")}>Questions viewed</span>
                     <span className={cn("font-semibold", isDark ? "text-white" : "text-slate-950")}>
+                      {gating.viewedCount} / {gating.totalQuestions}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex items-center justify-between text-xs">
+                    <span className={cn(isDark ? "text-slate-500" : "text-slate-500")}>Attempted</span>
+                    <span className={cn(isDark ? "text-slate-400" : "text-slate-600")}>
                       {gating.attemptedCount} / {gating.totalQuestions}
                     </span>
                   </div>
-                  {/* Compact progress bar — emerald when fully complete (answers
+                  {/* Compact progress bar — emerald when fully viewed (answers
                       unlocked), amber until then. */}
                   <div className={cn("mt-3 h-2 w-full overflow-hidden rounded-full", isDark ? "bg-slate-800" : "bg-slate-200")}>
                     <div
@@ -1427,14 +1469,14 @@ export function StudentBarFinalExamMcqQuestionPage() {
                             : "bg-amber-500"
                       )}
                       style={{
-                        width: `${gating.totalQuestions > 0 ? Math.max(0, Math.min(100, (gating.attemptedCount / gating.totalQuestions) * 100)) : 0}%`
+                        width: `${gating.totalQuestions > 0 ? Math.max(0, Math.min(100, (gating.viewedCount / gating.totalQuestions) * 100)) : 0}%`
                       }}
                     />
                   </div>
                   <p className={cn("mt-2 text-xs", isDark ? "text-slate-400" : "text-slate-600")}>
                     {canRevealAnswers
-                      ? "All questions attempted — answers are unlocked."
-                      : "Attempt all questions in this subject to reveal correct answers."}
+                      ? "All questions viewed — answers are unlocked."
+                      : "View every question in this subject (including the final one) to reveal correct answers."}
                   </p>
                 </div>
 
