@@ -174,11 +174,11 @@ function normalizeStoredCaseType(value: string | null | undefined): "Handbook" |
 
 function resolveCaseTypeValues(caseType: SubjectSummaryCaseTypeFilter) {
   if (caseType === "HANDBOOK") {
-    return ["Handbook"];
+    return ["Handbook", "handbook", "HANDBOOK"];
   }
 
   if (caseType === "TEXTBOOK") {
-    return ["Textbook", "Textbooks"];
+    return ["Textbook", "Textbooks", "textbook", "textbooks", "TEXTBOOK", "TEXTBOOKS"];
   }
 
   return [];
