@@ -69,6 +69,14 @@ const hotPosts = [
 
 const watchedTags = ["legal-analysis", "cases", "study-system", "notes", "workflow"];
 
+function parseConnectSort(value: string | null): HelarConnectSort | null {
+  if (value === "interesting" || value === "hot" || value === "week" || value === "month") {
+    return value;
+  }
+
+  return null;
+}
+
 function formatRelativeTime(value: string) {
   const date = new Date(value);
   const diffSeconds = Math.max(1, Math.floor((Date.now() - date.getTime()) / 1000));
@@ -119,9 +127,9 @@ export function HelarConnectPage() {
   const currentUserName = session?.user.fullName ?? "";
   const isModerator = canModerateHelarConnect(session?.user.roleCodes);
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedSort, setSelectedSort] = useState<HelarConnectSort>("interesting");
+  const [selectedSort, setSelectedSort] = useState<HelarConnectSort>(() => parseConnectSort(searchParams.get("sort")) ?? "interesting");
   const [isAskModalOpen, setIsAskModalOpen] = useState(false);
-  const [expandedQuestionId, setExpandedQuestionId] = useState<string | null>(null);
+  const [expandedQuestionId, setExpandedQuestionId] = useState<string | null>(() => searchParams.get("question"));
   const [commentComposerQuestionId, setCommentComposerQuestionId] = useState<string | null>(null);
   const [answerComposerQuestionId, setAnswerComposerQuestionId] = useState<string | null>(null);
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
@@ -215,6 +223,19 @@ export function HelarConnectPage() {
   });
 
   useEffect(() => {
+    const nextSort = parseConnectSort(searchParams.get("sort"));
+
+    if (nextSort && nextSort !== selectedSort) {
+      setSelectedSort(nextSort);
+    }
+
+    const nextQuestionId = searchParams.get("question");
+    if (nextQuestionId && nextQuestionId !== expandedQuestionId) {
+      setExpandedQuestionId(nextQuestionId);
+    }
+  }, [expandedQuestionId, searchParams, selectedSort]);
+
+  useEffect(() => {
     if (!isAuthenticated || searchParams.get("intent") !== "ask-question") {
       return;
     }
@@ -224,6 +245,25 @@ export function HelarConnectPage() {
     nextParams.delete("intent");
     setSearchParams(nextParams, { replace: true });
   }, [isAuthenticated, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    const targetQuestionId = searchParams.get("question");
+    if (!targetQuestionId) {
+      return;
+    }
+
+    const hasQuestion = questionsQuery.data?.items.some((question) => question.id === targetQuestionId);
+    if (!hasQuestion) {
+      return;
+    }
+
+    if (viewedQuestionIdsRef.current.has(targetQuestionId)) {
+      return;
+    }
+
+    viewedQuestionIdsRef.current.add(targetQuestionId);
+    void viewMutation.mutateAsync(targetQuestionId);
+  }, [questionsQuery.data?.items, searchParams, viewMutation]);
 
   const questionCountLabel = useMemo(() => {
     const totalQuestions = questionsQuery.data?.summary.totalQuestions ?? 0;

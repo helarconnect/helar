@@ -496,7 +496,7 @@ body {
     background:
       radial-gradient(circle at top left, rgba(12, 90, 255, 0.08) 0%, transparent 28%),
       radial-gradient(circle at top right, rgba(254, 83, 61, 0.08) 0%, transparent 24%),
-      linear-gradient(180deg, #05070d 0%, #09111f 18%, #f4f7fb 46%, #ffffff 100%);
+      linear-gradient(180deg, #05070d 0%, #09111f 42%, #060a13 100%);
   }
 
   .futuristic-panel {

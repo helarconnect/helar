@@ -109,6 +109,17 @@ export async function fetchHelarConnectQuestions(filters: HelarConnectQuestionFi
   return response.data.data;
 }
 
+export async function fetchHelarConnectQuestionsPublic(filters: HelarConnectQuestionFilters) {
+  const response = await publicHttp.get<HelarConnectResponse<HelarConnectSnapshot>>("/api/v1/connect/questions", {
+    params: {
+      search: filters.search ?? "",
+      sort: filters.sort ?? "interesting"
+    }
+  });
+
+  return response.data.data;
+}
+
 export async function fetchHelarConnectUsers(search: string) {
   const response = await publicHttp.get<HelarConnectResponse<HelarConnectUsersSnapshot>>("/api/v1/connect/users", {
     params: {

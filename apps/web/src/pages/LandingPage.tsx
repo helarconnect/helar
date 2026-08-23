@@ -1,18 +1,24 @@
-import { motion } from "framer-motion";
+import { motion, useMotionValue, useSpring } from "framer-motion";
 import {
   BookOpenText,
   BriefcaseBusiness,
   Building2,
+  Check,
+  Facebook,
   GraduationCap,
+  Linkedin,
   ShieldCheck,
-  Sparkles
+  Sparkles,
+  Twitter
 } from "lucide-react";
+import type { PointerEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import uploadedHeroImage from "@/assets/helar-hero-upload.png";
-import { SectionHeading } from "@/components/ui/SectionHeading";
-import { trustSignals } from "@/lib/mock-api";
+import { fetchLatestPublications, type LatestPublicationItem } from "@/lib/catalog-api";
+import { fetchHelarConnectQuestionsPublic, type HelarConnectSnapshot } from "@/lib/connect-api";
+import { formatDateDMY } from "@/lib/date";
 
 type ImageSize =
   | "square_hd"
@@ -26,11 +32,6 @@ type ImageSize =
 // not a wireframe with neutral placeholders.
 const createAiImageUrl = (prompt: string, imageSize: ImageSize) =>
   `https://coresg-normal.trae.ai/api/ide/v1/text_to_image?prompt=${encodeURIComponent(prompt)}&image_size=${imageSize}`;
-
-const advisoryImage = createAiImageUrl(
-  "law student reviewing digital law reports, subject notes, and bar exam materials on laptop and tablet in a premium library setting, warm academic lighting, realistic photography, high-end website section image",
-  "landscape_16_9"
-);
 
 const aboutImage = createAiImageUrl(
   "female law student studying with law reports, summary notes, and printed case materials in a refined law library, premium academic environment, bookshelves, tablets, warm professional lighting, realistic editorial photography",
@@ -70,35 +71,103 @@ const expertiseAreas = [
   }
 ];
 
-const collectionHighlights = [
-  {
-    image: createAiImageUrl(
-      "premium editorial photo of legal study materials including law reports and casebooks on a polished desk, realistic website feature image",
-      "portrait_4_3"
-    ),
-    body: "Built for fast lookup, comparison, and dependable case reference during study or legal writing.",
-    title: "Research Collection",
-    subtitle: "Law Reports"
-  },
-  {
-    image: createAiImageUrl(
-      "premium editorial photo of law subject summary notes and study outlines on tablet and notebook, realistic website feature image",
-      "portrait_4_3"
-    ),
-    body: "Clear, compact learning materials that help students revise broad course topics with less friction.",
-    title: "Revision Collection",
-    subtitle: "Subject Summary Notes"
-  },
-  {
-    image: createAiImageUrl(
-      "premium editorial photo of bar exam practice materials, handbook notes, and case ratio sheets, realistic website feature image",
-      "portrait_4_3"
-    ),
-    body: "Focused NLS materials that support handbook revision, case analysis, and realistic Bar preparation.",
-    title: "Bar Prep Collection",
-    subtitle: "NLS Resources"
+function TikTokIcon(props: { className?: string }) {
+  return (
+    <svg className={props.className} fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02c.08 1.53.63 3.09 1.75 4.17c1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97c-.57-.26-1.1-.59-1.62-.93c-.01 2.92.01 5.84-.02 8.75c-.08 1.4-.54 2.79-1.35 3.94c-1.31 1.92-3.58 3.17-5.91 3.21c-1.43.08-2.86-.31-4.08-1.03c-2.02-1.19-3.44-3.37-3.65-5.71c-.02-.5-.03-1-.01-1.49c.18-1.9 1.12-3.72 2.58-4.96c1.66-1.44 3.98-2.13 6.15-1.72c.02 1.48-.04 2.96-.04 4.44c-.99-.32-2.15-.23-3.02.37c-.63.41-1.11 1.04-1.36 1.75c-.21.51-.15 1.07-.14 1.61c.24 1.64 1.82 3.02 3.5 2.87c1.12-.01 2.19-.66 2.77-1.61c.19-.33.4-.67.41-1.06c.1-1.79.06-3.57.07-5.36c.01-4.03-.01-8.05.02-12.07" />
+    </svg>
+  );
+}
+
+const revealContainer = {
+  hidden: { opacity: 0, y: 28 },
+  visible: { opacity: 1, y: 0 }
+};
+
+const staggerChildren = {
+  hidden: {},
+  visible: {
+    transition: {
+      staggerChildren: 0.12
+    }
   }
-];
+};
+
+type LandingHighlightsCache = {
+  connect: HelarConnectSnapshot;
+  publications: LatestPublicationItem[];
+  sort: "hot" | "interesting" | "week";
+  timestamp: number;
+};
+
+let landingHighlightsCache: LandingHighlightsCache | null = null;
+
+function useCountUp(params: { active: boolean; durationMs?: number; value: number }) {
+  const durationMs = params.durationMs ?? 900;
+  const [display, setDisplay] = useState(0);
+
+  useEffect(() => {
+    if (!params.active) {
+      return;
+    }
+
+    let frameId = 0;
+    let fallbackTimeoutId = 0;
+    const startedAt = performance.now();
+    const target = params.value;
+
+    const tick = (now: number) => {
+      const progress = Math.min(1, (now - startedAt) / durationMs);
+      setDisplay(Math.round(target * progress));
+
+      if (progress < 1) {
+        frameId = window.requestAnimationFrame(tick);
+      }
+    };
+
+    frameId = window.requestAnimationFrame(tick);
+    fallbackTimeoutId = window.setTimeout(() => setDisplay(target), durationMs + 80);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.clearTimeout(fallbackTimeoutId);
+    };
+  }, [durationMs, params.active, params.value]);
+
+  return display;
+}
+
+function useTiltCard(params: { maxDeg?: number }) {
+  const maxDeg = params.maxDeg ?? 8;
+  const rotateX = useMotionValue(0);
+  const rotateY = useMotionValue(0);
+  const springConfig = { damping: 18, stiffness: 220, mass: 0.6 };
+  const rotateXSpring = useSpring(rotateX, springConfig);
+  const rotateYSpring = useSpring(rotateY, springConfig);
+
+  function reset() {
+    rotateX.set(0);
+    rotateY.set(0);
+  }
+
+  return {
+    onPointerLeave: reset,
+    onPointerMove: (event: PointerEvent<HTMLElement>) => {
+      const rect = event.currentTarget.getBoundingClientRect();
+      const offsetX = event.clientX - rect.left;
+      const offsetY = event.clientY - rect.top;
+      const percentX = (offsetX / rect.width) * 2 - 1;
+      const percentY = (offsetY / rect.height) * 2 - 1;
+
+      rotateX.set(-percentY * maxDeg);
+      rotateY.set(percentX * maxDeg);
+    },
+    style: {
+      rotateX: rotateXSpring,
+      rotateY: rotateYSpring,
+      transformStyle: "preserve-3d" as const
+    }
+  };
+}
 
 export function LandingPage() {
   const heroResearchItems = useMemo(
@@ -144,6 +213,45 @@ export function LandingPage() {
 
   const [typedLineIndex, setTypedLineIndex] = useState(0);
   const [typedCharacterCount, setTypedCharacterCount] = useState(0);
+  const [connectSnapshot, setConnectSnapshot] = useState<HelarConnectSnapshot | null>(null);
+  const [connectStatus, setConnectStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [connectSort, setConnectSort] = useState<"hot" | "interesting" | "week">("hot");
+  const [connectHighlightsActive, setConnectHighlightsActive] = useState(true);
+  const [latestPublications, setLatestPublications] = useState<LatestPublicationItem[]>([]);
+  const [latestPublicationsStatus, setLatestPublicationsStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [latestPublicationsActive, setLatestPublicationsActive] = useState(true);
+  const [coreCountersActive, setCoreCountersActive] = useState(false);
+  const [highlightsRefreshKey, setHighlightsRefreshKey] = useState(0);
+
+  const connectTilt = useTiltCard({ maxDeg: 7 });
+  const publicationsTilt = useTiltCard({ maxDeg: 7 });
+
+  const totalConnectQuestions = useCountUp({
+    active: connectHighlightsActive && !!connectSnapshot,
+    value: connectSnapshot?.summary.totalQuestions ?? 0
+  });
+  const latestPublicationsCount = useCountUp({
+    active: latestPublicationsActive && latestPublications.length > 0,
+    value: latestPublications.length
+  });
+  const coreMaterialCount = useCountUp({ active: coreCountersActive, value: 6 });
+  const coreLibraryCount = useCountUp({ active: coreCountersActive, value: 1 });
+  const connectQuestionCountLabel = connectSnapshot ? totalConnectQuestions.toLocaleString() : "—";
+  const latestPublicationsCountLabel = latestPublications.length > 0 ? latestPublicationsCount.toLocaleString() : "—";
+
+  const getPublicationHref = (publication: LatestPublicationItem) => {
+    const slug = publication.category?.slug ?? "";
+
+    if (slug === "law-reports") {
+      return `/app/library/law-reports/${publication.id}`;
+    }
+
+    if (slug === "helarpedia") {
+      return `/app/library/helarpedia/${publication.id}`;
+    }
+
+    return "/app/dashboard";
+  };
 
   useEffect(() => {
     if (typedLineIndex >= heroTypewriterBlocks.length) {
@@ -170,6 +278,66 @@ export function LandingPage() {
 
     return () => window.clearTimeout(timeout);
   }, [heroTypewriterBlocks, typedCharacterCount, typedLineIndex]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadHomepageHighlights() {
+      const cache = landingHighlightsCache;
+      const canUseCache = cache && cache.sort === connectSort && Date.now() - cache.timestamp < 60_000;
+
+      if (canUseCache) {
+        setConnectSnapshot(cache.connect);
+        setConnectStatus("ready");
+        setLatestPublications(cache.publications);
+        setLatestPublicationsStatus("ready");
+      } else {
+        setConnectSnapshot(null);
+        setLatestPublications([]);
+        setConnectStatus("loading");
+        setLatestPublicationsStatus("loading");
+      }
+
+      try {
+        const [nextConnectSnapshot, nextPublications] = await Promise.all([
+          fetchHelarConnectQuestionsPublic({ sort: connectSort }),
+          fetchLatestPublications(6)
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        setConnectSnapshot(nextConnectSnapshot);
+        setConnectStatus("ready");
+        setLatestPublications(nextPublications);
+        setLatestPublicationsStatus("ready");
+
+        landingHighlightsCache = {
+          connect: nextConnectSnapshot,
+          publications: nextPublications,
+          sort: connectSort,
+          timestamp: Date.now()
+        };
+      } catch {
+        if (cancelled) {
+          return;
+        }
+
+        setConnectStatus("error");
+        setLatestPublicationsStatus("error");
+        setConnectSnapshot(null);
+        setLatestPublications([]);
+      }
+    }
+
+    void loadHomepageHighlights();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [connectSort, highlightsRefreshKey]);
+
   return (
     <div className="futuristic-page pb-24">
       <section className="relative overflow-hidden bg-[#05070d]">
@@ -288,52 +456,328 @@ export function LandingPage() {
         </motion.div>
       </section>
 
-      <section className="section-shell relative z-20 -mt-8 lg:-mt-10">
-        <div className="grid gap-6 md:grid-cols-3">
-          {[
-            {
-              body: "Find law reports, summary notes, textbook cases, and NLS materials without jumping between scattered folders.",
-              title: "Everything In One Place"
-            },
-            {
-              body: "The layout is built to help students understand what Helar offers within a few seconds of landing on the page.",
-              title: "Clear At First Glance"
-            },
-            {
-              body: "The library supports everyday reading and serious exam preparation with materials that feel curated, not generic.",
-              title: "Built For Real Study"
-            }
-          ].map((item) => (
-            <article className="futuristic-panel p-6 lg:p-7" key={item.title}>
-              <h3 className="font-heading text-[1.55rem] leading-[1.3] text-[color:var(--color-text)]">{item.title}</h3>
-              <p className="body-copy mt-4">{item.body}</p>
-            </article>
-          ))}
-        </div>
+      <section className="section-shell relative z-20 -mt-10 lg:-mt-16">
+        <motion.div
+          animate={{ x: [0, 18, 0], y: [0, -14, 0] }}
+          className="futuristic-orb left-[-7rem] top-[-5rem] h-56 w-56 bg-[rgba(44,109,255,0.24)]"
+          transition={{ duration: 10, ease: "easeInOut", repeat: Infinity }}
+        />
+        <motion.div
+          animate={{ x: [0, -14, 0], y: [0, 18, 0] }}
+          className="futuristic-orb right-[-5rem] top-12 h-64 w-64 bg-[rgba(254,83,61,0.18)]"
+          transition={{ duration: 12, ease: "easeInOut", repeat: Infinity }}
+        />
+        <motion.div
+          className="futuristic-panel-dark grid gap-12 p-7 lg:grid-cols-[1.05fr_0.95fr] lg:p-12"
+          initial="hidden"
+          transition={{ duration: 0.7, ease: "easeOut" }}
+          variants={revealContainer}
+          viewport={{ amount: 0.25, once: true }}
+          whileInView="visible"
+        >
+          <div className="space-y-7">
+            <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
+              <div className="max-w-xl space-y-3">
+                <p className="text-sm font-semibold uppercase tracking-[0.18em] text-white/65">
+                  Welcome to Helar
+                </p>
+                <h2 className="font-heading text-[2.15rem] leading-[1.15] text-white lg:text-[2.7rem]">
+                  Research, revise, and prepare with one organized library.
+                </h2>
+                <p className="text-[15px] leading-7 text-white/75">
+                  Get the core materials, Helar Connect community, and the latest publications in one place—designed for serious study without the clutter.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {[
+                  { href: "https://www.facebook.com/profile.php?id=61576597417904", icon: Facebook, label: "Facebook" },
+                  { href: "https://www.tiktok.com/@helar.law", icon: TikTokIcon, label: "TikTok" },
+                  { href: "https://x.com/helarlaw", icon: Twitter, label: "X (Twitter)" },
+                  { href: "https://www.linkedin.com/company/helar-law", icon: Linkedin, label: "LinkedIn" }
+                ].map((item) => {
+                  const Icon = item.icon;
+                  const className =
+                    "inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/12 bg-white/5 text-white/90 transition hover:bg-white/10";
+
+                  if (!item.href) {
+                    return (
+                      <span aria-label={item.label} className={className} key={item.label} title={item.label}>
+                        <Icon className="h-4 w-4" />
+                      </span>
+                    );
+                  }
+
+                  return (
+                    <a
+                      aria-label={item.label}
+                      className={className}
+                      href={item.href}
+                      key={item.label}
+                      rel="noreferrer"
+                      target="_blank"
+                      title={item.label}
+                    >
+                      <Icon className="h-4 w-4" />
+                    </a>
+                  );
+                })}
+              </div>
+            </div>
+
+            <motion.div className="grid gap-4 sm:grid-cols-3" initial="hidden" variants={staggerChildren} whileInView="visible" viewport={{ amount: 0.3, once: true }}>
+              {[
+                {
+                  body: "Find law reports, notes, cases, and Bar materials with clear categories and fast navigation.",
+                  icon: BookOpenText,
+                  title: "Curated Library"
+                },
+                {
+                  body: "Keep your reading focused with clean layouts, calm spacing, and study-first organization.",
+                  icon: Sparkles,
+                  title: "Study-First Design"
+                },
+                {
+                  body: "Ask questions, share insights, and learn faster with Helar Connect community support.",
+                  icon: BriefcaseBusiness,
+                  title: "Community Help"
+                }
+              ].map((item) => {
+                const Icon = item.icon;
+
+                return (
+                  <motion.article
+                    className="futuristic-card-dark rounded-[1.55rem] p-6"
+                    key={item.title}
+                    transition={{ duration: 0.25 }}
+                    variants={revealContainer}
+                    whileHover={{ y: -6 }}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="futuristic-icon-badge">
+                        <Icon className="h-4 w-4" />
+                      </div>
+                      <h3 className="font-heading text-[1.25rem] leading-[1.3] text-white">{item.title}</h3>
+                    </div>
+                    <p className="mt-4 text-sm leading-7 text-white/72">{item.body}</p>
+                  </motion.article>
+                );
+              })}
+            </motion.div>
+          </div>
+
+          <div className="grid gap-5">
+            <motion.article
+              className="futuristic-panel-dark p-7 lg:p-8"
+              onPointerLeave={connectTilt.onPointerLeave}
+              onPointerMove={connectTilt.onPointerMove}
+              onViewportEnter={() => setConnectHighlightsActive(true)}
+              style={connectTilt.style}
+              transition={{ duration: 0.25 }}
+              viewport={{ amount: 0.3, once: true }}
+              whileHover={{ y: -6 }}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/65">Helar Connect</p>
+                  <h3 className="mt-3 font-heading text-[1.7rem] leading-[1.2] text-white">Ask, discuss, and learn faster.</h3>
+                </div>
+                <Link
+                  className="inline-flex items-center justify-center rounded-full border border-white/14 bg-white/6 px-4 py-2 text-sm font-semibold text-white backdrop-blur-sm transition hover:bg-white/10"
+                  to="/connect"
+                >
+                  Visit Helar Connect
+                </Link>
+              </div>
+
+              <p className="mt-4 text-[15px] leading-7 text-white/78">
+                Connect with a growing legal learning community—post questions, get answers, and stay engaged while studying.
+              </p>
+
+              <div className="mt-6 flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  {[
+                    { label: "Hot", value: "hot" as const },
+                    { label: "Interesting", value: "interesting" as const },
+                    { label: "This week", value: "week" as const }
+                  ].map((item) => (
+                    <button
+                      className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] transition ${
+                        connectSort === item.value ? "border-white/18 bg-white/12 text-white" : "border-white/10 bg-white/5 text-white/72 hover:bg-white/10"
+                      }`}
+                      key={item.value}
+                      onClick={() => setConnectSort(item.value)}
+                      type="button"
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="rounded-full border border-white/12 bg-white/5 px-4 py-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/70">
+                    Questions: <span className="text-white">{connectQuestionCountLabel}</span>
+                  </p>
+                </div>
+              </div>
+
+              {connectStatus === "loading" ? (
+                <p className="mt-6 text-sm text-white/65">Loading Helar Connect highlights...</p>
+              ) : connectStatus === "error" ? (
+                <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-sm text-white/65">Unable to load Helar Connect highlights right now.</p>
+                  <button
+                    className="rounded-full border border-white/14 bg-white/6 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-white transition hover:bg-white/10"
+                    onClick={() => setHighlightsRefreshKey((current) => current + 1)}
+                    type="button"
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : (
+                <div className="mt-6 space-y-4">
+                  <div className="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-2 [scrollbar-width:auto]">
+                    {(connectSnapshot?.items ?? []).slice(0, 3).map((question) => (
+                      <Link
+                        className="min-w-[18rem] snap-start rounded-2xl border border-white/10 bg-white/5 px-4 py-4 transition hover:bg-white/10"
+                        key={question.id}
+                        to={`/connect?sort=${connectSort}&question=${encodeURIComponent(question.id)}`}
+                      >
+                        <p className="font-semibold text-white">{question.title}</p>
+                        <p className="mt-2 text-sm leading-6 text-white/70">{question.excerpt}</p>
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </motion.article>
+
+            <motion.article
+              className="futuristic-panel-dark p-7 lg:p-8"
+              onPointerLeave={publicationsTilt.onPointerLeave}
+              onPointerMove={publicationsTilt.onPointerMove}
+              onViewportEnter={() => setLatestPublicationsActive(true)}
+              style={publicationsTilt.style}
+              transition={{ duration: 0.25 }}
+              viewport={{ amount: 0.3, once: true }}
+              whileHover={{ y: -6 }}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/65">Latest publications</p>
+                  <h3 className="mt-3 font-heading text-[1.7rem] leading-[1.2] text-white">
+                    Fresh additions to the library.
+                  </h3>
+                </div>
+                <Link
+                  className="inline-flex items-center justify-center rounded-full border border-white/14 bg-white/6 px-4 py-2 text-sm font-semibold text-white backdrop-blur-sm transition hover:bg-white/10"
+                  to="/app/dashboard"
+                >
+                  Explore
+                </Link>
+              </div>
+
+              <div className="mt-6 rounded-full border border-white/12 bg-white/5 px-4 py-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/70">
+                  Showing: <span className="text-white">{latestPublicationsCountLabel}</span> latest items
+                </p>
+              </div>
+
+              {latestPublicationsStatus === "loading" ? (
+                <p className="mt-6 text-sm text-white/65">Loading latest publications...</p>
+              ) : latestPublicationsStatus === "error" ? (
+                <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-sm text-white/65">Unable to load latest publications right now.</p>
+                  <button
+                    className="rounded-full border border-white/14 bg-white/6 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-white transition hover:bg-white/10"
+                    onClick={() => setHighlightsRefreshKey((current) => current + 1)}
+                    type="button"
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : latestPublications.length === 0 ? (
+                <p className="mt-6 text-sm text-white/65">No publications available yet.</p>
+              ) : (
+                <div className="mt-6 flex snap-x snap-mandatory gap-4 overflow-x-auto pb-2 [scrollbar-width:auto]">
+                  {latestPublications.slice(0, 6).map((publication) => {
+                    const label =
+                      publication.category?.slug === "law-reports"
+                        ? "Law report"
+                        : publication.category?.slug === "helarpedia"
+                          ? "Helarpedia"
+                          : publication.category?.name ?? "Publication";
+                    const dateLabel = formatDateDMY(publication.reportDate ?? publication.createdAt, "Not dated");
+                    const href = getPublicationHref(publication);
+
+                    return (
+                      <Link
+                        className="min-w-[18rem] snap-start rounded-2xl border border-white/10 bg-white/5 p-4 transition hover:bg-white/10"
+                        key={publication.id}
+                        to={href}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/65">{label}</p>
+                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/65">{dateLabel}</p>
+                        </div>
+                        <p className="mt-3 font-semibold text-white">{publication.title}</p>
+                        {publication.reportNumber ? (
+                          <p className="mt-2 text-sm text-white/70">Report number: {publication.reportNumber}</p>
+                        ) : null}
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </motion.article>
+          </div>
+        </motion.div>
       </section>
 
-      <section className="section-shell space-y-10 pt-24">
+      <motion.section
+        className="section-shell space-y-10 pt-28 lg:pt-32"
+        onViewportEnter={() => setCoreCountersActive(true)}
+        viewport={{ amount: 0.25, once: true }}
+      >
         <div className="grid gap-8 lg:grid-cols-[0.95fr_1.05fr] lg:items-center">
           <div className="futuristic-panel-dark p-8 lg:p-10">
             <p className="text-sm font-semibold uppercase tracking-[0.18em] text-white/65">Core Library</p>
             <h2 className="mt-4 font-heading text-[2.2rem] leading-[1.2] text-white lg:text-[3rem]">
-              The Complete Legal Study Stack
+              Everything you need for serious legal study.
             </h2>
             <p className="mt-5 text-[1rem] leading-8 text-white/80">
-              These are the six materials the homepage is now built around, presented in a cleaner and more professional structure.
+              Helar brings research, revision, and Bar preparation into one clear library—with fewer distractions and stronger structure.
             </p>
+            <div className="mt-7 flex flex-col gap-3 sm:flex-row">
+              <Link
+                className="inline-flex items-center justify-center gap-2 rounded-full bg-[color:var(--color-accent-strong)] px-6 py-3 text-sm font-semibold text-white transition hover:brightness-105"
+                to="/auth/sign-up"
+              >
+                Get Started
+              </Link>
+              <Link
+                className="inline-flex items-center justify-center gap-2 rounded-full border border-white/16 bg-white/6 px-6 py-3 text-sm font-semibold text-white backdrop-blur-sm transition hover:bg-white/10"
+                to="/pricing"
+              >
+                View Pricing
+              </Link>
+            </div>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-3">
             {[
-              { label: "6", value: "essential study materials" },
-              { label: "1", value: "organized digital library" },
-              { label: "NLS", value: "revision and Bar support" }
+              { id: "core-materials", label: coreMaterialCount, value: "essential study materials" },
+              { id: "core-library", label: coreLibraryCount, value: "organized digital library" },
+              { id: "core-nls", label: "NLS", value: "revision and Bar support" }
             ].map((item) => (
-              <div className="futuristic-panel p-6 text-center" key={item.label}>
+              <motion.div
+                className="futuristic-card-dark rounded-[1.6rem] p-6 text-center"
+                key={item.id}
+                transition={{ duration: 0.25 }}
+                whileHover={{ y: -6 }}
+              >
                 <p className="font-heading text-[2.5rem] leading-none text-[color:var(--color-accent-strong)]">{item.label}</p>
-                <p className="mt-3 text-sm uppercase tracking-[0.14em] text-[color:var(--color-subtle)]">{item.value}</p>
-              </div>
+                <p className="mt-3 text-sm uppercase tracking-[0.14em] text-white/72">{item.value}</p>
+              </motion.div>
             ))}
           </div>
         </div>
@@ -343,38 +787,43 @@ export function LandingPage() {
             const Icon = item.icon;
 
             return (
-              <article className="futuristic-card p-6 lg:p-7" key={item.title}>
+              <motion.article
+                className="futuristic-card-dark rounded-[1.6rem] p-7"
+                key={item.title}
+                transition={{ duration: 0.25 }}
+                whileHover={{ y: -8 }}
+              >
                 <div className="futuristic-icon-badge">
                   <Icon className="h-4 w-4" />
                 </div>
-                <h3 className="mt-5 font-heading text-[1.65rem] leading-[1.35] text-[color:var(--color-text)]">{item.title}</h3>
-                <p className="body-copy mt-4">{item.body}</p>
-              </article>
+                <h3 className="mt-5 font-heading text-[1.65rem] leading-[1.25] text-white">{item.title}</h3>
+                <p className="mt-4 text-[15px] leading-7 text-white/72">{item.body}</p>
+              </motion.article>
             );
           })}
         </div>
-      </section>
+      </motion.section>
 
-      <section className="section-shell pt-24">
+      <section className="section-shell pt-28 lg:pt-32">
         <div className="grid items-center gap-10 lg:grid-cols-[0.92fr_1.08fr]">
-          <div className="futuristic-panel overflow-hidden p-0">
+          <motion.div className="futuristic-panel-dark overflow-hidden p-0" transition={{ duration: 0.25 }} whileHover={{ y: -6 }}>
             <img
               alt="Helar legal learning overview"
               className="h-[360px] w-full object-cover lg:h-[460px]"
               loading="lazy"
               src={aboutImage}
             />
-          </div>
+          </motion.div>
 
           <div className="space-y-6">
-            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[color:var(--color-accent-strong)]">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-white/65">
               Why Helar Works
             </p>
-            <h2 className="font-heading text-[2.35rem] leading-[1.25] text-[color:var(--color-text)] lg:text-[3rem]">
-              A cleaner path from legal research to revision and exam readiness.
+            <h2 className="font-heading text-[2.35rem] leading-[1.18] text-white lg:text-[3rem]">
+              Clear structure that helps students move faster.
             </h2>
-            <p className="body-copy max-w-2xl">
-              Helar is designed around the resources students actually search for most. That makes the homepage easier to understand and the product easier to trust.
+            <p className="max-w-2xl text-[15px] leading-7 text-white/75">
+              The library is designed around what law students actually look for day-to-day, so you spend less time searching and more time learning.
             </p>
 
             <div className="grid gap-4 sm:grid-cols-2">
@@ -384,128 +833,61 @@ export function LandingPage() {
                 "Study faculty textbook cases and ratios with better structure and recall.",
                 "Prepare for NLS and BAR exams with focused, exam-relevant materials."
               ].map((item) => (
-                <div className="futuristic-panel p-4" key={item}>
+                <motion.div className="futuristic-card-dark rounded-[1.4rem] p-5" key={item} transition={{ duration: 0.25 }} whileHover={{ y: -6 }}>
                   <div className="flex items-start gap-3">
-                    <span className="mt-2 h-2 w-2 rounded-full bg-[color:var(--color-accent-strong)]" />
-                    <p className="body-copy">{item}</p>
+                    <span className="mt-1 inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/12 bg-white/5">
+                      <Check className="h-4 w-4 text-[color:var(--color-accent)]" />
+                    </span>
+                    <p className="text-sm leading-7 text-white/72">{item}</p>
                   </div>
-                </div>
+                </motion.div>
               ))}
             </div>
           </div>
         </div>
       </section>
 
-      <section className="section-shell space-y-10 pt-24">
-        <SectionHeading
-          body="These focused collections show the product in a more polished way without overcrowding the page."
-          eyebrow="Focused Collections"
-          title="Built Around How Students Actually Study"
-        />
-        <div className="grid gap-6 md:grid-cols-3">
-          {collectionHighlights.map((item) => (
-            <article className="futuristic-card overflow-hidden p-0" key={item.title}>
-              <img
-                alt={`${item.title} visual`}
-                className="h-72 w-full object-cover"
-                loading="lazy"
-                src={item.image}
-              />
-              <div className="p-8">
-                <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-muted)]">{item.subtitle}</p>
-                <h3 className="mt-3 font-heading text-[1.5rem] text-[color:var(--color-text)]">{item.title}</h3>
-                <p className="body-copy mt-4">{item.body}</p>
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
-
       <section className="section-shell pt-24">
-        <div className="grid gap-8 lg:grid-cols-[1.02fr_0.98fr]">
-          <div className="futuristic-panel-dark px-8 py-10 lg:px-10 lg:py-12">
-            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-white/65">Study Workflow</p>
-            <h2 className="mt-4 font-heading text-[2.2rem] leading-[1.28] text-white lg:text-[2.8rem]">
-              The homepage now tells one simple story from the first screen onward.
-            </h2>
-            <p className="mt-5 text-[1rem] leading-8 text-white/78">
-              See the six resources immediately, understand the value quickly, then move into the sections that explain how the library supports research, revision, and exam preparation.
-            </p>
-
-            <ul className="mt-8 space-y-4">
-              {[
-                "Visible six-item resource list directly inside the hero",
-                "Cleaner section order with less repeated messaging",
-                "Stronger card hierarchy and calmer spacing",
-                "A more premium first impression without visual clutter"
-              ].map((item) => (
-                <li className="rounded-2xl border border-white/12 bg-white/5 px-4 py-4 text-[15px] leading-7 text-white/82" key={item}>
-                  {item}
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div className="futuristic-panel-dark relative overflow-hidden p-4 sm:p-6">
-            <img
-              alt="Helar legal study materials and digital library workflow"
-              className="h-[420px] w-full rounded-[1.6rem] object-cover"
-              loading="lazy"
-              src={advisoryImage}
-            />
-            <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(6,10,19,0.06)_0%,rgba(6,10,19,0.1)_45%,rgba(6,10,19,0.5)_100%)]" />
-            <div className="absolute bottom-8 left-8 right-8">
-              <div className="rounded-[1.4rem] border border-white/12 bg-[rgba(6,10,19,0.8)] p-5 backdrop-blur-md">
-                <p className="text-xs uppercase tracking-[0.18em] text-white/62">Quick overview</p>
-                <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                  {[
-                    { label: "6", value: "core resources" },
-                    { label: "NLS", value: "focused" },
-                    { label: "24/7", value: "access" }
-                  ].map((item) => (
-                    <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-center" key={item.label}>
-                      <p className="font-heading text-2xl text-[color:var(--color-accent)]">{item.label}</p>
-                      <p className="mt-2 text-sm uppercase tracking-[0.14em] text-white/72">{item.value}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="section-shell pt-24">
-        <div className="futuristic-panel-dark px-8 py-14 text-center lg:px-12">
-          <h2 className="font-heading text-[2.1rem] leading-[1.35] text-white lg:text-[2.8rem]">
-            Start studying from the legal materials you actually need.
-          </h2>
-          <p className="mx-auto mt-6 max-w-3xl text-[18px] leading-[30px] text-white/82">
-            Get immediate access to law reports, subject summary notes, faculty textbook cases and ratios, NLS handbook notes, NLS cases and ratios, and NLS (BAR) final exams.
-          </p>
-          <Link className="mt-10 inline-flex border border-white/18 bg-white/6 px-8 py-4 font-heading text-base text-white backdrop-blur-sm transition hover:bg-white/10" to="/auth/sign-up">
-            Explore The Library
-          </Link>
-        </div>
-      </section>
-
-      <section className="section-shell pt-24" id="contact">
-        <div className="futuristic-panel grid gap-8 p-8 md:grid-cols-[1fr_1fr]">
+        <div className="futuristic-panel-dark grid gap-10 px-8 py-14 lg:grid-cols-[1.15fr_0.85fr] lg:px-12">
           <div>
-            <h3 className="font-heading text-[28px] text-[color:var(--color-text)]">Contact Helar</h3>
-            <p className="body-copy mt-4 whitespace-pre-line">
-              {`Address: 163, Sathcom-K House, Okporo Road. Rumuodara. Port Harcourt
-
-Phone number: 09030009297, 08023035628
-
-Email: info@helar.law`}
+            <h2 className="font-heading text-[2.1rem] leading-[1.25] text-white lg:text-[2.8rem]">
+              Start studying with a library that feels premium, not messy.
+            </h2>
+            <p className="mt-6 max-w-3xl text-[18px] leading-[30px] text-white/82">
+              Join Helar to access law reports, subject summaries, cases & ratios, and NLS materials—organized so you can move from research to revision with clarity.
             </p>
+            <div className="mt-10 flex flex-col gap-3 sm:flex-row">
+              <Link
+                className="inline-flex items-center justify-center rounded-full bg-[color:var(--color-accent-strong)] px-8 py-4 font-heading text-base text-white transition hover:brightness-105"
+                to="/auth/sign-up"
+              >
+                Get Started
+              </Link>
+              <Link
+                className="inline-flex items-center justify-center rounded-full border border-white/18 bg-white/6 px-8 py-4 font-heading text-base text-white backdrop-blur-sm transition hover:bg-white/10"
+                to="/pricing"
+              >
+                See Pricing
+              </Link>
+              <Link
+                className="inline-flex items-center justify-center rounded-full border border-white/18 bg-white/6 px-8 py-4 font-heading text-base text-white backdrop-blur-sm transition hover:bg-white/10"
+                to="/connect"
+              >
+                Helar Connect
+              </Link>
+            </div>
           </div>
-          <div className="flex flex-wrap gap-3 md:justify-end">
-            {trustSignals.map((signal) => (
-              <span key={signal} className="rounded-full border border-[rgba(21,28,50,0.12)] bg-white/70 px-4 py-2 text-sm text-[color:var(--color-text)] backdrop-blur-sm">
-                {signal}
-              </span>
+
+          <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
+            {[
+              { label: "Fast", value: "find what you need" },
+              { label: "Clean", value: "read without clutter" },
+              { label: "Focused", value: "prepare with purpose" }
+            ].map((item) => (
+              <div className="rounded-[1.6rem] border border-white/12 bg-white/5 p-6" key={item.label}>
+                <p className="font-heading text-[1.8rem] leading-none text-[color:var(--color-accent)]">{item.label}</p>
+                <p className="mt-3 text-sm uppercase tracking-[0.14em] text-white/72">{item.value}</p>
+              </div>
             ))}
           </div>
         </div>

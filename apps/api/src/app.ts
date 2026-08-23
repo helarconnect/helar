@@ -121,6 +121,7 @@ import {
   parseAdminPortalSearchQuery,
   searchAdminPortal
 } from "./portal-search.js";
+import { listLatestCatalogPublications, parseLatestCatalogPublicationsQuery } from "./catalog-latest-publications.js";
 import {
   createHelarConnectAnswer,
   createHelarConnectComment,
@@ -2060,6 +2061,37 @@ export function createApp(options: AppOptions = {}) {
       success: true,
       data: dashboardSnapshot
     });
+  });
+
+  app.get("/api/v1/catalog/latest-publications", async (request: Request, response: Response) => {
+    if (!useDatabase) {
+      return response.json({
+        success: true,
+        data: {
+          items: []
+        }
+      });
+    }
+
+    try {
+      const query = parseLatestCatalogPublicationsQuery(request.query as Record<string, string | string[] | undefined>);
+      const items = await listLatestCatalogPublications(query);
+      return response.json({
+        success: true,
+        data: {
+          items
+        }
+      });
+    } catch (error) {
+      console.error(error);
+      return response.status(500).json({
+        success: false,
+        error: {
+          code: "CATALOG_LATEST_PUBLICATIONS_FAILED",
+          message: "Could not load latest publications right now."
+        }
+      });
+    }
   });
 
   app.post("/api/v1/contact", async (request: Request, response: Response) => {
