@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils'
 
 type Tone = 'dark' | 'light'
 
-export function ScrollToTopButton({ tone }: { tone: Tone }) {
+export function ScrollToTopButton({ className, tone }: { className?: string; tone: Tone }) {
   const location = useLocation()
   const [isVisible, setIsVisible] = useState(false)
 
@@ -44,6 +44,7 @@ export function ScrollToTopButton({ tone }: { tone: Tone }) {
         tone === 'dark'
           ? 'border-white/12 bg-white/10 text-white backdrop-blur-xl hover:bg-white/14'
           : 'border-slate-200 bg-white text-slate-900 hover:bg-slate-50',
+        className,
       )}
       onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
       type="button"
@@ -52,4 +53,3 @@ export function ScrollToTopButton({ tone }: { tone: Tone }) {
     </button>
   )
 }
-

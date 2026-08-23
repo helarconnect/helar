@@ -93,6 +93,11 @@ body {
     line-height: 1.75;
   }
 
+  .dark .rich-text-content :where(h1, h2, h3, h4, h5, h6, p, span, div, li, td, th, font, small, strong, em, i, b, u, s, strike, del) {
+    color: inherit !important;
+    background-color: transparent !important;
+  }
+
   .rich-text-content > * {
     max-width: 100%;
   }

@@ -224,6 +224,20 @@ export function AppLayout() {
                 <h1 className={cn('mt-1 font-heading text-2xl sm:text-3xl break-words max-w-full', isDark ? 'text-white' : 'text-slate-950')}>{resolvedPageTitle}</h1>
               </div>
             </div>
+            <div className="flex items-center gap-2 md:hidden">
+              <button
+                aria-label="Open profile"
+                className={cn(
+                  'inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border',
+                  isDark ? 'border-slate-700 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-900',
+                )}
+                onClick={() => navigate('/app/profile')}
+                type="button"
+              >
+                <User className="h-4 w-4" />
+              </button>
+            </div>
+
             <div className="hidden items-center gap-3 md:flex">
               <ThemeToggle />
               <LibrarySearchControl audience={isAdminWorkspace ? 'admin' : 'student'} />
@@ -338,7 +352,7 @@ export function AppLayout() {
         </div>
       </div>
       <StudyNotesFab isAdminWorkspace={isAdminWorkspace} />
-      <ScrollToTopButton tone={isDark ? 'dark' : 'light'} />
+      <ScrollToTopButton className="bottom-24 right-6" tone={isDark ? 'dark' : 'light'} />
         {showVerificationPrompt && isEmailVerificationPending && session?.user.email ? (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/70 px-4 backdrop-blur-sm">
           <div
