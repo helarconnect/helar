@@ -13,21 +13,10 @@ import {
   updateLawReportReadingSession,
   type AdminLibrarySection
 } from "@/lib/admin-api";
+import { formatDateDMY } from "@/lib/date";
 import { queryKeys } from "@/lib/query-keys";
 import { cn, hasAdminAccess } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth-store";
-
-function formatDate(value?: string | null) {
-  if (!value) {
-    return "Not available";
-  }
-
-  return new Intl.DateTimeFormat("en-US", {
-    day: "numeric",
-    month: "long",
-    year: "numeric"
-  }).format(new Date(value));
-}
 
 function stripHtml(value: string) {
   return value
@@ -246,7 +235,7 @@ function buildSearchResults(query: string, report: {
   return [
     ...findSectionMatches("title", "Title", report.title, query),
     ...findSectionMatches("court", materialTypeLabel, prettifyType(report.materialType), query),
-    ...findSectionMatches("date", "Date", formatDate(report.reportDate), query),
+    ...findSectionMatches("date", "Date", formatDateDMY(report.reportDate), query),
     ...findSectionMatches("report-number", serialLabel, report.reportNumber ?? "Pending assignment", query),
     ...findSectionMatches("suit-number", storageLabel, report.storageUrl, query),
     ...findSectionMatches("summary", "Summary", stripHtml(report.summary), query),
@@ -1019,7 +1008,7 @@ export function AdminLawReportReader() {
                     label: isHelarpedia ? "Entry type" : "Court",
                     value: isHelarpedia ? (report.materialType === "REFERENCE_ENTRY" ? "Helarpedia entry" : report.materialType.replace(/_/g, " ")) : prettifyCourt(report.materialType)
                   },
-                  { icon: CalendarDays, id: "date", label: "Date", value: formatDate(report.reportDate) },
+                  { icon: CalendarDays, id: "date", label: "Date", value: formatDateDMY(report.reportDate) },
                   { icon: FileSearch, id: "report-number", label: serialNumberLabel, value: report.reportNumber ?? "Pending assignment" },
                   { icon: FileSearch, id: "suit-number", label: crossReferenceLabel, value: report.storageUrl || "—" }
                 ] as const

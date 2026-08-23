@@ -35,6 +35,7 @@ import {
   type AdminLibraryTransportProgressStep,
   updateAdminLibraryMaterial
 } from "@/lib/admin-api";
+import { formatDateDMY } from "@/lib/date";
 import { queryKeys } from "@/lib/query-keys";
 import { cn, isContentAdmin } from "@/lib/utils";
 import { RichTextEditor } from "@/components/ui/RichTextEditor";
@@ -115,14 +116,6 @@ function getDefaultReportNumber() {
 
 function getDefaultHelarpediaNumber() {
   return "Helarpedia-1000";
-}
-
-function formatDate(dateString: string) {
-  return new Intl.DateTimeFormat("en-US", {
-    day: "numeric",
-    month: "short",
-    year: "numeric"
-  }).format(new Date(dateString));
 }
 
 function prettifyMaterialType(value: string) {
@@ -1696,8 +1689,8 @@ export function AdminLibraryWorkspace({ section }: { section: AdminLibrarySectio
                         <p className={cn("mt-2", isDark ? "text-slate-400" : "text-slate-500")}>{material.bookmarkCount} bookmarks</p>
                       </td>
                       <td className="px-4 py-4 align-top text-sm">
-                        <p>{formatDate(material.lastUpdatedAt)}</p>
-                        <p className={cn("mt-2", isDark ? "text-slate-400" : "text-slate-500")}>Created {formatDate(material.createdAt)}</p>
+                        <p>{formatDateDMY(material.lastUpdatedAt)}</p>
+                        <p className={cn("mt-2", isDark ? "text-slate-400" : "text-slate-500")}>Created {formatDateDMY(material.createdAt)}</p>
                       </td>
                       <td className="rounded-r-[22px] px-4 py-4 align-top">
                         <div className="flex min-w-[170px] flex-wrap gap-2">

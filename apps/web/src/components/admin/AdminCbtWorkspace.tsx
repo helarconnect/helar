@@ -36,6 +36,7 @@ import {
   type CbtCreateInput,
   type CbtUpdateInput
 } from "@/lib/admin-api";
+import { formatDateDMY, formatDateTimeDMY } from "@/lib/date";
 import { queryKeys } from "@/lib/query-keys";
 import { useAuthStore } from "@/store/auth-store";
 import { cn } from "@/lib/utils";
@@ -49,21 +50,6 @@ const defaultFilters: CbtListFilters = {
   sortBy: "createdAt",
   sortOrder: "desc",
 };
-
-function formatDateTime(value?: string | null) {
-  if (!value) return "Not available";
-  return new Intl.DateTimeFormat("en-US", {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(new Date(value));
-}
-
-function formatDateOnly(value?: string | null) {
-  if (!value) return "Not available";
-  return new Intl.DateTimeFormat("en-US", {
-    dateStyle: "medium"
-  }).format(new Date(value));
-}
 
 function prettifyEnum(value?: string | null) {
   if (!value) return "Not available";
@@ -873,7 +859,7 @@ export function AdminCbtWorkspace() {
                         <p className={cn("text-sm", isDark ? "text-slate-200" : "text-slate-700")}>{Math.round(cbt.durationSeconds / 60)} min</p>
                       </td>
                       <td className="py-4 pr-4 align-top">
-                        <p className={cn("text-sm", isDark ? "text-slate-200" : "text-slate-700")}>{formatDateOnly(cbt.createdAt)}</p>
+                        <p className={cn("text-sm", isDark ? "text-slate-200" : "text-slate-700")}>{formatDateDMY(cbt.createdAt)}</p>
                       </td>
                       <td className="py-4 align-top">
                         <div className="flex flex-wrap gap-2">
@@ -1472,7 +1458,7 @@ export function AdminCbtWorkspace() {
                         <div>
                           <p className={cn("text-sm font-semibold", isDark ? "text-white" : "text-slate-950")}>{attempt.user.fullName}</p>
                           <p className={cn("mt-1 text-sm", isDark ? "text-slate-400" : "text-slate-600")}>
-                            Attempt {attempt.attemptNumber} • {attempt.submittedAt ? formatDateTime(attempt.submittedAt) : "Not submitted"}
+                            Attempt {attempt.attemptNumber} • {attempt.submittedAt ? formatDateTimeDMY(attempt.submittedAt) : "Not submitted"}
                           </p>
                         </div>
                         <StatusPill isDark={isDark} tone={attempt.result?.passed ? "green" : "red"}>

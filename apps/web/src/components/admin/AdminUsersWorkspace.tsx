@@ -43,6 +43,7 @@ import {
   updateAdminUserRoles,
   updateAdminUserStatus
 } from "@/lib/admin-api";
+import { formatDateDMY, formatDateTimeDMY } from "@/lib/date";
 import { queryKeys } from "@/lib/query-keys";
 import { useAuthStore } from "@/store/auth-store";
 import { cn } from "@/lib/utils";
@@ -58,27 +59,6 @@ const defaultFilters: Required<AdminUserListFilters> = {
   sortOrder: "desc",
   status: "all"
 };
-
-function formatDateTime(value?: string | null) {
-  if (!value) {
-    return "Not available";
-  }
-
-  return new Intl.DateTimeFormat("en-US", {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(new Date(value));
-}
-
-function formatDateOnly(value?: string | null) {
-  if (!value) {
-    return "Not available";
-  }
-
-  return new Intl.DateTimeFormat("en-US", {
-    dateStyle: "medium"
-  }).format(new Date(value));
-}
 
 function prettifyEnum(value?: string | null) {
   if (!value) {
@@ -133,7 +113,7 @@ function buildUserExportRows(users: AdminUserSummary[]) {
     role: user.roles.map((role) => role.name).join(", ") || user.primaryRole,
     status: prettifyEnum(user.status),
     phoneNumber: user.phoneNumber || "",
-    registeredAt: formatDateOnly(user.createdAt),
+    registeredAt: formatDateDMY(user.createdAt),
     location: [user.city, user.state, user.country].filter(Boolean).join(", "),
     plan: user.subscriptionPlan || "No active plan"
   }));
@@ -202,7 +182,7 @@ function saveUsersAsPdf(users: AdminUserSummary[]) {
       </head>
       <body>
         <h1>Helar Registered Users</h1>
-        <p>Generated on ${formatDateTime(new Date().toISOString())}</p>
+        <p>Generated on ${formatDateTimeDMY(new Date().toISOString())}</p>
         <table>
           <thead>
             <tr>
@@ -530,7 +510,7 @@ function CurrentYearMonthlyBarChart({
     Array.from({ length: 12 }, (_, monthIndex) => ({
       month: monthIndex + 1,
       count: 0,
-      label: new Intl.DateTimeFormat("en-US", { month: "short" }).format(new Date(year, monthIndex, 1))
+      label: new Intl.DateTimeFormat("en-GB", { month: "short" }).format(new Date(year, monthIndex, 1))
     }));
   const maxCount = Math.max(...monthlyData.map((item) => item.count), 1);
   const totalCount = data?.totalRegistrations ?? monthlyData.reduce((sum, item) => sum + item.count, 0);
@@ -1340,8 +1320,8 @@ export function AdminUsersWorkspace() {
                         </div>
                       </td>
                       <td className="py-4 pr-4 align-top">
-                        <p className={cn("text-sm", isDark ? "text-slate-200" : "text-slate-700")}>{formatDateOnly(user.createdAt)}</p>
-                        <p className={cn("mt-1 text-xs", isDark ? "text-slate-500" : "text-slate-400")}>Last active {formatDateOnly(user.lastActiveAt)}</p>
+                        <p className={cn("text-sm", isDark ? "text-slate-200" : "text-slate-700")}>{formatDateDMY(user.createdAt)}</p>
+                        <p className={cn("mt-1 text-xs", isDark ? "text-slate-500" : "text-slate-400")}>Last active {formatDateDMY(user.lastActiveAt)}</p>
                       </td>
                       <td className="py-4 pr-4 align-top">
                         <p className={cn("text-sm", isDark ? "text-slate-200" : "text-slate-700")}>
@@ -1581,9 +1561,9 @@ export function AdminUsersWorkspace() {
                 <p className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-400")}>Account overview</p>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
                   {[
-                    { label: "Registered", value: formatDateTime(selectedUserQuery.data.createdAt) },
-                    { label: "Last active", value: formatDateTime(selectedUserQuery.data.lastActiveAt) },
-                    { label: "Email verified", value: formatDateTime(selectedUserQuery.data.emailVerifiedAt) },
+                    { label: "Registered", value: formatDateTimeDMY(selectedUserQuery.data.createdAt) },
+                    { label: "Last active", value: formatDateTimeDMY(selectedUserQuery.data.lastActiveAt) },
+                    { label: "Email verified", value: formatDateTimeDMY(selectedUserQuery.data.emailVerifiedAt) },
                     { label: "Profile type", value: prettifyEnum(selectedUserQuery.data.profileType) }
                   ].map((item) => (
                     <CompactField isDark={isDark} key={item.label} label={item.label} value={item.value} />
@@ -1801,11 +1781,11 @@ export function AdminUsersWorkspace() {
                               <span className="truncate">{device.name}</span>
                             </p>
                             <p className={cn("mt-1 text-xs", isDark ? "text-slate-500" : "text-slate-500")}>
-                              Last seen: {formatDateTime(device.lastSeenAt)}
+                              Last seen: {formatDateTimeDMY(device.lastSeenAt)}
                             </p>
                           </div>
                           <p className={cn("text-xs uppercase tracking-[0.16em]", isDark ? "text-slate-500" : "text-slate-400")}>
-                            Added {formatDateOnly(device.createdAt)}
+                            Added {formatDateDMY(device.createdAt)}
                           </p>
                         </div>
                       </div>
@@ -1875,7 +1855,7 @@ export function AdminUsersWorkspace() {
                           </StatusPill>
                         </div>
                         <p className={cn("mt-3 text-xs", isDark ? "text-slate-500" : "text-slate-400")}>
-                          {formatDateOnly(subscription.startsAt)} to {subscription.endsAt ? formatDateOnly(subscription.endsAt) : "Open-ended"}
+                          {formatDateDMY(subscription.startsAt)} to {subscription.endsAt ? formatDateDMY(subscription.endsAt) : "Open-ended"}
                         </p>
                       </div>
                     ))
@@ -1900,7 +1880,7 @@ export function AdminUsersWorkspace() {
                             {prettifyEnum(item.kind)}
                           </StatusPill>
                         </div>
-                        <p className={cn("mt-2 text-xs", isDark ? "text-slate-500" : "text-slate-400")}>{formatDateTime(item.createdAt)}</p>
+                        <p className={cn("mt-2 text-xs", isDark ? "text-slate-500" : "text-slate-400")}>{formatDateTimeDMY(item.createdAt)}</p>
                       </div>
                     ))
                   ) : (

@@ -25,6 +25,7 @@ import {
   type QuestionCreateInput,
   type QuestionUpdateInput
 } from "@/lib/admin-api";
+import { formatDateDMY } from "@/lib/date";
 import { queryKeys } from "@/lib/query-keys";
 import { useAuthStore } from "@/store/auth-store";
 import { cn } from "@/lib/utils";
@@ -39,13 +40,6 @@ const defaultFilters: QuestionListFilters = {
   sortOrder: "desc",
   onlyQuestionBank: true,
 };
-
-function formatDateOnly(value?: string | null) {
-  if (!value) return "Not available";
-  return new Intl.DateTimeFormat("en-US", {
-    dateStyle: "medium"
-  }).format(new Date(value));
-}
 
 function prettifyEnum(value?: string | null) {
   if (!value) return "Not available";
@@ -774,7 +768,7 @@ export function AdminQuestionBankWorkspace() {
                         <p className={cn("text-sm", isDark ? "text-slate-200" : "text-slate-700")}>{q.points}</p>
                       </td>
                       <td className="py-4 pr-4 align-top">
-                        <p className={cn("text-sm", isDark ? "text-slate-200" : "text-slate-700")}>{formatDateOnly(q.createdAt)}</p>
+                        <p className={cn("text-sm", isDark ? "text-slate-200" : "text-slate-700")}>{formatDateDMY(q.createdAt)}</p>
                       </td>
                       <td className="py-4 align-top">
                         <div className="flex flex-wrap gap-2">

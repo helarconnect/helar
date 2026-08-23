@@ -53,6 +53,7 @@ import {
   updateSubjectSummarySubject,
   updateSubjectSummaryTopic
 } from "@/lib/admin-api";
+import { formatDateDMY } from "@/lib/date";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 
@@ -109,14 +110,6 @@ const nigeriaCourtOptions = [
   "Tax Appeal Tribunal",
   "Coroner's Court"
 ] as const;
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat("en-US", {
-    day: "numeric",
-    month: "short",
-    year: "numeric"
-  }).format(new Date(value));
-}
 
 function prettifyStatus(value: string) {
   return value
@@ -2275,8 +2268,8 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
                         <td className="px-4 py-4">
                           <StatusBadge isDark={isDark} value={subject.status} />
                         </td>
-                        <td className="px-4 py-4">{formatDate(subject.createdAt)}</td>
-                        <td className="px-4 py-4">{formatDate(subject.updatedAt)}</td>
+                        <td className="px-4 py-4">{formatDateDMY(subject.createdAt)}</td>
+                        <td className="px-4 py-4">{formatDateDMY(subject.updatedAt)}</td>
                         <td className="px-4 py-4">
                           <div className="flex items-center gap-2">
                             <IconButton isDark={isDark} onClick={() => openSubjectModal(subject)} title="Edit subject">
@@ -2416,8 +2409,8 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
                         <td className="px-4 py-4">{topic.subject.name}</td>
                         <td className="px-4 py-4">{topic.caseCount}</td>
                         <td className="px-4 py-4"><StatusBadge isDark={isDark} value={topic.status} /></td>
-                        <td className="px-4 py-4">{formatDate(topic.createdAt)}</td>
-                        <td className="px-4 py-4">{formatDate(topic.updatedAt)}</td>
+                        <td className="px-4 py-4">{formatDateDMY(topic.createdAt)}</td>
+                        <td className="px-4 py-4">{formatDateDMY(topic.updatedAt)}</td>
                         <td className="px-4 py-4">
                           <div className="flex items-center gap-2">
                             <IconButton isDark={isDark} onClick={() => openTopicModal(topic)} title="Edit topic">
@@ -2595,8 +2588,8 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
                         <td className="px-4 py-4">{item.subject.name}</td>
                         <td className="px-4 py-4">{item.topic.name}</td>
                         <td className="px-4 py-4"><StatusBadge isDark={isDark} value={item.status} /></td>
-                        <td className="px-4 py-4">{formatDate(item.createdAt)}</td>
-                        <td className="px-4 py-4">{formatDate(item.updatedAt)}</td>
+                        <td className="px-4 py-4">{formatDateDMY(item.createdAt)}</td>
+                        <td className="px-4 py-4">{formatDateDMY(item.updatedAt)}</td>
                         <td className="px-4 py-4">
                           <div className="flex items-center gap-2">
                             <Link className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-300 bg-white text-slate-900 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:border-slate-600 dark:hover:bg-slate-800" to={`/app/admin/library/subject-summaries/cases/${item.id}${caseFilters.caseType === "all" ? "" : `?caseType=${caseFilters.caseType}`}`}>
