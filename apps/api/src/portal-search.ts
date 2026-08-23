@@ -412,10 +412,7 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
     ,
     prisma.studyMaterialBodyChunk.findMany({
       where: {
-        content: containsText(search),
-        material: {
-          deletedAt: null
-        }
+        content: containsText(search)
       },
       orderBy: {
         updatedAt: "desc"

@@ -1865,8 +1865,7 @@ async function searchLibraryMaterials({ limit, query }: AdminLibrarySearchQuery,
 
   const matchingChunks = await prisma.studyMaterialBodyChunk.findMany({
     where: {
-      content: containsText(query),
-      material: materialWhere
+      content: containsText(query)
     },
     orderBy: {
       updatedAt: "desc"
