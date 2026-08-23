@@ -2,6 +2,7 @@ import { StudentStudyContentType, type Prisma } from "@prisma/client";
 import { z } from "zod";
 
 import { prisma } from "./lib/prisma.js";
+import { parseSearchDateRange } from "./lib/search-utils.js";
 import { containsText } from "./lib/text-search.js";
 
 const progressInputSchema = z
@@ -559,6 +560,7 @@ export async function listStudentStudyDownloads(userId: string, query: z.infer<t
 }
 
 export async function searchStudentStudyCenter(userId: string, query: z.infer<typeof searchQuerySchema>) {
+  const dateRange = parseSearchDateRange(query.query);
   const [bookmarks, notes, downloads, history] = await Promise.all([
     prisma.studentStudyBookmark.findMany({
       where: {
@@ -567,7 +569,23 @@ export async function searchStudentStudyCenter(userId: string, query: z.infer<ty
         OR: [
           { title: containsText(query.query) },
           { subjectName: containsText(query.query) },
-          { topicName: containsText(query.query) }
+          { topicName: containsText(query.query) },
+          ...(dateRange
+            ? [
+                {
+                  createdAt: {
+                    gte: dateRange.start,
+                    lt: dateRange.end
+                  }
+                },
+                {
+                  updatedAt: {
+                    gte: dateRange.start,
+                    lt: dateRange.end
+                  }
+                }
+              ]
+            : [])
         ]
       },
       orderBy: [{ updatedAt: "desc" }],
@@ -580,7 +598,23 @@ export async function searchStudentStudyCenter(userId: string, query: z.infer<ty
         OR: [
           { title: containsText(query.query) },
           { referenceTitle: containsText(query.query) },
-          { contentPlainText: containsText(query.query) }
+          { contentPlainText: containsText(query.query) },
+          ...(dateRange
+            ? [
+                {
+                  createdAt: {
+                    gte: dateRange.start,
+                    lt: dateRange.end
+                  }
+                },
+                {
+                  updatedAt: {
+                    gte: dateRange.start,
+                    lt: dateRange.end
+                  }
+                }
+              ]
+            : [])
         ]
       },
       orderBy: [{ updatedAt: "desc" }],
@@ -592,7 +626,17 @@ export async function searchStudentStudyCenter(userId: string, query: z.infer<ty
         userId,
         OR: [
           { fileName: containsText(query.query) },
-          { title: containsText(query.query) }
+          { title: containsText(query.query) },
+          ...(dateRange
+            ? [
+                {
+                  createdAt: {
+                    gte: dateRange.start,
+                    lt: dateRange.end
+                  }
+                }
+              ]
+            : [])
         ]
       },
       orderBy: [{ createdAt: "desc" }],
@@ -605,7 +649,29 @@ export async function searchStudentStudyCenter(userId: string, query: z.infer<ty
         OR: [
           { title: containsText(query.query) },
           { subjectName: containsText(query.query) },
-          { topicName: containsText(query.query) }
+          { topicName: containsText(query.query) },
+          ...(dateRange
+            ? [
+                {
+                  createdAt: {
+                    gte: dateRange.start,
+                    lt: dateRange.end
+                  }
+                },
+                {
+                  updatedAt: {
+                    gte: dateRange.start,
+                    lt: dateRange.end
+                  }
+                },
+                {
+                  lastOpenedAt: {
+                    gte: dateRange.start,
+                    lt: dateRange.end
+                  }
+                }
+              ]
+            : [])
         ]
       },
       orderBy: [{ lastOpenedAt: "desc" }],

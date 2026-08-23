@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 
 import { useTheme } from "@/hooks/useTheme";
-import { searchAdminPortal, searchLibrary, type AdminPortalSearchItem } from "@/lib/admin-api";
+import { searchAdminPortal, searchStudentPortal, type AdminPortalSearchItem, type StudentPortalSearchItem } from "@/lib/admin-api";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 
@@ -44,8 +44,8 @@ export function LibrarySearchControl({ audience = "admin" }: { audience?: "admin
   });
   const studentSearchQuery = useQuery({
     enabled: audience === "student" && isOpen && trimmedQuery.length >= 2,
-    queryFn: () => searchLibrary(trimmedQuery),
-    queryKey: queryKeys.librarySearch(audience, trimmedQuery)
+    queryFn: () => searchStudentPortal(trimmedQuery),
+    queryKey: queryKeys.studentPortalSearch(trimmedQuery)
   });
 
   function handleClose() {
@@ -74,10 +74,22 @@ export function LibrarySearchControl({ audience = "admin" }: { audience?: "admin
     }
   }
 
+  function getStudentResultIcon(kind: StudentPortalSearchItem["kind"]) {
+    switch (kind) {
+      case "library_material":
+        return BookOpenText;
+      case "bookmark":
+      case "note":
+      case "download":
+      case "history":
+        return FileStack;
+    }
+  }
+
   return (
     <>
       <button
-        aria-label={audience === "admin" ? "Search workspace" : "Search library"}
+        aria-label={audience === "admin" ? "Search workspace" : "Search portal"}
         className={cn(
           "inline-flex h-11 w-11 items-center justify-center rounded-2xl border transition",
           isDark
@@ -103,10 +115,10 @@ export function LibrarySearchControl({ audience = "admin" }: { audience?: "admin
                 <div className={cn("flex items-center justify-between border-b px-5 py-4", isDark ? "border-slate-800" : "border-slate-200")}>
                   <div>
                     <p className={cn("text-xs uppercase tracking-[0.22em]", isDark ? "text-slate-500" : "text-slate-400")}>
-                      {audience === "admin" ? "Workspace search" : "Library search"}
+                      {audience === "admin" ? "Workspace search" : "Portal search"}
                     </p>
                     <h3 className={cn("mt-1 font-heading text-2xl", isDark ? "text-white" : "text-slate-950")}>
-                      {audience === "admin" ? "Search users and content" : "Search all library items"}
+                      {audience === "admin" ? "Search users and content" : "Search portal content"}
                     </h3>
                   </div>
                   <button
@@ -140,7 +152,7 @@ export function LibrarySearchControl({ audience = "admin" }: { audience?: "admin
                       placeholder={
                         audience === "admin"
                           ? "Search users, library items, subjects, topics, cases, and revision guides"
-                          : "Search law reports, subject summaries, cases and ratios"
+                          : "Search library items, notes, bookmarks, and history"
                       }
                       type="text"
                       value={query}
@@ -157,7 +169,7 @@ export function LibrarySearchControl({ audience = "admin" }: { audience?: "admin
                       >
                         {audience === "admin"
                           ? "Type at least two characters to search users, library items, subjects, topics, cases, and revision guides."
-                          : "Type at least two characters to search across all library items."}
+                          : "Type at least two characters to search across the portal."}
                       </div>
                     ) : audience === "admin" && adminSearchQuery.isLoading ? (
                       <div className="flex items-center gap-3 px-2 py-6">
@@ -167,7 +179,7 @@ export function LibrarySearchControl({ audience = "admin" }: { audience?: "admin
                     ) : audience === "student" && studentSearchQuery.isLoading ? (
                       <div className="flex items-center gap-3 px-2 py-6">
                         <LoaderCircle className={cn("h-5 w-5 animate-spin", isDark ? "text-slate-400" : "text-slate-500")} />
-                        <p className={cn("text-sm", isDark ? "text-slate-300" : "text-slate-600")}>Searching the library...</p>
+                        <p className={cn("text-sm", isDark ? "text-slate-300" : "text-slate-600")}>Searching the portal...</p>
                       </div>
                     ) : audience === "admin" && adminSearchQuery.data?.groups.length ? (
                       <div className="space-y-5">
@@ -238,57 +250,80 @@ export function LibrarySearchControl({ audience = "admin" }: { audience?: "admin
                           </section>
                         ))}
                       </div>
-                    ) : audience === "student" && studentSearchQuery.data?.length ? (
-                      <div className="space-y-3">
-                        {studentSearchQuery.data.map((result) => (
-                          <button
-                            className={cn(
-                              "w-full rounded-[24px] border px-5 py-4 text-left transition",
-                              isDark
-                                ? "border-slate-800 bg-slate-900 hover:border-slate-700"
-                                : "border-slate-200 bg-slate-50 hover:border-slate-300 hover:bg-white"
-                            )}
-                            key={`${result.section}-${result.id}`}
-                            onClick={() =>
-                              handleOpenPath(result.path, {
-                                librarySearchItemId: result.id,
-                                librarySearchQuery: trimmedQuery,
-                                librarySearchScope: result.matchedIn
-                              })
-                            }
-                            type="button"
-                          >
-                            <div className="flex flex-wrap items-start justify-between gap-3">
-                              <div className="min-w-0 flex-1">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span
-                                    className={cn(
-                                      "rounded-full border px-3 py-1 text-[11px] uppercase tracking-[0.18em]",
-                                      isDark ? "border-slate-700 bg-slate-950 text-slate-400" : "border-slate-200 bg-white text-slate-500"
-                                    )}
-                                  >
-                                    {result.sectionLabel}
-                                  </span>
-                                  {result.reportNumber ? (
-                                    <span
-                                      className={cn(
-                                        "rounded-full border px-3 py-1 text-[11px] uppercase tracking-[0.18em]",
-                                        isDark ? "border-slate-700 bg-slate-950 text-slate-400" : "border-slate-200 bg-white text-slate-500"
-                                      )}
-                                    >
-                                      {result.reportNumber}
-                                    </span>
-                                  ) : null}
-                                </div>
-                                <p className={cn("mt-3 text-base font-semibold leading-7", isDark ? "text-white" : "text-slate-950")}>{result.title}</p>
-                                <p className={cn("mt-2 text-sm leading-7", isDark ? "text-slate-300" : "text-slate-600")}>{result.snippet}</p>
-                              </div>
-                              <div className={cn("flex items-center gap-2 text-sm", isDark ? "text-slate-400" : "text-slate-500")}>
-                                <BookOpenText className="h-4 w-4" />
-                                <span>{prettifyMaterialType(result.materialType)}</span>
-                              </div>
+                    ) : audience === "student" && studentSearchQuery.data?.groups.length ? (
+                      <div className="space-y-5">
+                        {studentSearchQuery.data.groups.map((group) => (
+                          <section className="space-y-3" key={group.key}>
+                            <div className="flex items-center justify-between gap-3 px-1">
+                              <p className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-400")}>{group.label}</p>
+                              <span className={cn("text-xs", isDark ? "text-slate-500" : "text-slate-400")}>{group.items.length} result(s)</span>
                             </div>
-                          </button>
+
+                            <div className="space-y-3">
+                              {group.items.map((result) => {
+                                const ResultIcon = getStudentResultIcon(result.kind);
+
+                                return (
+                                  <button
+                                    className={cn(
+                                      "w-full rounded-[24px] border px-5 py-4 text-left transition",
+                                      isDark
+                                        ? "border-slate-800 bg-slate-900 hover:border-slate-700"
+                                        : "border-slate-200 bg-slate-50 hover:border-slate-300 hover:bg-white"
+                                    )}
+                                    key={`${group.key}-${result.kind}-${result.id}`}
+                                    onClick={() => {
+                                      if (result.kind === "library_material") {
+                                        handleOpenPath(result.path, {
+                                          librarySearchItemId: result.id,
+                                          librarySearchQuery: trimmedQuery,
+                                          librarySearchScope: result.matchedIn
+                                        });
+                                        return;
+                                      }
+
+                                      handleOpenPath(result.path);
+                                    }}
+                                    type="button"
+                                  >
+                                    <div className="flex items-start gap-4">
+                                      <span
+                                        className={cn(
+                                          "inline-flex h-11 w-11 flex-none items-center justify-center rounded-2xl border",
+                                          isDark ? "border-slate-700 bg-slate-950 text-slate-300" : "border-slate-200 bg-white text-slate-600"
+                                        )}
+                                      >
+                                        <ResultIcon className="h-5 w-5" />
+                                      </span>
+                                      <div className="min-w-0 flex-1">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <p className={cn("text-base font-semibold leading-7", isDark ? "text-white" : "text-slate-950")}>{result.title}</p>
+                                          {result.badge ? (
+                                            <span
+                                              className={cn(
+                                                "rounded-full border px-3 py-1 text-[11px] uppercase tracking-[0.18em]",
+                                                isDark ? "border-slate-700 bg-slate-950 text-slate-400" : "border-slate-200 bg-white text-slate-500"
+                                              )}
+                                            >
+                                              {result.badge}
+                                            </span>
+                                          ) : null}
+                                        </div>
+                                        <p className={cn("mt-1 text-sm", isDark ? "text-slate-400" : "text-slate-500")}>{result.subtitle}</p>
+                                        <p className={cn("mt-2 text-sm leading-7", isDark ? "text-slate-300" : "text-slate-600")}>{result.snippet}</p>
+                                      </div>
+                                      {result.kind === "library_material" && result.materialType ? (
+                                        <div className={cn("flex items-center gap-2 text-sm", isDark ? "text-slate-400" : "text-slate-500")}>
+                                          <BookOpenText className="h-4 w-4" />
+                                          <span>{prettifyMaterialType(result.materialType)}</span>
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </section>
                         ))}
                       </div>
                     ) : audience === "admin" && adminSearchQuery.isError ? (
@@ -316,7 +351,7 @@ export function LibrarySearchControl({ audience = "admin" }: { audience?: "admin
                           isDark ? "border-slate-800 bg-slate-900 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"
                         )}
                       >
-                        {audience === "admin" ? "No workspace records matched your search." : "No library items matched your search."}
+                        {audience === "admin" ? "No workspace records matched your search." : "No portal records matched your search."}
                       </div>
                     )}
                   </div>

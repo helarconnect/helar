@@ -121,6 +121,7 @@ import {
   parseAdminPortalSearchQuery,
   searchAdminPortal
 } from "./portal-search.js";
+import { parseStudentPortalSearchQuery, searchStudentPortal } from "./student-portal-search.js";
 import { listLatestCatalogPublications, parseLatestCatalogPublicationsQuery } from "./catalog-latest-publications.js";
 import {
   createHelarConnectAnswer,
@@ -8862,6 +8863,52 @@ export function createApp(options: AppOptions = {}) {
           error: {
             code: "SUBJECT_SUMMARY_CASE_BULK_FAILED",
             message: "Could not process the bulk case action."
+          }
+        });
+      }
+    }
+  );
+
+  app.get(
+    "/api/v1/portal/search",
+    authenticateRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required for portal search."
+          }
+        });
+      }
+
+      try {
+        const parsedQuery = parseStudentPortalSearchQuery(request.query as Record<string, string | string[] | undefined>);
+        const data = await searchStudentPortal(request.auth!.userId, parsedQuery);
+
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return response.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "The portal search query is invalid.",
+              details: error.flatten()
+            }
+          });
+        }
+
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "PORTAL_SEARCH_FAILED",
+            message: "Could not search the portal."
           }
         });
       }

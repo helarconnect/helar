@@ -183,6 +183,30 @@ export type AdminPortalSearchResponse = {
   totalResults: number;
 };
 
+export type StudentPortalSearchItem = {
+  badge: string | null;
+  id: string;
+  kind: "library_material" | "bookmark" | "note" | "download" | "history";
+  matchedIn?: "body" | "reportNumber" | "storageUrl" | "summary" | "title";
+  materialType?: AdminLibraryMaterialType;
+  path: string;
+  reportNumber?: string | null;
+  snippet: string;
+  subtitle: string;
+  title: string;
+};
+
+export type StudentPortalSearchGroup = {
+  items: StudentPortalSearchItem[];
+  key: "library" | "study_center";
+  label: string;
+};
+
+export type StudentPortalSearchResponse = {
+  groups: StudentPortalSearchGroup[];
+  totalResults: number;
+};
+
 export type AdminLibraryMaterialInput = {
   body: string;
   // Optional short-lived opaque transport chunk token. When set, the backend
@@ -2948,6 +2972,17 @@ export async function searchAdminLibrary(query: string, limit = 12) {
 
 export async function searchAdminPortal(query: string, limit = 5) {
   const response = await authenticatedHttp.get<{ success: true; data: AdminPortalSearchResponse }>("/api/v1/admin/search", {
+    params: {
+      limit,
+      query
+    }
+  });
+
+  return response.data.data;
+}
+
+export async function searchStudentPortal(query: string, limit = 5) {
+  const response = await authenticatedHttp.get<{ success: true; data: StudentPortalSearchResponse }>("/api/v1/portal/search", {
     params: {
       limit,
       query

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { prisma } from "./lib/prisma.js";
+import { parseSearchDateRange, parseSearchYear } from "./lib/search-utils.js";
 import { containsText } from "./lib/text-search.js";
 
 const adminPortalSearchQuerySchema = z.object({
@@ -167,8 +168,10 @@ export function parseAdminPortalSearchQuery(query: Record<string, string | strin
 export async function searchAdminPortal(query: AdminPortalSearchQuery) {
   const search = query.query.trim();
   const limit = query.limit;
+  const dateRange = parseSearchDateRange(search);
+  const yearQuery = parseSearchYear(search);
 
-  const [initialUsers, initialLibraryMaterials, initialSubjects, initialTopics, initialCases, initialEntries] = await Promise.all([
+  const [initialUsers, initialLibraryMaterials, initialSubjects, initialTopics, initialCases, initialEntries, matchingChunks] = await Promise.all([
     prisma.user.findMany({
       where: {
         deletedAt: null,
@@ -178,7 +181,23 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
           { phoneNumber: containsText(search) },
           { city: containsText(search) },
           { state: containsText(search) },
-          { country: containsText(search) }
+          { country: containsText(search) },
+          ...(dateRange
+            ? [
+                {
+                  createdAt: {
+                    gte: dateRange.start,
+                    lt: dateRange.end
+                  }
+                },
+                {
+                  updatedAt: {
+                    gte: dateRange.start,
+                    lt: dateRange.end
+                  }
+                }
+              ]
+            : [])
         ]
       },
       orderBy: {
@@ -210,6 +229,28 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
           { storageUrl: containsText(search) },
           { summary: containsText(search) },
           { body: containsText(search) },
+          ...(dateRange
+            ? [
+                {
+                  reportDate: {
+                    gte: dateRange.start,
+                    lt: dateRange.end
+                  }
+                },
+                {
+                  createdAt: {
+                    gte: dateRange.start,
+                    lt: dateRange.end
+                  }
+                },
+                {
+                  updatedAt: {
+                    gte: dateRange.start,
+                    lt: dateRange.end
+                  }
+                }
+              ]
+            : []),
           {
             category: {
               name: containsText(search)
@@ -283,11 +324,24 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
           { title: containsText(search) },
           { citation: containsText(search) },
           { court: containsText(search) },
+          { jurisdiction: containsText(search) },
           { ratioDecidendi: containsText(search) },
           { caseSummary: containsText(search) },
           { facts: containsText(search) },
           { issues: containsText(search) },
           { decisionHolding: containsText(search) },
+          ...(yearQuery !== null
+            ? [
+                {
+                  year: yearQuery
+                }
+              ]
+            : []),
+          { judges: { has: search } },
+          { legalPrinciples: { has: search } },
+          { relatedStatutes: { has: search } },
+          { relatedCases: { has: search } },
+          { keywords: { has: search } },
           {
             subject: {
               name: containsText(search)
@@ -355,7 +409,79 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
         }
       }
     })
+    ,
+    prisma.studyMaterialBodyChunk.findMany({
+      where: {
+        content: containsText(search),
+        material: {
+          deletedAt: null
+        }
+      },
+      orderBy: {
+        updatedAt: "desc"
+      },
+      select: {
+        content: true,
+        field: true,
+        materialId: true
+      },
+      take: Math.min(limit * 20, 240)
+    })
   ]);
+
+  const chunkMatchesByMaterialId = new Map<
+    string,
+    {
+      body?: string;
+      summary?: string;
+    }
+  >();
+  const chunkMaterialIds: string[] = [];
+  const seenChunkMaterialIds = new Set<string>();
+
+  for (const chunk of matchingChunks) {
+    const existing = chunkMatchesByMaterialId.get(chunk.materialId) ?? {};
+
+    if (chunk.field === 0 && !existing.body) {
+      chunkMatchesByMaterialId.set(chunk.materialId, { ...existing, body: chunk.content });
+    } else if (chunk.field === 1 && !existing.summary) {
+      chunkMatchesByMaterialId.set(chunk.materialId, { ...existing, summary: chunk.content });
+    }
+
+    if (!seenChunkMaterialIds.has(chunk.materialId)) {
+      seenChunkMaterialIds.add(chunk.materialId);
+      chunkMaterialIds.push(chunk.materialId);
+    }
+  }
+
+  const missingChunkMaterialIds = chunkMaterialIds.filter(
+    (id) => !initialLibraryMaterials.some((material) => material.id === id)
+  );
+
+  const extraChunkMaterials = missingChunkMaterialIds.length
+    ? await prisma.studyMaterial.findMany({
+        where: {
+          deletedAt: null,
+          id: {
+            in: missingChunkMaterialIds
+          }
+        },
+        orderBy: {
+          updatedAt: "desc"
+        },
+        take: limit,
+        include: {
+          category: {
+            select: {
+              name: true,
+              slug: true
+            }
+          }
+        }
+      })
+    : [];
+
+  const combinedInitialLibraryMaterials = [...initialLibraryMaterials, ...extraChunkMaterials];
 
   const [users, libraryMaterials, subjects, topics, cases, entries] = await Promise.all([
     completeMongoMatches({
@@ -398,7 +524,7 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
         )
     }),
     completeMongoMatches({
-      items: initialLibraryMaterials,
+      items: combinedInitialLibraryMaterials,
       limit,
       loadCandidates: () =>
         prisma.studyMaterial.findMany({
@@ -425,7 +551,9 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
           material.storageUrl,
           material.summary,
           material.body,
-          material.category?.name
+          material.category?.name,
+          chunkMatchesByMaterialId.get(material.id)?.body ?? "",
+          chunkMatchesByMaterialId.get(material.id)?.summary ?? ""
         )
     }),
     completeMongoMatches({
@@ -587,7 +715,15 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
           categorySlug: material.category?.slug ?? null,
           id: material.id
         }),
-        snippet: findSnippet(search, material.summary, material.body, material.storageUrl, material.reportNumber),
+        snippet: findSnippet(
+          search,
+          material.summary,
+          material.body,
+          chunkMatchesByMaterialId.get(material.id)?.summary ?? "",
+          chunkMatchesByMaterialId.get(material.id)?.body ?? "",
+          material.storageUrl,
+          material.reportNumber
+        ),
         subtitle: material.category?.name ?? "Library",
         title: material.title
       }))

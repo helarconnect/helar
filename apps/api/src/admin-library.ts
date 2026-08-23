@@ -3,6 +3,7 @@ import { ContentPublicationStatus, MaterialType, Prisma } from "@prisma/client";
 import { z } from "zod";
 
 import { prisma } from "./lib/prisma.js";
+import { parseSearchDateRange } from "./lib/search-utils.js";
 import { containsText } from "./lib/text-search.js";
 import { createPreviewHtml, getPremiumContentAccess, PREMIUM_PREVIEW_WORD_LIMIT } from "./premium-access.js";
 import { runInTransaction } from "./lib/transactions.js";
@@ -309,6 +310,20 @@ function stripHtml(value: string) {
     .trim();
 }
 
+function usesMongoRuntime() {
+  return (process.env.DATABASE_URL ?? "").startsWith("mongodb");
+}
+
+function normalizeSearchText(value: string | null | undefined) {
+  return stripHtml(value ?? "").toLowerCase();
+}
+
+function matchesSearch(query: string, ...values: Array<string | null | undefined>) {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  return values.some((value) => normalizeSearchText(value).includes(needle));
+}
+
 function calculateEstimatedMinutesFromBody(body: string) {
   const plainText = stripHtml(body);
 
@@ -578,6 +593,8 @@ function resolvePublicationStatus(actorRoleCodes: string[], currentStatus?: Cont
 
 function buildSearchSnippet(material: {
   body: string | null;
+  extraBodyText?: string | null;
+  extraSummaryText?: string | null;
   reportNumber: string | null;
   storageUrl: string;
   summary: string | null;
@@ -590,7 +607,9 @@ function buildSearchSnippet(material: {
     { scope: "reportNumber", text: material.reportNumber ?? "" },
     { scope: "storageUrl", text: material.storageUrl },
     { scope: "summary", text: stripHtml(material.summary ?? "") },
-    { scope: "body", text: stripHtml(material.body ?? "") }
+    { scope: "body", text: stripHtml(material.body ?? "") },
+    { scope: "summary", text: stripHtml(material.extraSummaryText ?? "") },
+    { scope: "body", text: stripHtml(material.extraBodyText ?? "") }
   ] satisfies Array<{ scope: AdminLibrarySearchScope; text: string }>;
 
   for (const source of sources) {
@@ -1788,14 +1807,18 @@ async function searchLibraryMaterials({ limit, query }: AdminLibrarySearchQuery,
   const categories = await ensureAdminLibraryCategories();
   const categoryIds = categories.map((category) => category.id);
   const categoryById = new Map(categories.map((category) => [category.id, category]));
+  const dateRange = parseSearchDateRange(query);
+  const materialWhere: Prisma.StudyMaterialWhereInput = {
+    categoryId: {
+      in: categoryIds
+    },
+    deletedAt: null,
+    ...(audience === "student" ? { publicationStatus: ContentPublicationStatus.PUBLISHED } : {})
+  };
 
   const materials = await prisma.studyMaterial.findMany({
     where: {
-      categoryId: {
-        in: categoryIds
-      },
-      deletedAt: null,
-      ...(audience === "student" ? { publicationStatus: ContentPublicationStatus.PUBLISHED } : {}),
+      ...materialWhere,
       OR: [
         {
           title: containsText(query)
@@ -1811,7 +1834,17 @@ async function searchLibraryMaterials({ limit, query }: AdminLibrarySearchQuery,
         },
         {
           body: containsText(query)
-        }
+        },
+        ...(dateRange
+          ? [
+              {
+                reportDate: {
+                  gte: dateRange.start,
+                  lt: dateRange.end
+                }
+              }
+            ]
+          : [])
       ]
     },
     orderBy: {
@@ -1820,7 +1853,167 @@ async function searchLibraryMaterials({ limit, query }: AdminLibrarySearchQuery,
     take: limit
   });
 
-  return materials.flatMap((material) => {
+  const chunkMatchesByMaterialId = new Map<
+    string,
+    {
+      body?: string;
+      summary?: string;
+    }
+  >();
+  const chunkMaterialIds: string[] = [];
+  const seenChunkMaterialIds = new Set<string>();
+
+  const matchingChunks = await prisma.studyMaterialBodyChunk.findMany({
+    where: {
+      content: containsText(query),
+      material: materialWhere
+    },
+    orderBy: {
+      updatedAt: "desc"
+    },
+    select: {
+      content: true,
+      field: true,
+      materialId: true
+    },
+    take: Math.min(limit * 20, 240)
+  });
+
+  for (const chunk of matchingChunks) {
+    const existing = chunkMatchesByMaterialId.get(chunk.materialId) ?? {};
+    if (chunk.field === 0 && !existing.body) {
+      chunkMatchesByMaterialId.set(chunk.materialId, { ...existing, body: chunk.content });
+    } else if (chunk.field === 1 && !existing.summary) {
+      chunkMatchesByMaterialId.set(chunk.materialId, { ...existing, summary: chunk.content });
+    }
+
+    if (!seenChunkMaterialIds.has(chunk.materialId)) {
+      seenChunkMaterialIds.add(chunk.materialId);
+      chunkMaterialIds.push(chunk.materialId);
+    }
+  }
+
+  const headMaterialIds = new Set(materials.map((material) => material.id));
+  const missingChunkMaterialIds = chunkMaterialIds.filter((id) => !headMaterialIds.has(id));
+
+  const extraMaterials = missingChunkMaterialIds.length
+    ? await prisma.studyMaterial.findMany({
+        where: {
+          ...materialWhere,
+          id: {
+            in: missingChunkMaterialIds
+          }
+        },
+        orderBy: {
+          updatedAt: "desc"
+        },
+        take: limit
+      })
+    : [];
+
+  const combinedMaterials = [...materials, ...extraMaterials];
+  const uniqueMaterials: typeof combinedMaterials = [];
+  const seenMaterialIds = new Set<string>();
+
+  for (const material of combinedMaterials) {
+    if (seenMaterialIds.has(material.id)) continue;
+    seenMaterialIds.add(material.id);
+    uniqueMaterials.push(material);
+  }
+
+  uniqueMaterials.sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime());
+
+  let finalMaterials = uniqueMaterials;
+
+  if (usesMongoRuntime() && finalMaterials.length < limit) {
+    const completed = [...finalMaterials];
+    const seenIds = new Set(completed.map((material) => material.id));
+    const candidateLimit = Math.min(Math.max(limit * 60, 120), 600);
+
+    const candidates = await prisma.studyMaterial.findMany({
+      where: materialWhere,
+      orderBy: {
+        updatedAt: "desc"
+      },
+      take: candidateLimit
+    });
+
+    const candidateIds = candidates.map((material) => material.id);
+    const candidateChunkMap = new Map<string, { body?: string; summary?: string }>();
+
+    if (candidateIds.length) {
+      const candidateChunks = await prisma.studyMaterialBodyChunk.findMany({
+        where: {
+          materialId: {
+            in: candidateIds
+          }
+        },
+        orderBy: {
+          updatedAt: "desc"
+        },
+        select: {
+          content: true,
+          field: true,
+          materialId: true
+        },
+        take: Math.min(candidateIds.length * 6, 1200)
+      });
+
+      for (const chunk of candidateChunks) {
+        const existing = candidateChunkMap.get(chunk.materialId) ?? {};
+        if (chunk.field === 0 && !existing.body) {
+          candidateChunkMap.set(chunk.materialId, { ...existing, body: chunk.content });
+        } else if (chunk.field === 1 && !existing.summary) {
+          candidateChunkMap.set(chunk.materialId, { ...existing, summary: chunk.content });
+        }
+      }
+    }
+
+    for (const candidate of candidates) {
+      if (seenIds.has(candidate.id)) continue;
+
+      const chunkText = candidateChunkMap.get(candidate.id) ?? null;
+      const matchesDate = dateRange
+        ? (candidate.reportDate && candidate.reportDate >= dateRange.start && candidate.reportDate < dateRange.end) ||
+          (candidate.createdAt >= dateRange.start && candidate.createdAt < dateRange.end) ||
+          (candidate.updatedAt >= dateRange.start && candidate.updatedAt < dateRange.end)
+        : false;
+
+      if (
+        !matchesDate &&
+        !matchesSearch(
+          query,
+          candidate.title,
+          candidate.reportNumber,
+          candidate.storageUrl,
+          candidate.summary,
+          candidate.body,
+          chunkText?.summary ?? "",
+          chunkText?.body ?? ""
+        )
+      ) {
+        continue;
+      }
+
+      completed.push(candidate);
+      seenIds.add(candidate.id);
+
+      if (chunkText && !chunkMatchesByMaterialId.has(candidate.id)) {
+        chunkMatchesByMaterialId.set(candidate.id, {
+          ...(chunkText.body ? { body: chunkText.body } : {}),
+          ...(chunkText.summary ? { summary: chunkText.summary } : {})
+        });
+      }
+
+      if (completed.length >= limit) {
+        break;
+      }
+    }
+
+    finalMaterials = completed;
+  }
+
+  return finalMaterials.slice(0, limit).flatMap((material) => {
     const category = material.categoryId ? categoryById.get(material.categoryId) : null;
     const section = category ? getSectionFromCategorySlug(category.slug) : null;
 
@@ -1828,7 +2021,15 @@ async function searchLibraryMaterials({ limit, query }: AdminLibrarySearchQuery,
       return [];
     }
 
-    const searchPreview = buildSearchSnippet(material, query);
+    const chunkMatch = chunkMatchesByMaterialId.get(material.id) ?? null;
+    const searchPreview = buildSearchSnippet(
+      {
+        ...material,
+        extraBodyText: chunkMatch?.body ?? null,
+        extraSummaryText: chunkMatch?.summary ?? null
+      },
+      query
+    );
 
     return [
       {

@@ -8,6 +8,7 @@ export const queryKeys = {
   adminLibraryDetail: (section: string, materialId: string) => ['admin-library-detail', section, materialId] as const,
   adminLibrarySearch: (query: string) => ['admin-library-search', query] as const,
   adminPortalSearch: (query: string) => ['admin-portal-search', query] as const,
+  studentPortalSearch: (query: string) => ['student-portal-search', query] as const,
   librarySearch: (audience: "admin" | "student", query: string) => ['library-search', audience, query] as const,
   adminMonthlyRegistrations: (year: number) => ['admin-monthly-registrations', year] as const,
   helarConnectQuestions: (filters: Record<string, unknown>) => ['helar-connect-questions', filters] as const,
