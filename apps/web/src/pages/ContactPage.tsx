@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
-import { Mail, MapPin, Send } from "lucide-react";
+import { Mail, MapPin, Phone, Send } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { AxiosError } from "axios";
@@ -66,8 +66,29 @@ export function ContactPage() {
                   <MapPin className="h-5 w-5" />
                 </span>
                 <div className="space-y-1">
-                  <p className="font-heading text-xl text-white">Halleluyah Chambers</p>
-                  <p className="text-sm leading-6 text-white/75">Okporo Road, Port Harcourt, Rivers State</p>
+                  <p className="font-heading text-xl text-white">Helar Office</p>
+                  <p className="text-sm leading-6 text-white/75">163, Sathcom-K House, Okporo Road. Rumuodara. Port Harcourt</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/70">Phone</p>
+              <div className="flex items-start gap-3">
+                <span className="mt-1 inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-white/10 text-white">
+                  <Phone className="h-5 w-5" />
+                </span>
+                <div className="space-y-1">
+                  <p className="font-heading text-xl text-white">
+                    <a className="underline underline-offset-4" href="tel:+2349030009297">
+                      09030009297
+                    </a>
+                    <span className="text-white/70">, </span>
+                    <a className="underline underline-offset-4" href="tel:+2348023035628">
+                      08023035628
+                    </a>
+                  </p>
+                  <p className="text-sm leading-6 text-white/75">Call us during business hours for enquiries and support.</p>
                 </div>
               </div>
             </div>
@@ -79,8 +100,8 @@ export function ContactPage() {
                   <Mail className="h-5 w-5" />
                 </span>
                 <div className="space-y-1">
-                  <a className="font-heading text-xl text-white underline underline-offset-4" href="mailto:support@helar.law">
-                    support@helar.law
+                  <a className="font-heading text-xl text-white underline underline-offset-4" href="mailto:info@helar.law">
+                    info@helar.law
                   </a>
                   <p className="text-sm leading-6 text-white/75">We respond to messages in the order they arrive.</p>
                 </div>
@@ -97,7 +118,7 @@ export function ContactPage() {
               <p className="eyebrow">Message form</p>
               <h2 className="font-heading text-2xl text-[color:var(--color-text)]">Send a message</h2>
               <p className="body-copy mt-3 max-w-xl">
-                Messages submitted here are delivered to <span className="font-medium text-[color:var(--color-text)]">support@helar.law</span>.
+                Messages submitted here are delivered to <span className="font-medium text-[color:var(--color-text)]">info@helar.law</span>.
               </p>
             </div>
 

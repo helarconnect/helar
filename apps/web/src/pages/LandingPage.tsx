@@ -494,11 +494,11 @@ export function LandingPage() {
           <div>
             <h3 className="font-heading text-[28px] text-[color:var(--color-text)]">Contact Helar</h3>
             <p className="body-copy mt-4 whitespace-pre-line">
-              {`Halleluyah Chambers
-Okporo Road
-Port Harcourt, Rivers State
+              {`Address: 163, Sathcom-K House, Okporo Road. Rumuodara. Port Harcourt
 
-Email: support@helar.law`}
+Phone number: 09030009297, 08023035628
+
+Email: info@helar.law`}
             </p>
           </div>
           <div className="flex flex-wrap gap-3 md:justify-end">

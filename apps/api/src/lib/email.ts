@@ -774,7 +774,7 @@ export async function sendContactEmail(input: ContactEmailInput) {
     return { skipped: true as const };
   }
 
-  const recipient = process.env.CONTACT_TO_EMAIL?.trim() || "support@helar.law";
+  const recipient = process.env.CONTACT_TO_EMAIL?.trim() || "info@helar.law";
   const transporter = createGoogleTransport(config);
   const mail = buildTransactionalMailOptions({
     config,

@@ -26,19 +26,11 @@ export function MarketingLayout() {
               </Link>
             </div>
             <div className="space-y-2 text-sm md:text-right">
-              <p className="text-white/85">Halleluyah Chambers, Okporo Road, Port Harcourt, Rivers State</p>
-              <a className="accent-coral font-heading text-xl underline underline-offset-4" href="mailto:support@helar.law">
-                support@helar.law
+              <p className="text-white/85">163, Sathcom-K House, Okporo Road. Rumuodara. Port Harcourt</p>
+              <a className="accent-coral font-heading text-xl underline underline-offset-4" href="mailto:info@helar.law">
+                info@helar.law
               </a>
-              <p className="text-white/75">Enquiries, partnerships, and learner support</p>
-              <a
-                className="mt-4 inline-flex justify-end font-heading text-sm text-white/75 underline underline-offset-4 transition hover:text-white"
-                href="https://wa.me/2347066689108"
-                rel="noreferrer"
-                target="_blank"
-              >
-                Powered by Giovy Tech Ltd.
-              </a>
+              <p className="text-white/75">Phone: 09030009297, 08023035628</p>
             </div>
           </div>
         </footer>

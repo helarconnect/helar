@@ -1132,7 +1132,7 @@ model SubjectSummaryCase {
 model SubjectSummaryEntry {
   id                   String                   @id @default(auto()) @map("_id") @db.ObjectId
   subjectId            String                   @db.ObjectId
-  moduleType           SubjectSummaryModuleType @default(FACULTY)
+  moduleType           SubjectSummaryModuleType @default(TEXTBOOK)
   topic                String?
   serialNumber         String?
   question             String
