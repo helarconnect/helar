@@ -5,6 +5,7 @@ import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { AppSidebar } from '@/components/layout/AppSidebar'
 import { AdminNotificationBell } from '@/components/layout/AdminNotificationBell'
 import { LibrarySearchControl } from '@/components/layout/LibrarySearchControl'
+import { ScrollToTopButton } from '@/components/layout/ScrollToTopButton'
 import { StudyNotesFab } from '@/components/layout/StudyNotesFab'
 import { ThemeToggle } from '@/components/layout/ThemeToggle'
 import { useTheme } from '@/hooks/useTheme'
@@ -337,6 +338,7 @@ export function AppLayout() {
         </div>
       </div>
       <StudyNotesFab isAdminWorkspace={isAdminWorkspace} />
+      <ScrollToTopButton tone={isDark ? 'dark' : 'light'} />
         {showVerificationPrompt && isEmailVerificationPending && session?.user.email ? (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/70 px-4 backdrop-blur-sm">
           <div

@@ -1,7 +1,7 @@
 import { AxiosError } from "axios";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
-import { ArrowRight, CheckCircle2, LockKeyhole, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { z } from "zod";
@@ -53,12 +53,6 @@ type AuthFormValues = z.infer<typeof baseAuthSchema>;
 type AuthPlaceholderPageProps = {
   mode: "sign-in" | "sign-up";
 };
-
-const authHighlights = [
-  "Strict input validation protects sign-in and registration payloads.",
-  "Rate-limited auth requests make brute-force abuse much harder.",
-  "Structured account creation keeps profile and session data cleaner."
-];
 
 export function AuthPlaceholderPage({ mode }: AuthPlaceholderPageProps) {
   const isSignIn = mode === "sign-in";
@@ -116,12 +110,6 @@ export function AuthPlaceholderPage({ mode }: AuthPlaceholderPageProps) {
     }
   });
 
-  const title = isSignIn ? "Enter the Helar workspace" : "Create your Helar account";
-  const subtitle = isSignIn
-    ? "A more secure sign-in flow for serious legal learning."
-    : "Register with a stronger account structure and validated credentials.";
-  const visibleHighlights = isSignIn ? authHighlights.slice(0, 2) : authHighlights;
-
   function handleAuthSubmit(values: AuthFormValues) {
     authMutation.mutate(values);
   }
@@ -139,67 +127,23 @@ export function AuthPlaceholderPage({ mode }: AuthPlaceholderPageProps) {
       <div className="auth-orb auth-orb-secondary" />
       <div className="auth-grid" />
 
-      <div className="auth-shell">
-        <section className={isSignIn ? "auth-panel auth-panel-compact" : "auth-panel"}>
-          <div className="auth-copy">
-            <span className="auth-pill">
-              <Sparkles className="h-4 w-4" />
-              {isSignIn ? "Secure access" : "Protected registration"}
-            </span>
-
-            <h1>{title}</h1>
-            <p className="auth-lead">{subtitle}</p>
-
-            {isSignIn ? null : (
-              <div className="auth-kpis">
-                <article className="auth-kpi-card">
-                  <p className="auth-kpi-value">2</p>
-                  <p className="auth-kpi-label">account types</p>
-                </article>
-                <article className="auth-kpi-card">
-                  <p className="auth-kpi-value">Zod</p>
-                  <p className="auth-kpi-label">validated request schemas</p>
-                </article>
-                <article className="auth-kpi-card">
-                  <p className="auth-kpi-value">60s</p>
-                  <p className="auth-kpi-label">windowed auth throttling</p>
-                </article>
-              </div>
-            )}
-
-            <div className="auth-feature-list">
-              {visibleHighlights.map((item) => (
-                <div className="auth-feature-row" key={item}>
-                  <CheckCircle2 className="h-4 w-4" />
-                  <span>{item}</span>
-                </div>
-              ))}
-            </div>
-
-            <div className="auth-trust-strip">
-              <div className="auth-trust-item">
-                <ShieldCheck className="h-4 w-4" />
-                <span>Encrypted sessions</span>
-              </div>
-              {isSignIn ? null : (
-                <div className="auth-trust-item">
-                  <LockKeyhole className="h-4 w-4" />
-                  <span>Password confirmation required</span>
-                </div>
-              )}
-            </div>
-          </div>
-        </section>
-
-        <section className={isSignIn ? "auth-card auth-card-compact" : "auth-card"}>
-          <div className="auth-card-header">
-            <div>
-              <p className="auth-card-eyebrow">{isSignIn ? "Sign in" : "Create account"}</p>
-              <h2>{isSignIn ? "Welcome back" : "Start securely"}</h2>
-            </div>
+      <div className="auth-shell auth-shell-single">
+        <section className="auth-card auth-card-centered">
+          <div className="auth-card-top">
+            <Link className="auth-brand" to="/">
+              Helar
+            </Link>
             <Link className="auth-inline-link" to="/">
               Back to home
             </Link>
+          </div>
+
+          <div className="auth-title-block">
+            <p className="auth-card-eyebrow">{isSignIn ? "Sign in" : "Create account"}</p>
+            <h1 className="auth-title">{isSignIn ? "Welcome back" : "Create your account"}</h1>
+            <p className="auth-subtitle">
+              {isSignIn ? "Sign in to continue to your dashboard." : "Start your Helar workspace in minutes."}
+            </p>
           </div>
 
           <form className="auth-form" onSubmit={form.handleSubmit(handleAuthSubmit)}>
@@ -286,7 +230,7 @@ export function AuthPlaceholderPage({ mode }: AuthPlaceholderPageProps) {
                   : "Creating account..."
                 : isSignIn
                   ? "Sign in to workspace"
-                  : "Create secure account"}
+                  : "Create account"}
               <ArrowRight className="h-4 w-4" />
             </button>
 

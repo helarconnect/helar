@@ -1414,19 +1414,6 @@ async function persistSignIn(payload: z.infer<typeof signInSchema>) {
     };
   }
 
-  if (!user.emailVerifiedAt) {
-    return {
-      status: 403 as const,
-      body: {
-        success: false,
-        error: {
-          code: "EMAIL_NOT_VERIFIED",
-          message: "Please verify your email address before signing in."
-        }
-      }
-    };
-  }
-
   const signedInSession = await runInTransaction(async (tx: Prisma.TransactionClient) => {
     await registerUserDevice(
       tx,

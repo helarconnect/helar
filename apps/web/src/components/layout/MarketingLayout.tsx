@@ -1,6 +1,8 @@
 import { Link, Outlet, useLocation } from 'react-router-dom'
 
 import { MarketingHeader } from '@/components/layout/MarketingHeader'
+import { ScrollToTopButton } from '@/components/layout/ScrollToTopButton'
+import { SocialLinks } from '@/components/layout/SocialLinks'
 
 export function MarketingLayout() {
   const location = useLocation()
@@ -24,6 +26,7 @@ export function MarketingLayout() {
               <Link className="inline-flex font-heading text-sm text-white/85 underline underline-offset-4 transition hover:text-white" to="/contact">
                 Contact Helar
               </Link>
+              <SocialLinks className="pt-2" tone="dark" />
             </div>
             <div className="space-y-2 text-sm md:text-right">
               <p className="text-white/85">163, Sathcom-K House, Okporo Road. Rumuodara. Port Harcourt</p>
@@ -35,6 +38,7 @@ export function MarketingLayout() {
           </div>
         </footer>
       )}
+      {isConnectPage ? null : <ScrollToTopButton tone="dark" />}
     </div>
   )
 }

@@ -4,18 +4,16 @@ import {
   BriefcaseBusiness,
   Building2,
   Check,
-  Facebook,
   GraduationCap,
-  Linkedin,
   ShieldCheck,
   Sparkles,
-  Twitter
 } from "lucide-react";
 import type { PointerEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import uploadedHeroImage from "@/assets/helar-hero-upload.png";
+import { SocialLinks } from "@/components/layout/SocialLinks";
 import { fetchLatestPublications, type LatestPublicationItem } from "@/lib/catalog-api";
 import { fetchHelarConnectQuestionsPublic, type HelarConnectSnapshot } from "@/lib/connect-api";
 import { formatDateDMY } from "@/lib/date";
@@ -70,14 +68,6 @@ const expertiseAreas = [
     title: "NLS (BAR) Final Exams"
   }
 ];
-
-function TikTokIcon(props: { className?: string }) {
-  return (
-    <svg className={props.className} fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-      <path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02c.08 1.53.63 3.09 1.75 4.17c1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97c-.57-.26-1.1-.59-1.62-.93c-.01 2.92.01 5.84-.02 8.75c-.08 1.4-.54 2.79-1.35 3.94c-1.31 1.92-3.58 3.17-5.91 3.21c-1.43.08-2.86-.31-4.08-1.03c-2.02-1.19-3.44-3.37-3.65-5.71c-.02-.5-.03-1-.01-1.49c.18-1.9 1.12-3.72 2.58-4.96c1.66-1.44 3.98-2.13 6.15-1.72c.02 1.48-.04 2.96-.04 4.44c-.99-.32-2.15-.23-3.02.37c-.63.41-1.11 1.04-1.36 1.75c-.21.51-.15 1.07-.14 1.61c.24 1.64 1.82 3.02 3.5 2.87c1.12-.01 2.19-.66 2.77-1.61c.19-.33.4-.67.41-1.06c.1-1.79.06-3.57.07-5.36c.01-4.03-.01-8.05.02-12.07" />
-    </svg>
-  );
-}
 
 const revealContainer = {
   hidden: { opacity: 0, y: 28 },
@@ -489,40 +479,7 @@ export function LandingPage() {
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
-                {[
-                  { href: "https://www.facebook.com/profile.php?id=61576597417904", icon: Facebook, label: "Facebook" },
-                  { href: "https://www.tiktok.com/@helar.law", icon: TikTokIcon, label: "TikTok" },
-                  { href: "https://x.com/helarlaw", icon: Twitter, label: "X (Twitter)" },
-                  { href: "https://www.linkedin.com/company/helar-law", icon: Linkedin, label: "LinkedIn" }
-                ].map((item) => {
-                  const Icon = item.icon;
-                  const className =
-                    "inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/12 bg-white/5 text-white/90 transition hover:bg-white/10";
-
-                  if (!item.href) {
-                    return (
-                      <span aria-label={item.label} className={className} key={item.label} title={item.label}>
-                        <Icon className="h-4 w-4" />
-                      </span>
-                    );
-                  }
-
-                  return (
-                    <a
-                      aria-label={item.label}
-                      className={className}
-                      href={item.href}
-                      key={item.label}
-                      rel="noreferrer"
-                      target="_blank"
-                      title={item.label}
-                    >
-                      <Icon className="h-4 w-4" />
-                    </a>
-                  );
-                })}
-              </div>
+              <SocialLinks tone="dark" />
             </div>
 
             <motion.div className="grid gap-4 sm:grid-cols-3" initial="hidden" variants={staggerChildren} whileInView="visible" viewport={{ amount: 0.3, once: true }}>
@@ -843,52 +800,6 @@ export function LandingPage() {
                 </motion.div>
               ))}
             </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="section-shell pt-24">
-        <div className="futuristic-panel-dark grid gap-10 px-8 py-14 lg:grid-cols-[1.15fr_0.85fr] lg:px-12">
-          <div>
-            <h2 className="font-heading text-[2.1rem] leading-[1.25] text-white lg:text-[2.8rem]">
-              Start studying with a library that feels premium, not messy.
-            </h2>
-            <p className="mt-6 max-w-3xl text-[18px] leading-[30px] text-white/82">
-              Join Helar to access law reports, subject summaries, cases & ratios, and NLS materials—organized so you can move from research to revision with clarity.
-            </p>
-            <div className="mt-10 flex flex-col gap-3 sm:flex-row">
-              <Link
-                className="inline-flex items-center justify-center rounded-full bg-[color:var(--color-accent-strong)] px-8 py-4 font-heading text-base text-white transition hover:brightness-105"
-                to="/auth/sign-up"
-              >
-                Get Started
-              </Link>
-              <Link
-                className="inline-flex items-center justify-center rounded-full border border-white/18 bg-white/6 px-8 py-4 font-heading text-base text-white backdrop-blur-sm transition hover:bg-white/10"
-                to="/pricing"
-              >
-                See Pricing
-              </Link>
-              <Link
-                className="inline-flex items-center justify-center rounded-full border border-white/18 bg-white/6 px-8 py-4 font-heading text-base text-white backdrop-blur-sm transition hover:bg-white/10"
-                to="/connect"
-              >
-                Helar Connect
-              </Link>
-            </div>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
-            {[
-              { label: "Fast", value: "find what you need" },
-              { label: "Clean", value: "read without clutter" },
-              { label: "Focused", value: "prepare with purpose" }
-            ].map((item) => (
-              <div className="rounded-[1.6rem] border border-white/12 bg-white/5 p-6" key={item.label}>
-                <p className="font-heading text-[1.8rem] leading-none text-[color:var(--color-accent)]">{item.label}</p>
-                <p className="mt-3 text-sm uppercase tracking-[0.14em] text-white/72">{item.value}</p>
-              </div>
-            ))}
           </div>
         </div>
       </section>

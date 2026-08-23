@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion'
-import { ArrowRight, Menu } from 'lucide-react'
+import { ArrowRight, Menu, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 
 import { BrandMark } from '@/components/ui/BrandMark'
@@ -18,6 +19,32 @@ export function MarketingHeader() {
   const isHomePage = location.pathname === '/'
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
   const clearSession = useAuthStore((state) => state.clearSession)
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+
+  useEffect(() => {
+    setIsMobileMenuOpen(false)
+  }, [location.pathname])
+
+  useEffect(() => {
+    if (!isMobileMenuOpen) {
+      return
+    }
+
+    const originalOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsMobileMenuOpen(false)
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.body.style.overflow = originalOverflow
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [isMobileMenuOpen])
 
   return (
     <header
@@ -90,11 +117,105 @@ export function MarketingHeader() {
               </Link>
             </>
           )}
-          <Link className="inline-flex h-11 w-11 items-center justify-center rounded-sm border border-white/20 text-stone-100 transition hover:bg-white/10 lg:hidden" to="/pricing">
+          <button
+            aria-label="Open menu"
+            aria-expanded={isMobileMenuOpen}
+            className="inline-flex h-11 w-11 items-center justify-center rounded-sm border border-white/20 text-stone-100 transition hover:bg-white/10 lg:hidden"
+            onClick={() => setIsMobileMenuOpen(true)}
+            type="button"
+          >
             <Menu className="h-4 w-4" />
-          </Link>
+          </button>
         </div>
       </motion.div>
+
+      {isMobileMenuOpen ? (
+        <div className="fixed inset-0 z-[60] lg:hidden">
+          <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm" onClick={() => setIsMobileMenuOpen(false)} />
+          <motion.div
+            animate={{ opacity: 1, y: 0 }}
+            className="absolute left-4 right-4 top-4 rounded-[22px] border border-white/10 bg-[rgba(12,18,34,0.9)] p-5 text-white shadow-[0_28px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl"
+            initial={{ opacity: 0, y: -14 }}
+            transition={{ duration: 0.22 }}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/70">Menu</p>
+              <button
+                aria-label="Close menu"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/12 bg-white/5 transition hover:bg-white/10"
+                onClick={() => setIsMobileMenuOpen(false)}
+                type="button"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-5 grid gap-2">
+              {marketingLinks.map((item) => (
+                <NavLink
+                  className={({ isActive }) =>
+                    cn(
+                      'flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-sm font-semibold transition hover:bg-white/10',
+                      isActive && 'border-[color:var(--color-accent-strong)]/40 bg-white/10',
+                    )
+                  }
+                  key={`${item.label}-${item.href}-mobile`}
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  to={item.href}
+                >
+                  <span>{item.label}</span>
+                  <ArrowRight className="h-4 w-4 text-white/70" />
+                </NavLink>
+              ))}
+            </div>
+
+            <div className="mt-6 grid gap-2">
+              {isAuthenticated ? (
+                <>
+                  <Link
+                    className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-sm font-semibold transition hover:bg-white/10"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    to="/app/dashboard"
+                  >
+                    <span>Dashboard</span>
+                    <ArrowRight className="h-4 w-4 text-white/70" />
+                  </Link>
+                  <button
+                    className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-left text-sm font-semibold transition hover:bg-white/10"
+                    onClick={() => {
+                      clearSession()
+                      setIsMobileMenuOpen(false)
+                    }}
+                    type="button"
+                  >
+                    <span>Log out</span>
+                    <ArrowRight className="h-4 w-4 text-white/70" />
+                  </button>
+                </>
+              ) : (
+                <>
+                  <Link
+                    className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-sm font-semibold transition hover:bg-white/10"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    to="/auth/sign-in"
+                  >
+                    <span>Sign in</span>
+                    <ArrowRight className="h-4 w-4 text-white/70" />
+                  </Link>
+                  <Link
+                    className="flex items-center justify-between rounded-2xl border border-[color:var(--color-accent)]/40 bg-[color:var(--color-accent)]/15 px-4 py-4 text-sm font-semibold text-white transition hover:bg-[color:var(--color-accent)]/25"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    to="/auth/sign-up"
+                  >
+                    <span>Get Started</span>
+                    <ArrowRight className="h-4 w-4 text-white" />
+                  </Link>
+                </>
+              )}
+            </div>
+          </motion.div>
+        </div>
+      ) : null}
     </header>
   )
 }

@@ -1893,6 +1893,12 @@ body {
   padding: 32px 24px;
 }
 
+.auth-shell-single {
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  max-width: 720px;
+}
+
 .auth-panel {
   position: relative;
 }
@@ -2022,6 +2028,53 @@ body {
   padding: 24px;
   box-shadow: 0 32px 90px rgba(2, 8, 20, 0.42);
   backdrop-filter: blur(16px);
+}
+
+.auth-card-centered {
+  width: min(560px, 100%);
+  padding: 26px;
+}
+
+.auth-card-top {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.auth-brand {
+  font-family: "Libre Baskerville", Georgia, serif;
+  font-size: 18px;
+  letter-spacing: 0.02em;
+  color: #ffffff;
+}
+
+.auth-brand:hover {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.auth-title-block {
+  position: relative;
+  z-index: 1;
+  margin-bottom: 18px;
+}
+
+.auth-title {
+  margin: 12px 0 0;
+  color: #ffffff;
+  font-family: "Libre Baskerville", Georgia, serif;
+  font-size: 32px;
+  line-height: 1.18;
+}
+
+.auth-subtitle {
+  margin: 12px 0 0;
+  color: #b7c6d8;
+  font-size: 14px;
+  line-height: 1.7;
 }
 
 .auth-card-compact {
