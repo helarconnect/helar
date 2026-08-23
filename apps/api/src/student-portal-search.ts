@@ -42,15 +42,30 @@ export function parseStudentPortalSearchQuery(query: Record<string, string | str
   });
 }
 
+async function settleOrFallback<T>(promise: Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await promise;
+  } catch (error) {
+    console.error(error);
+    return fallback;
+  }
+}
+
 export async function searchStudentPortal(userId: string, query: StudentPortalSearchQuery): Promise<StudentPortalSearchResponse> {
   const [libraryItems, studyCenter] = await Promise.all([
-    searchLibraryMaterialsForStudents({
-      limit: query.limit,
-      query: query.query
-    }),
-    searchStudentStudyCenter(userId, {
-      query: query.query
-    })
+    settleOrFallback(
+      searchLibraryMaterialsForStudents({
+        limit: query.limit,
+        query: query.query
+      }),
+      []
+    ),
+    settleOrFallback(
+      searchStudentStudyCenter(userId, {
+        query: query.query
+      }),
+      { items: [] }
+    )
   ]);
 
   const groups: StudentPortalSearchGroup[] = [

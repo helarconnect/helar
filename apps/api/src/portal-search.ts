@@ -80,10 +80,26 @@ async function completeMongoMatches<T extends { id: string }>(params: {
 
   const completedItems = [...params.items];
   const seenIds = new Set(completedItems.map((item) => item.id));
-  const candidates = await params.loadCandidates();
+  let candidates: T[] = [];
+
+  try {
+    candidates = await params.loadCandidates();
+  } catch (error) {
+    console.error(error);
+    return completedItems;
+  }
 
   for (const candidate of candidates) {
-    if (seenIds.has(candidate.id) || !params.matches(candidate)) {
+    let isMatch = false;
+
+    try {
+      isMatch = params.matches(candidate);
+    } catch (error) {
+      console.error(error);
+      isMatch = false;
+    }
+
+    if (seenIds.has(candidate.id) || !isMatch) {
       continue;
     }
 
