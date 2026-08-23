@@ -1863,20 +1863,27 @@ async function searchLibraryMaterials({ limit, query }: AdminLibrarySearchQuery,
   const chunkMaterialIds: string[] = [];
   const seenChunkMaterialIds = new Set<string>();
 
-  const matchingChunks = await prisma.studyMaterialBodyChunk.findMany({
-    where: {
-      content: containsText(query)
-    },
-    orderBy: {
-      updatedAt: "desc"
-    },
-    select: {
-      content: true,
-      field: true,
-      materialId: true
-    },
-    take: Math.min(limit * 20, 240)
-  });
+  let matchingChunks: Array<{ content: string; field: number; materialId: string }> = [];
+
+  try {
+    matchingChunks = await prisma.studyMaterialBodyChunk.findMany({
+      where: {
+        content: containsText(query)
+      },
+      orderBy: {
+        updatedAt: "desc"
+      },
+      select: {
+        content: true,
+        field: true,
+        materialId: true
+      },
+      take: Math.min(limit * 20, 240)
+    });
+  } catch (error) {
+    console.error(error);
+    matchingChunks = [];
+  }
 
   for (const chunk of matchingChunks) {
     const existing = chunkMatchesByMaterialId.get(chunk.materialId) ?? {};

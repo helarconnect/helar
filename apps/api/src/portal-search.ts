@@ -59,6 +59,15 @@ function matchesSearch(query: string, ...values: Array<string | null | undefined
   return values.some((value) => normalizeSearchText(value).includes(normalizedQuery));
 }
 
+async function settleOrFallback<T>(promise: Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await promise;
+  } catch (error) {
+    console.error(error);
+    return fallback;
+  }
+}
+
 async function completeMongoMatches<T extends { id: string }>(params: {
   items: T[];
   limit: number;
@@ -171,8 +180,7 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
   const dateRange = parseSearchDateRange(search);
   const yearQuery = parseSearchYear(search);
 
-  const [initialUsers, initialLibraryMaterials, initialSubjects, initialTopics, initialCases, initialEntries, matchingChunks] = await Promise.all([
-    prisma.user.findMany({
+  const usersPromise = prisma.user.findMany({
       where: {
         deletedAt: null,
         OR: [
@@ -219,8 +227,8 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
           }
         }
       }
-    }),
-    prisma.studyMaterial.findMany({
+    });
+  const libraryPromise = prisma.studyMaterial.findMany({
       where: {
         deletedAt: null,
         OR: [
@@ -270,8 +278,8 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
           }
         }
       }
-    }),
-    prisma.subjectSummarySubject.findMany({
+    });
+  const subjectsPromise = prisma.subjectSummarySubject.findMany({
       where: {
         deletedAt: null,
         OR: [{ name: containsText(search) }, { description: containsText(search) }]
@@ -283,8 +291,8 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
         name: true,
         description: true
       }
-    }),
-    prisma.subjectSummaryTopic.findMany({
+    });
+  const topicsPromise = prisma.subjectSummaryTopic.findMany({
       where: {
         deletedAt: null,
         subject: {
@@ -310,8 +318,8 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
           }
         }
       }
-    }),
-    prisma.subjectSummaryCase.findMany({
+    });
+  const casesPromise = prisma.subjectSummaryCase.findMany({
       where: {
         deletedAt: null,
         subject: {
@@ -372,8 +380,8 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
           }
         }
       }
-    }),
-    prisma.subjectSummaryEntry.findMany({
+    });
+  const entriesPromise = prisma.subjectSummaryEntry.findMany({
       where: {
         deletedAt: null,
         subject: {
@@ -408,9 +416,8 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
           }
         }
       }
-    })
-    ,
-    prisma.studyMaterialBodyChunk.findMany({
+    });
+  const chunksPromise = prisma.studyMaterialBodyChunk.findMany({
       where: {
         content: containsText(search)
       },
@@ -423,7 +430,16 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
         materialId: true
       },
       take: Math.min(limit * 20, 240)
-    })
+    });
+
+  const [initialUsers, initialLibraryMaterials, initialSubjects, initialTopics, initialCases, initialEntries, matchingChunks] = await Promise.all([
+    settleOrFallback(usersPromise, []),
+    settleOrFallback(libraryPromise, []),
+    settleOrFallback(subjectsPromise, []),
+    settleOrFallback(topicsPromise, []),
+    settleOrFallback(casesPromise, []),
+    settleOrFallback(entriesPromise, []),
+    settleOrFallback(chunksPromise, [])
   ]);
 
   const chunkMatchesByMaterialId = new Map<
@@ -456,26 +472,29 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
   );
 
   const extraChunkMaterials = missingChunkMaterialIds.length
-    ? await prisma.studyMaterial.findMany({
-        where: {
-          deletedAt: null,
-          id: {
-            in: missingChunkMaterialIds
-          }
-        },
-        orderBy: {
-          updatedAt: "desc"
-        },
-        take: limit,
-        include: {
-          category: {
-            select: {
-              name: true,
-              slug: true
+    ? await settleOrFallback(
+        prisma.studyMaterial.findMany({
+          where: {
+            deletedAt: null,
+            id: {
+              in: missingChunkMaterialIds
+            }
+          },
+          orderBy: {
+            updatedAt: "desc"
+          },
+          take: limit,
+          include: {
+            category: {
+              select: {
+                name: true,
+                slug: true
+              }
             }
           }
-        }
-      })
+        }),
+        []
+      )
     : [];
 
   const combinedInitialLibraryMaterials = [...initialLibraryMaterials, ...extraChunkMaterials];
