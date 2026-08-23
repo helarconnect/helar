@@ -1,5 +1,5 @@
 import { AlertCircle, ChevronDown, LogOut, MailCheck, Menu, User } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 
 import { AppSidebar } from '@/components/layout/AppSidebar'
@@ -65,6 +65,7 @@ export function AppLayout() {
   const { isDark } = useTheme()
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false)
   const [showVerificationPrompt, setShowVerificationPrompt] = useState(false)
+  const profileMenuRef = useRef<HTMLDivElement | null>(null)
   const roleCodes = session?.user.roleCodes ?? []
   const isEmailVerificationPending = session?.user.emailVerifiedAt === null
   const isAdminWorkspace = hasAdminAccess(roleCodes)
@@ -173,6 +174,37 @@ export function AppLayout() {
     }
   }, [isAdminWorkspace])
 
+  useEffect(() => {
+    if (!isProfileMenuOpen) {
+      return
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!(event.target instanceof HTMLElement)) {
+        return
+      }
+
+      if (profileMenuRef.current?.contains(event.target)) {
+        return
+      }
+
+      setIsProfileMenuOpen(false)
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsProfileMenuOpen(false)
+      }
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown)
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown)
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isProfileMenuOpen])
+
   return (
     <div
       className={cn(
@@ -224,81 +256,125 @@ export function AppLayout() {
                 <h1 className={cn('mt-1 font-heading text-2xl sm:text-3xl break-words max-w-full', isDark ? 'text-white' : 'text-slate-950')}>{resolvedPageTitle}</h1>
               </div>
             </div>
-            <div className="flex items-center gap-2 md:hidden">
-              <button
-                aria-label="Open profile"
-                className={cn(
-                  'inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border',
-                  isDark ? 'border-slate-700 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-900',
-                )}
-                onClick={() => navigate('/app/profile')}
-                type="button"
-              >
-                <User className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="hidden items-center gap-3 md:flex">
-              <ThemeToggle />
-              <LibrarySearchControl audience={isAdminWorkspace ? 'admin' : 'student'} />
-              {isAdminWorkspace ? (
-                <AdminNotificationBell isDark={isDark} isSuperAdminWorkspace={isSuperAdminWorkspace} />
-              ) : null}
-
-              <div className="relative">
-                <button
-                  className={cn(
-                    'flex items-center gap-3 rounded-full border px-4 py-2 transition',
-                    isDark
-                      ? 'border-slate-700 bg-slate-900 text-white hover:border-slate-600'
-                      : 'border-slate-200 bg-white text-slate-950 hover:border-slate-300',
-                  )}
-                  onClick={() => setIsProfileMenuOpen((current) => !current)}
-                  type="button"
-                >
-                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-950 text-sm font-medium text-white">
-                    {userName.charAt(0)}
-                  </span>
-                  <div className="text-left">
-                    <p className={cn('text-sm font-medium', isDark ? 'text-white' : 'text-slate-950')}>{userName}</p>
-                    <p className={cn('text-xs uppercase tracking-[0.18em]', isDark ? 'text-slate-500' : 'text-slate-400')}>
-                      Synced just now
-                    </p>
-                  </div>
-                  <ChevronDown className={cn('h-4 w-4 transition', isProfileMenuOpen && 'rotate-180')} />
-                </button>
-
-                {isProfileMenuOpen ? (
-                  <div
+            <div className="flex items-center gap-2" ref={profileMenuRef}>
+              <div className="flex items-center gap-2 md:hidden">
+                <ThemeToggle />
+                <div className="relative">
+                  <button
+                    aria-expanded={isProfileMenuOpen}
+                    aria-label="Open profile menu"
                     className={cn(
-                      'absolute right-0 top-[calc(100%+12px)] z-20 w-52 rounded-2xl border p-2 shadow-[0_24px_60px_rgba(15,23,42,0.16)]',
-                      isDark ? 'border-slate-700 bg-slate-900' : 'border-slate-200 bg-white',
+                      'inline-flex h-11 items-center justify-center gap-2 rounded-2xl border px-3 transition',
+                      isDark ? 'border-slate-700 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-900',
                     )}
+                    onClick={() => setIsProfileMenuOpen((current) => !current)}
+                    type="button"
                   >
-                    <Link
+                    <User className="h-4 w-4" />
+                    <ChevronDown className={cn('h-4 w-4 transition', isProfileMenuOpen && 'rotate-180')} />
+                  </button>
+
+                  {isProfileMenuOpen ? (
+                    <div
                       className={cn(
-                        'flex items-center gap-3 rounded-xl px-3 py-3 text-sm transition',
-                        isDark ? 'text-slate-200 hover:bg-slate-800' : 'text-slate-700 hover:bg-slate-50',
+                        'absolute right-0 top-[calc(100%+12px)] z-30 w-52 rounded-2xl border p-2 shadow-[0_24px_60px_rgba(15,23,42,0.16)]',
+                        isDark ? 'border-slate-700 bg-slate-900' : 'border-slate-200 bg-white',
                       )}
-                      onClick={() => setIsProfileMenuOpen(false)}
-                      to="/app/profile"
                     >
-                      <User className="h-4 w-4" />
-                      <span>Profile</span>
-                    </Link>
-                    <button
-                      className={cn(
-                        'flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm transition',
-                        isDark ? 'text-slate-200 hover:bg-slate-800' : 'text-slate-700 hover:bg-slate-50',
-                      )}
-                      onClick={handleLogout}
-                      type="button"
-                    >
-                      <LogOut className="h-4 w-4" />
-                      <span>Logout</span>
-                    </button>
-                  </div>
+                      <button
+                        className={cn(
+                          'flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm transition',
+                          isDark ? 'text-slate-200 hover:bg-slate-800' : 'text-slate-700 hover:bg-slate-50',
+                        )}
+                        onClick={() => {
+                          setIsProfileMenuOpen(false)
+                          navigate('/app/profile')
+                        }}
+                        type="button"
+                      >
+                        <User className="h-4 w-4" />
+                        <span>Update profile</span>
+                      </button>
+                      <button
+                        className={cn(
+                          'flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm transition',
+                          isDark ? 'text-slate-200 hover:bg-slate-800' : 'text-slate-700 hover:bg-slate-50',
+                        )}
+                        onClick={handleLogout}
+                        type="button"
+                      >
+                        <LogOut className="h-4 w-4" />
+                        <span>Logout</span>
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="hidden items-center gap-3 md:flex">
+                <ThemeToggle />
+                <LibrarySearchControl audience={isAdminWorkspace ? 'admin' : 'student'} />
+                {isAdminWorkspace ? (
+                  <AdminNotificationBell isDark={isDark} isSuperAdminWorkspace={isSuperAdminWorkspace} />
                 ) : null}
+
+                <div className="relative">
+                  <button
+                    className={cn(
+                      'flex items-center gap-3 rounded-full border px-4 py-2 transition',
+                      isDark
+                        ? 'border-slate-700 bg-slate-900 text-white hover:border-slate-600'
+                        : 'border-slate-200 bg-white text-slate-950 hover:border-slate-300',
+                    )}
+                    onClick={() => setIsProfileMenuOpen((current) => !current)}
+                    type="button"
+                  >
+                    <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-950 text-sm font-medium text-white">
+                      {userName.charAt(0)}
+                    </span>
+                    <div className="text-left">
+                      <p className={cn('text-sm font-medium', isDark ? 'text-white' : 'text-slate-950')}>{userName}</p>
+                      <p
+                        className={cn('text-xs uppercase tracking-[0.18em]', isDark ? 'text-slate-500' : 'text-slate-400')}
+                      >
+                        Synced just now
+                      </p>
+                    </div>
+                    <ChevronDown className={cn('h-4 w-4 transition', isProfileMenuOpen && 'rotate-180')} />
+                  </button>
+
+                  {isProfileMenuOpen ? (
+                    <div
+                      className={cn(
+                        'absolute right-0 top-[calc(100%+12px)] z-20 w-52 rounded-2xl border p-2 shadow-[0_24px_60px_rgba(15,23,42,0.16)]',
+                        isDark ? 'border-slate-700 bg-slate-900' : 'border-slate-200 bg-white',
+                      )}
+                    >
+                      <Link
+                        className={cn(
+                          'flex items-center gap-3 rounded-xl px-3 py-3 text-sm transition',
+                          isDark ? 'text-slate-200 hover:bg-slate-800' : 'text-slate-700 hover:bg-slate-50',
+                        )}
+                        onClick={() => setIsProfileMenuOpen(false)}
+                        to="/app/profile"
+                      >
+                        <User className="h-4 w-4" />
+                        <span>Profile</span>
+                      </Link>
+                      <button
+                        className={cn(
+                          'flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm transition',
+                          isDark ? 'text-slate-200 hover:bg-slate-800' : 'text-slate-700 hover:bg-slate-50',
+                        )}
+                        onClick={handleLogout}
+                        type="button"
+                      >
+                        <LogOut className="h-4 w-4" />
+                        <span>Logout</span>
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </div>
           </div>
