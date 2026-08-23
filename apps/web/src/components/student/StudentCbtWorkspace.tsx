@@ -16,6 +16,7 @@ import { createPortal } from "react-dom";
 import { useSearchParams } from "react-router-dom";
 
 import { useTheme } from "@/hooks/useTheme";
+import { formatDateTimeDMY } from "@/lib/date";
 import { cn } from "@/lib/utils";
 import {
   fetchCbtAttempt,
@@ -35,15 +36,6 @@ import { queryKeys } from "@/lib/query-keys";
 import { useAuthStore } from "@/store/auth-store";
 
 type Toast = { id: number; message: string; tone: "error" | "success" };
-
-function formatDateTime(value?: string | null) {
-  if (!value) return "Not available";
-
-  return new Intl.DateTimeFormat("en-US", {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(new Date(value));
-}
 
 function formatDuration(seconds: number) {
   const minutes = Math.floor(seconds / 60);
@@ -444,7 +436,7 @@ export function StudentCbtWorkspace() {
                   >
                     <h3 className={cn("text-lg font-semibold", isDark ? "text-white" : "text-slate-900")}>{entry.cbtTitle}</h3>
                     <p className={cn("mt-1 text-sm", isDark ? "text-slate-400" : "text-slate-600")}>
-                      Attempt {entry.attemptNumber} • Submitted {formatDateTime(entry.submittedAt)}
+                      Attempt {entry.attemptNumber} • Submitted {formatDateTimeDMY(entry.submittedAt)}
                     </p>
                   </button>
                   <div className="flex items-center gap-3">

@@ -623,11 +623,15 @@ function parseReportDate(value: string, section: AdminLibrarySection) {
     return null;
   }
 
-  if (!value.trim()) {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
     return null;
   }
 
-  const parsedDate = new Date(`${value}T00:00:00.000Z`);
+  const parsedDate = trimmed.includes("T")
+    ? new Date(trimmed)
+    : new Date(`${trimmed}T00:00:00.000Z`);
 
   if (Number.isNaN(parsedDate.getTime())) {
     throw new z.ZodError([

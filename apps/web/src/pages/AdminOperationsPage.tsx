@@ -1054,7 +1054,7 @@ export function AdminContentReviewDetailPage() {
           downloadable: Boolean(mat.downloadable),
           estimatedMins: Number(mat.estimatedMins ?? 5),
           materialType: mat.materialType ?? 'PDF',
-          reportDate: mat.reportDate ?? undefined,
+          reportDate: mat.reportDate ? mat.reportDate.slice(0, 10) : undefined,
           reportNumber: mat.reportNumber ?? undefined,
           sharingEnabled: Boolean(mat.sharingEnabled),
           storageUrl: mat.storageUrl ?? '',

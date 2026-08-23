@@ -23,20 +23,12 @@ import {
   fetchStudentStudyDownloads,
   searchStudentStudyCenter
 } from "@/lib/admin-api";
+import { formatDateTimeDMY } from "@/lib/date";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth-store";
 
 type ToastTone = "error" | "success";
-
-function formatDateTime(value: string) {
-  return new Intl.DateTimeFormat("en-US", {
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    month: "short"
-  }).format(new Date(value));
-}
 
 function formatHours(seconds: number) {
   return `${(seconds / 3600).toFixed(seconds >= 3600 ? 1 : 2)}h`;
@@ -302,7 +294,7 @@ export function StudentDashboardPage() {
                   <p className="mt-2 max-w-2xl text-sm leading-6 text-white/75">
                     {activeSubscription.shouldShowExpiryReminder
                       ? activeSubscription.expiryReminderMessage
-                      : `Your subscription is active and expires on ${formatDateTime(activeSubscription.endsAt ?? activeSubscription.startsAt)}.`}
+                      : `Your subscription is active and expires on ${formatDateTimeDMY(activeSubscription.endsAt ?? activeSubscription.startsAt)}.`}
                   </p>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-[#0f1a31]/70 px-4 py-3 text-sm font-semibold text-white">
@@ -411,7 +403,7 @@ export function StudentDashboardPage() {
                       {dashboard.lastStudiedTopic.topicName || dashboard.lastStudiedTopic.title}
                     </p>
                     <p className={cn("mt-1 text-sm", isDark ? "text-slate-400" : "text-slate-600")}>
-                      {dashboard.lastStudiedTopic.subjectName || "Subject summary"} • {formatDateTime(dashboard.lastStudiedTopic.lastOpenedAt)}
+                      {dashboard.lastStudiedTopic.subjectName || "Subject summary"} • {formatDateTimeDMY(dashboard.lastStudiedTopic.lastOpenedAt)}
                     </p>
                   </div>
                 ) : null}
@@ -483,7 +475,7 @@ export function StudentDashboardPage() {
                     <div className="max-w-2xl">
                       <p className={cn("font-medium", isDark ? "text-white" : "text-slate-950")}>{item.title}</p>
                       <p className={cn("mt-1 text-sm", isDark ? "text-slate-400" : "text-slate-600")}>
-                          {formatStudyContentType(item.contentType)} • {formatDateTime(item.lastOpenedAt)} • {formatMinutes(item.durationSeconds)}
+                          {formatStudyContentType(item.contentType)} • {formatDateTimeDMY(item.lastOpenedAt)} • {formatMinutes(item.durationSeconds)}
                       </p>
                         <p className={cn("mt-2 text-sm", isDark ? "text-slate-500" : "text-slate-500")}>{item.lastPositionLabel || item.status}</p>
                     </div>
@@ -608,7 +600,7 @@ export function StudentDashboardPage() {
                     <Link className="min-w-0 flex-1" to={item.path}>
                       <p className={cn("truncate font-medium", isDark ? "text-white" : "text-slate-950")}>{item.title}</p>
                       <p className={cn("mt-1 text-sm", isDark ? "text-slate-400" : "text-slate-600")}>
-                        {[item.subjectName, item.topicName].filter(Boolean).join(" / ") || formatDateTime(item.createdAt)}
+                        {[item.subjectName, item.topicName].filter(Boolean).join(" / ") || formatDateTimeDMY(item.createdAt)}
                       </p>
                     </Link>
                     <button
@@ -696,7 +688,7 @@ export function StudentDashboardPage() {
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0 flex-1">
                         <p className={cn("truncate font-medium", isDark ? "text-white" : "text-slate-950")}>{item.title}</p>
-                        <p className={cn("mt-1 text-sm", isDark ? "text-slate-400" : "text-slate-600")}>{formatDateTime(item.lastOpenedAt)}</p>
+                        <p className={cn("mt-1 text-sm", isDark ? "text-slate-400" : "text-slate-600")}>{formatDateTimeDMY(item.lastOpenedAt)}</p>
                       </div>
                       <span className={cn("rounded-full border px-3 py-1 text-xs", isDark ? "border-slate-600 text-slate-300" : "border-slate-200 text-slate-600")}>
                         {item.readingProgressPct.toFixed(0)}%
@@ -718,7 +710,7 @@ export function StudentDashboardPage() {
                   <Link className={cn("block rounded-[22px] border px-4 py-4 transition", isDark ? "border-slate-700 bg-slate-800 hover:border-slate-600" : "border-slate-200 bg-slate-50 hover:border-slate-300")} key={item.id} to={item.path}>
                     <p className={cn("font-medium", isDark ? "text-white" : "text-slate-950")}>{item.title}</p>
                     <p className={cn("mt-1 text-sm", isDark ? "text-slate-400" : "text-slate-600")}>
-                      {[item.subjectName, item.topicName].filter(Boolean).join(" / ")} • {formatDateTime(item.lastOpenedAt)}
+                      {[item.subjectName, item.topicName].filter(Boolean).join(" / ")} • {formatDateTimeDMY(item.lastOpenedAt)}
                     </p>
                   </Link>
                 ))
@@ -742,7 +734,7 @@ export function StudentDashboardPage() {
                   >
                     <p className={cn("font-medium", isDark ? "text-white" : "text-slate-950")}>{item.fileName}</p>
                     <p className={cn("mt-1 text-sm", isDark ? "text-slate-400" : "text-slate-600")}>
-                      {item.title} • {formatDateTime(item.createdAt)}
+                      {item.title} • {formatDateTimeDMY(item.createdAt)}
                     </p>
                   </a>
                 ))

@@ -12,6 +12,7 @@ import {
   type SubscriptionPlan,
   verifySubscriptionPayment
 } from "@/lib/api";
+import { formatDateTimeDMY } from "@/lib/date";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/hooks/useTheme";
@@ -40,17 +41,6 @@ function getPlanCheckoutLabel(plan: SubscriptionPlan) {
   }
 
   return "Monthly";
-}
-
-function formatDate(value: string | null) {
-  if (!value) {
-    return "Not set";
-  }
-
-  return new Intl.DateTimeFormat("en-NG", {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(new Date(value));
 }
 
 function formatExpiryCountdown(daysUntilExpiry: number | null) {
@@ -336,7 +326,7 @@ export function SubscriptionPage() {
             </div>
             <p className={cn("mt-4 text-sm", isDark ? "text-slate-300" : "text-slate-600")}>
               {activeSubscription
-                ? `Access ends ${formatDate(activeSubscription.endsAt)}`
+                ? `Access ends ${formatDateTimeDMY(activeSubscription.endsAt)}`
                 : "Choose a plan below to start premium access."}
             </p>
             {activeSubscription ? (
@@ -433,7 +423,7 @@ export function SubscriptionPage() {
                     <p className={cn("text-sm font-semibold", isDark ? "text-slate-100" : "text-slate-800")}>{payment.formattedAmount}</p>
                   </div>
                   <p className={cn("mt-3 text-sm", isDark ? "text-slate-300" : "text-slate-600")}>
-                    Paid or attempted on {formatDate(payment.createdAt)}
+                    Paid or attempted on {formatDateTimeDMY(payment.createdAt)}
                   </p>
                   {payment.reference ? (
                     <p className={cn("mt-1 break-all text-xs", isDark ? "text-slate-500" : "text-slate-400")}>

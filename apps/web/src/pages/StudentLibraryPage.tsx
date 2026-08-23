@@ -20,6 +20,7 @@ import {
   type SubjectSummaryHierarchySubject,
   type SubjectSummaryHierarchyTopic
 } from "@/lib/admin-api";
+import { formatDateDMY } from "@/lib/date";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 
@@ -31,18 +32,6 @@ const defaultFilters: Required<AdminLibraryFilters> = {
   sortBy: "reportNumber",
   sortOrder: "desc"
 };
-
-function formatDate(value?: string | null) {
-  if (!value) {
-    return "Date not available";
-  }
-
-  return new Intl.DateTimeFormat("en-US", {
-    day: "numeric",
-    month: "short",
-    year: "numeric"
-  }).format(new Date(value));
-}
 
 function prettifyCourt(value: string) {
   return value
@@ -435,7 +424,7 @@ export function StudentLawReportsPage() {
                         )}
                       >
                         <CalendarDays className="h-3 w-3" />
-                        {formatDate(material.reportDate)}
+                        {formatDateDMY(material.reportDate, "Date not available")}
                       </span>
                       {material.estimatedMins ? (
                         <span
@@ -693,7 +682,9 @@ export function StudentHelarpediaPage() {
                             <BookOpenText className={cn("h-4 w-4", isDark ? "text-slate-500" : "text-slate-400")} />
                             <p className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-400")}>Updated</p>
                           </div>
-                          <p className={cn("mt-2 text-sm font-medium", isDark ? "text-white" : "text-slate-950")}>{formatDate(material.reportDate)}</p>
+                          <p className={cn("mt-2 text-sm font-medium", isDark ? "text-white" : "text-slate-950")}>
+                            {formatDateDMY(material.reportDate, "Date not available")}
+                          </p>
                         </div>
 
                         <div className={cn("rounded-[20px] border p-3", isDark ? "border-slate-800 bg-slate-950" : "border-slate-200 bg-slate-50")}>
