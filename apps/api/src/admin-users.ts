@@ -544,7 +544,7 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
         include: {
           roles: {
             where: {
-              deletedAt: null
+              ...notDeletedUserRoleWhere()
             },
             include: {
               role: true
@@ -754,7 +754,7 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
           createdAt: true,
           roles: {
             where: {
-              deletedAt: null
+              ...notDeletedUserRoleWhere()
             },
             select: {
               role: {
@@ -780,7 +780,7 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
         include: {
           roles: {
             where: {
-              deletedAt: null
+              ...notDeletedUserRoleWhere()
             },
             include: {
               role: true
@@ -1640,6 +1640,7 @@ export async function updateAdminUserRoles(userId: string, roleCodes: string[], 
 
       await tx.userRole.create({
         data: {
+          deletedAt: null,
           userId,
           roleId: nextRole.id
         }
