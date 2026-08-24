@@ -70,7 +70,11 @@ export function AppLayout() {
   const [isResendingVerification, setIsResendingVerification] = useState(false)
   const profileMenuRef = useRef<HTMLDivElement | null>(null)
   const roleCodes = session?.user.roleCodes ?? []
-  const isEmailVerificationPending = session?.user.emailVerifiedAt === null
+  const shouldSuppressEmailVerificationPrompt = roleCodes.some((roleCode) =>
+    ['student', 'lawyer', 'judge'].includes(roleCode)
+  )
+  const isEmailVerificationPending =
+    session?.user.emailVerifiedAt === null && !shouldSuppressEmailVerificationPrompt
   const isAdminWorkspace = hasAdminAccess(roleCodes)
   const isSuperAdminWorkspace = isSuperAdmin(roleCodes)
   const isContentAdminWorkspace = isContentAdmin(roleCodes)
@@ -145,13 +149,13 @@ export function AppLayout() {
   }
 
   useEffect(() => {
-    if (session?.user.email && session.user.emailVerifiedAt === null) {
+    if (session?.user.email && isEmailVerificationPending) {
       setShowVerificationPrompt(true)
       return
     }
 
     setShowVerificationPrompt(false)
-  }, [session?.user.email, session?.user.emailVerifiedAt])
+  }, [isEmailVerificationPending, session?.user.email])
 
   useEffect(() => {
     setVerificationActionMessage(null)

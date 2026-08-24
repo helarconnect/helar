@@ -355,19 +355,19 @@ const declineApprovalSchema = z
 
 const profileSchema = z
   .object({
-    fullName: z.string().trim().min(2).max(80),
+    fullName: z.string().trim().min(2).max(80).optional(),
     phoneNumber: z.string().trim().regex(/^\+?[0-9\s\-()]{7,20}$/).optional().or(z.literal("")),
     avatarUrl: z.string().trim().max(2_000_000).optional().or(z.literal("")),
     sex: z.union([z.literal("MALE"), z.literal("FEMALE"), z.literal("")]).optional(),
-    addressLine1: z.string().trim().min(4).max(120),
+    addressLine1: z.string().trim().min(4).max(120).optional(),
     addressLine2: z.string().trim().max(120).optional().or(z.literal("")),
-    city: z.string().trim().min(2).max(80),
-    state: z.string().trim().min(2).max(80),
+    city: z.string().trim().min(2).max(80).optional(),
+    state: z.string().trim().min(2).max(80).optional(),
     institutionState: z.string().trim().max(80).optional().or(z.literal("")),
     institutionName: z.string().trim().max(160).optional().or(z.literal("")),
     institutionOtherName: z.string().trim().max(160).optional().or(z.literal("")),
-    postalCode: z.string().trim().min(3).max(20),
-    country: z.string().trim().min(2).max(60)
+    postalCode: z.string().trim().min(3).max(20).optional(),
+    country: z.string().trim().min(2).max(60).optional()
   })
   .strict();
 
@@ -1663,23 +1663,76 @@ async function persistResetPassword(payload: z.infer<typeof resetPasswordSchema>
 }
 
 async function persistProfileUpdate(userId: string, payload: z.infer<typeof profileSchema>) {
+  const data: Prisma.UserUpdateInput = {};
+
+  if (payload.fullName !== undefined) {
+    data.fullName = payload.fullName;
+  }
+
+  if (payload.phoneNumber !== undefined) {
+    data.phoneNumber = payload.phoneNumber.trim() ? payload.phoneNumber.trim() : null;
+  }
+
+  if (payload.avatarUrl !== undefined) {
+    data.avatarUrl = payload.avatarUrl.trim() ? payload.avatarUrl.trim() : null;
+  }
+
+  if (payload.sex !== undefined) {
+    data.sex = payload.sex ? (payload.sex as "MALE" | "FEMALE") : null;
+  }
+
+  if (payload.addressLine1 !== undefined) {
+    data.addressLine1 = payload.addressLine1;
+  }
+
+  if (payload.addressLine2 !== undefined) {
+    data.addressLine2 = payload.addressLine2.trim() ? payload.addressLine2 : null;
+  }
+
+  if (payload.city !== undefined) {
+    data.city = payload.city;
+  }
+
+  if (payload.state !== undefined) {
+    data.state = payload.state;
+  }
+
+  if (payload.institutionState !== undefined) {
+    data.institutionState = payload.institutionState.trim() ? payload.institutionState : null;
+  }
+
+  if (payload.institutionName !== undefined) {
+    data.institutionName = payload.institutionName.trim() ? payload.institutionName : null;
+  }
+
+  if (payload.institutionOtherName !== undefined) {
+    data.institutionOtherName = payload.institutionOtherName.trim() ? payload.institutionOtherName : null;
+  }
+
+  if (payload.postalCode !== undefined) {
+    data.postalCode = payload.postalCode;
+  }
+
+  if (payload.country !== undefined) {
+    data.country = payload.country;
+  }
+
+  if (Object.keys(data).length === 0) {
+    const existingUser = await prisma.user.findUnique({
+      where: { id: userId },
+      include: userRelationsInclude
+    });
+
+    if (!existingUser) {
+      throw new Error("User not found.");
+    }
+
+    return normalizeUser(existingUser);
+  }
+
   const updatedUser = await prisma.user.update({
     where: { id: userId },
-    data: {
-      fullName: payload.fullName,
-      phoneNumber: payload.phoneNumber || null,
-      avatarUrl: payload.avatarUrl || null,
-      sex: payload.sex ? (payload.sex as "MALE" | "FEMALE") : null,
-      addressLine1: payload.addressLine1,
-      addressLine2: payload.addressLine2 || null,
-      city: payload.city,
-      state: payload.state,
-      institutionState: payload.institutionState || null,
-      institutionName: payload.institutionName || null,
-      institutionOtherName: payload.institutionOtherName || null,
-      postalCode: payload.postalCode,
-      country: payload.country
-    },
+    data,
     include: userRelationsInclude
   });
 
@@ -3415,6 +3468,46 @@ export function createApp(options: AppOptions = {}) {
     }
   });
 
+  function buildVerificationEmailErrorMeta(error: unknown) {
+    if (!(error instanceof Error)) {
+      return {
+        code: "unknown" as const,
+        message: "Unknown error."
+      };
+    }
+
+    const errorWithCode = error as Error & { code?: unknown; response?: unknown };
+    const rawCode = typeof errorWithCode.code === "string" ? errorWithCode.code : undefined;
+    const rawMessage = typeof errorWithCode.message === "string" ? errorWithCode.message : "Unknown error.";
+    const message = rawMessage.replace(/\s+/g, " ").trim().slice(0, 240);
+
+    if (message.toLowerCase().includes("was not accepted by the mail transport")) {
+      return { code: "smtp_rejected_recipients" as const, message };
+    }
+
+    if (rawCode === "EAUTH" || message.includes("535") || message.toLowerCase().includes("auth")) {
+      return { code: "smtp_auth_failed" as const, message };
+    }
+
+    if (
+      rawCode === "ECONNECTION" ||
+      rawCode === "ESOCKET" ||
+      rawCode === "ETIMEDOUT" ||
+      rawCode === "ECONNREFUSED" ||
+      rawCode === "ENOTFOUND" ||
+      rawCode === "EHOSTUNREACH" ||
+      rawCode === "EAI_AGAIN"
+    ) {
+      return { code: "smtp_connection_failed" as const, message };
+    }
+
+    if (message.toLowerCase().includes("tls") || message.toLowerCase().includes("ssl")) {
+      return { code: "smtp_tls_failed" as const, message };
+    }
+
+    return { code: "unknown" as const, message };
+  }
+
   const resendVerificationRateLimiter = createRateLimiter(3, 60_000);
 
   app.post(
@@ -3468,6 +3561,9 @@ export function createApp(options: AppOptions = {}) {
         const emailVerificationToken = createEmailVerificationToken(user.id, user.email);
         const emailVerificationUrl = createEmailVerificationUrl(emailVerificationToken);
         let verificationEmailStatus: "sent" | "skipped" | "failed" = "failed";
+        let verificationEmailError:
+          | { code: string; message: string }
+          | null = null;
 
         try {
           const result = await sendRegistrationVerificationEmails({
@@ -3480,6 +3576,7 @@ export function createApp(options: AppOptions = {}) {
         } catch (error) {
           console.error("Failed to resend registration verification email:", error);
           verificationEmailStatus = "failed";
+          verificationEmailError = buildVerificationEmailErrorMeta(error);
         }
 
         const message =
@@ -3495,7 +3592,8 @@ export function createApp(options: AppOptions = {}) {
             message
           },
           meta: {
-            verificationEmailStatus
+            verificationEmailStatus,
+            ...(verificationEmailError ? { verificationEmailError } : {})
           }
         });
       } catch (error) {

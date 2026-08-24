@@ -42,6 +42,22 @@ const profileSchema = z.object({
   country: z.enum(countries, { message: "Choose your country." })
 });
 
+const institutionUpdateSchema = z
+  .object({
+    institutionState: z.string().trim().min(1, "Choose the state where your institution is located."),
+    institutionName: z.string().trim().max(160, "Institution name is too long.").optional().or(z.literal("")),
+    institutionOtherName: z.string().trim().max(160, "Institution name is too long.").optional().or(z.literal(""))
+  })
+  .superRefine((values, context) => {
+    if (!values.institutionName.trim() && !values.institutionOtherName.trim()) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Choose your institution or enter it in the other institution field.",
+        path: ["institutionName"]
+      })
+    }
+  })
+
 const passwordSchema = z
   .object({
     currentPassword: z.string().trim().min(1, "Enter your current password."),
@@ -217,6 +233,41 @@ export function ProfilePage() {
       postalCode: parsedValues.postalCode,
       country: parsedValues.country
     } satisfies DemoProfilePayload);
+  }
+
+  function onSubmitInstitution(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    profileForm.clearErrors(["institutionState", "institutionName", "institutionOtherName"])
+
+    const result = institutionUpdateSchema.safeParse({
+      institutionState: profileForm.getValues("institutionState"),
+      institutionName: profileForm.getValues("institutionName"),
+      institutionOtherName: profileForm.getValues("institutionOtherName")
+    })
+
+    if (!result.success) {
+      const errors = result.error.flatten().fieldErrors
+
+      if (errors.institutionState?.[0]) {
+        profileForm.setError("institutionState", { message: errors.institutionState[0] })
+      }
+
+      if (errors.institutionName?.[0]) {
+        profileForm.setError("institutionName", { message: errors.institutionName[0] })
+      }
+
+      if (errors.institutionOtherName?.[0]) {
+        profileForm.setError("institutionOtherName", { message: errors.institutionOtherName[0] })
+      }
+
+      return
+    }
+
+    updateProfileMutation.mutate({
+      institutionState: result.data.institutionState,
+      institutionName: result.data.institutionName,
+      institutionOtherName: result.data.institutionOtherName
+    })
   }
 
   function onSubmitPassword(values: PasswordFormValues) {
@@ -547,7 +598,7 @@ export function ProfilePage() {
                   This section is available for student accounts only.
                 </div>
               ) : (
-                <form className="mt-6 space-y-5" onSubmit={profileForm.handleSubmit(onSubmitProfile)}>
+                <form className="mt-6 space-y-5" onSubmit={onSubmitInstitution}>
                 <div className="grid gap-5 md:grid-cols-2">
                   <div>
                     <label className={cn("text-sm font-medium", isDark ? "text-slate-200" : "text-slate-700")} htmlFor="institutionState">

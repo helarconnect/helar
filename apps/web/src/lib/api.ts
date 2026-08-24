@@ -85,7 +85,7 @@ export type ForgotPasswordResponse = {
 };
 
 export type DemoProfilePayload = {
-  fullName: string;
+  fullName?: string;
   phoneNumber?: string;
   avatarUrl?: string;
   sex?: "MALE" | "FEMALE" | "";
