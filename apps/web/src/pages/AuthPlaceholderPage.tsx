@@ -182,6 +182,8 @@ export function AuthPlaceholderPage({ mode }: AuthPlaceholderPageProps) {
         showToast("Account created successfully. Activation email is not configured yet.", "error");
       } else if (response.meta?.verificationEmailStatus === "failed") {
         showToast("Account created successfully. Activation email could not be sent.", "error");
+      } else if (response.meta?.verificationEmailStatus === "already_verified") {
+        showToast("Account created successfully.", "success");
       } else {
         showToast("Account created successfully.", "success");
       }

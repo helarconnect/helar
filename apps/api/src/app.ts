@@ -3415,6 +3415,102 @@ export function createApp(options: AppOptions = {}) {
     }
   });
 
+  const resendVerificationRateLimiter = createRateLimiter(3, 60_000);
+
+  app.post(
+    "/api/v1/auth/resend-verification",
+    authenticateRequest,
+    resendVerificationRateLimiter,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase && allowAuthFallback) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "EMAIL_VERIFICATION_UNAVAILABLE",
+            message: "Email verification is temporarily unavailable. Please try again shortly."
+          }
+        });
+      }
+
+      try {
+        const user = await prisma.user.findUnique({
+          where: { id: request.auth?.userId },
+          select: {
+            id: true,
+            email: true,
+            fullName: true,
+            emailVerifiedAt: true
+          }
+        });
+
+        if (!user) {
+          return response.status(404).json({
+            success: false,
+            error: {
+              code: "NOT_FOUND",
+              message: "We could not find your account."
+            }
+          });
+        }
+
+        if (user.emailVerifiedAt) {
+          return response.json({
+            success: true,
+            data: {
+              message: "Your email is already verified."
+            },
+            meta: {
+              verificationEmailStatus: "already_verified" as const
+            }
+          });
+        }
+
+        const emailVerificationToken = createEmailVerificationToken(user.id, user.email);
+        const emailVerificationUrl = createEmailVerificationUrl(emailVerificationToken);
+        let verificationEmailStatus: "sent" | "skipped" | "failed" = "failed";
+
+        try {
+          const result = await sendRegistrationVerificationEmails({
+            email: user.email,
+            fullName: user.fullName,
+            roleCodes: request.auth?.roleCodes ?? [],
+            verificationUrl: emailVerificationUrl
+          });
+          verificationEmailStatus = result.skipped ? "skipped" : "sent";
+        } catch (error) {
+          console.error("Failed to resend registration verification email:", error);
+          verificationEmailStatus = "failed";
+        }
+
+        const message =
+          verificationEmailStatus === "sent"
+            ? "Verification email sent."
+            : verificationEmailStatus === "skipped"
+              ? "Email verification is not configured yet."
+              : "We could not send the verification email right now.";
+
+        return response.json({
+          success: true,
+          data: {
+            message
+          },
+          meta: {
+            verificationEmailStatus
+          }
+        });
+      } catch (error) {
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "EMAIL_VERIFICATION_FAILED",
+            message: "We could not resend the verification email right now."
+          }
+        });
+      }
+    }
+  );
+
   app.post("/api/v1/auth/refresh", async (request: Request, response: Response) => {
     const parsed = refreshSchema.safeParse(request.body);
 

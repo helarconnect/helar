@@ -9,6 +9,7 @@ import { ScrollToTopButton } from '@/components/layout/ScrollToTopButton'
 import { StudyNotesFab } from '@/components/layout/StudyNotesFab'
 import { ThemeToggle } from '@/components/layout/ThemeToggle'
 import { useTheme } from '@/hooks/useTheme'
+import { resendEmailVerification } from '@/lib/api'
 import { cn, hasAdminAccess, isContentAdmin, isSuperAdmin } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth-store'
 import { useUiStore } from '@/store/ui-store'
@@ -65,6 +66,8 @@ export function AppLayout() {
   const { isDark } = useTheme()
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false)
   const [showVerificationPrompt, setShowVerificationPrompt] = useState(false)
+  const [verificationActionMessage, setVerificationActionMessage] = useState<string | null>(null)
+  const [isResendingVerification, setIsResendingVerification] = useState(false)
   const profileMenuRef = useRef<HTMLDivElement | null>(null)
   const roleCodes = session?.user.roleCodes ?? []
   const isEmailVerificationPending = session?.user.emailVerifiedAt === null
@@ -123,6 +126,24 @@ export function AppLayout() {
     navigate('/')
   }
 
+  async function handleResendVerificationEmail() {
+    if (!session?.user.email || !isEmailVerificationPending) {
+      return
+    }
+
+    setVerificationActionMessage(null)
+    setIsResendingVerification(true)
+
+    try {
+      const result = await resendEmailVerification()
+      setVerificationActionMessage(result.data.message)
+    } catch {
+      setVerificationActionMessage('We could not resend the verification email right now. Please try again shortly.')
+    } finally {
+      setIsResendingVerification(false)
+    }
+  }
+
   useEffect(() => {
     if (session?.user.email && session.user.emailVerifiedAt === null) {
       setShowVerificationPrompt(true)
@@ -131,6 +152,10 @@ export function AppLayout() {
 
     setShowVerificationPrompt(false)
   }, [session?.user.email, session?.user.emailVerifiedAt])
+
+  useEffect(() => {
+    setVerificationActionMessage(null)
+  }, [showVerificationPrompt, session?.user.emailVerifiedAt])
 
   useEffect(() => {
     if (isAdminWorkspace) {
@@ -479,6 +504,19 @@ export function AppLayout() {
                   </button>
                   <button
                     className={cn(
+                      'inline-flex items-center justify-center rounded-full border px-5 py-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60',
+                      isDark
+                        ? 'border-amber-400/30 bg-amber-500/10 text-amber-100 hover:bg-amber-500/20'
+                        : 'border-amber-300 bg-white text-amber-900 hover:bg-amber-100',
+                    )}
+                    disabled={isResendingVerification}
+                    onClick={handleResendVerificationEmail}
+                    type="button"
+                  >
+                    {isResendingVerification ? 'Sending…' : 'Resend verification email'}
+                  </button>
+                  <button
+                    className={cn(
                       'inline-flex items-center justify-center rounded-full border px-5 py-3 text-sm font-semibold transition',
                       isDark
                         ? 'border-slate-700 bg-slate-900 text-slate-200 hover:border-slate-600'
@@ -490,6 +528,16 @@ export function AppLayout() {
                     Go to profile
                   </button>
                 </div>
+                {verificationActionMessage ? (
+                  <div
+                    className={cn(
+                      'mt-4 rounded-2xl border px-4 py-3 text-sm leading-6',
+                      isDark ? 'border-slate-800 bg-slate-900/80 text-slate-200' : 'border-slate-200 bg-slate-50 text-slate-700',
+                    )}
+                  >
+                    {verificationActionMessage}
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>

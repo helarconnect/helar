@@ -52,7 +52,17 @@ export type DemoSignInResponse = {
     };
   };
   meta?: {
-    verificationEmailStatus?: "sent" | "skipped" | "failed";
+    verificationEmailStatus?: "sent" | "skipped" | "failed" | "already_verified";
+  };
+};
+
+export type ResendVerificationResponse = {
+  success: true;
+  data: {
+    message: string;
+  };
+  meta: {
+    verificationEmailStatus: "sent" | "skipped" | "failed" | "already_verified";
   };
 };
 
@@ -305,6 +315,11 @@ export async function signUpDemo(payload: DemoSignUpPayload): Promise<DemoSignIn
 
 export async function requestPasswordReset(payload: { email: string }): Promise<ForgotPasswordResponse> {
   const response = await publicHttp.post<ForgotPasswordResponse>("/api/v1/auth/forgot-password", payload);
+  return response.data;
+}
+
+export async function resendEmailVerification(): Promise<ResendVerificationResponse> {
+  const response = await authenticatedHttp.post<ResendVerificationResponse>("/api/v1/auth/resend-verification");
   return response.data;
 }
 
