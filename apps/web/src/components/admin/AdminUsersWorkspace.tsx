@@ -1,6 +1,7 @@
 import { AxiosError } from "axios";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ArrowUpDown,
   Ban,
   CheckCircle2,
   Download,
@@ -1141,11 +1142,12 @@ export function AdminUsersWorkspace() {
     }
   }
 
+  const roleCounts = usersQuery.data?.globalSummary.roleCounts;
   const totalRegisteredUsersValue = usersQuery.data?.globalSummary.totalUsers.toLocaleString() ?? "0";
-  const totalUsersValue = usersQuery.data?.summary.totalUsers.toLocaleString() ?? "0";
-  const activeUsersValue = usersQuery.data?.summary.activeUsers.toLocaleString() ?? "0";
-  const verifiedUsersValue = usersQuery.data?.summary.verifiedUsers.toLocaleString() ?? "0";
-  const registrationWindowValue = usersQuery.data?.summary.registrationsInWindow.toLocaleString() ?? "0";
+  const studentsValue = roleCounts?.student.toLocaleString() ?? "0";
+  const lawyersValue = roleCounts?.lawyer.toLocaleString() ?? "0";
+  const judgesValue = roleCounts?.judge.toLocaleString() ?? "0";
+  const contentAdminsValue = roleCounts?.content_admin.toLocaleString() ?? "0";
   const selectedUserRoleCodes = selectedUserQuery.data?.roles.map((role) => role.code) ?? [];
   const canUpdateSelectedUserPassword =
     Boolean(selectedUserQuery.data) &&
@@ -1153,6 +1155,31 @@ export function AdminUsersWorkspace() {
   const visibleCreateRoles = isSuperAdmin
     ? usersQuery.data?.availableRoles ?? []
     : (usersQuery.data?.availableRoles ?? []).filter((role) => role.code === "student");
+
+  const selectedInstitutionName =
+    selectedUserQuery.data?.institution.name || selectedUserQuery.data?.institution.otherName || null;
+  const selectedInstitutionState = selectedUserQuery.data?.institution.state || null;
+
+  const selectedAccountOverviewItems = selectedUserQuery.data
+    ? ([
+        { label: "Registered", value: formatDateTimeDMY(selectedUserQuery.data.createdAt) },
+        { label: "Last active", value: formatDateTimeDMY(selectedUserQuery.data.lastActiveAt) },
+        { label: "Email verified", value: formatDateTimeDMY(selectedUserQuery.data.emailVerifiedAt) },
+        { label: "Profile type", value: prettifyEnum(selectedUserQuery.data.profileType) },
+        ...(selectedUserQuery.data.profileType === "student"
+          ? [
+              { label: "School", value: selectedInstitutionName ? selectedInstitutionName : "Not available" },
+              { label: "School state", value: selectedInstitutionState ? selectedInstitutionState : "Not available" }
+            ]
+          : [])
+      ] as const)
+    : ([] as const);
+
+  function toggleSort(nextSortBy: AdminUserListFilters["sortBy"]) {
+    const resolvedSortBy = nextSortBy ?? "createdAt";
+    const nextSortOrder = filters.sortBy === resolvedSortBy ? (filters.sortOrder === "asc" ? "desc" : "asc") : "asc";
+    updateFilters({ sortBy: resolvedSortBy, sortOrder: nextSortOrder });
+  }
 
   return (
     <>
@@ -1185,10 +1212,10 @@ export function AdminUsersWorkspace() {
         </section>
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <MiniMetric isDark={isDark} label="Total registered users" value={totalRegisteredUsersValue} />
-          <MiniMetric isDark={isDark} label="Active accounts" value={activeUsersValue} />
-          <MiniMetric isDark={isDark} label="Verified email" value={verifiedUsersValue} />
-          <MiniMetric isDark={isDark} label="Registrations" value={registrationWindowValue} />
+          <MiniMetric isDark={isDark} label="Students" value={studentsValue} />
+          <MiniMetric isDark={isDark} label="Lawyers" value={lawyersValue} />
+          <MiniMetric isDark={isDark} label="Judges" value={judgesValue} />
+          <MiniMetric isDark={isDark} label="Content admins" value={contentAdminsValue} />
         </div>
 
         <Surface className="p-5 lg:p-6" isDark={isDark}>
@@ -1274,7 +1301,24 @@ export function AdminUsersWorkspace() {
                 <thead>
                   <tr className={cn("text-left text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-400")}>
                     <th className="pb-4 pr-4 font-medium">User</th>
-                    <th className="pb-4 pr-4 font-medium">Role</th>
+                    <th className="pb-4 pr-4 font-medium">
+                      <button
+                        className={cn(
+                          "inline-flex items-center gap-2 transition",
+                          isDark ? "text-slate-500 hover:text-slate-300" : "text-slate-400 hover:text-slate-700"
+                        )}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          toggleSort("role");
+                        }}
+                        type="button"
+                      >
+                        Role
+                        <ArrowUpDown className="h-3.5 w-3.5" />
+                        {filters.sortBy === "role" ? <span className="text-[10px]">{filters.sortOrder === "asc" ? "ASC" : "DESC"}</span> : null}
+                      </button>
+                    </th>
                     <th className="pb-4 pr-4 font-medium">Status</th>
                     <th className="pb-4 pr-4 font-medium">Registered</th>
                     <th className="pb-4 pr-4 font-medium">Location</th>
@@ -1568,12 +1612,7 @@ export function AdminUsersWorkspace() {
               <Surface className="p-4" isDark={isDark}>
                 <p className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-400")}>Account overview</p>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                  {[
-                    { label: "Registered", value: formatDateTimeDMY(selectedUserQuery.data.createdAt) },
-                    { label: "Last active", value: formatDateTimeDMY(selectedUserQuery.data.lastActiveAt) },
-                    { label: "Email verified", value: formatDateTimeDMY(selectedUserQuery.data.emailVerifiedAt) },
-                    { label: "Profile type", value: prettifyEnum(selectedUserQuery.data.profileType) }
-                  ].map((item) => (
+                  {selectedAccountOverviewItems.map((item) => (
                     <CompactField isDark={isDark} key={item.label} label={item.label} value={item.value} />
                   ))}
                 </div>

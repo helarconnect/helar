@@ -16,7 +16,7 @@ const adminUserFiltersSchema = z.object({
   status: z.enum(["all", "ACTIVE", "PENDING", "SUSPENDED"]).optional().default("all"),
   registeredFrom: z.string().trim().optional(),
   registeredTo: z.string().trim().optional(),
-  sortBy: z.enum(["createdAt", "fullName", "email", "status"]).optional().default("createdAt"),
+  sortBy: z.enum(["createdAt", "fullName", "email", "status", "role"]).optional().default("createdAt"),
   sortOrder: z.enum(["asc", "desc"]).optional().default("desc"),
   page: z.coerce.number().int().min(1).optional().default(1),
   pageSize: z.coerce.number().int().min(1).max(100).optional().default(12)
@@ -249,6 +249,32 @@ function normalizeSearchValue(value: string | null | undefined) {
   return (value ?? "").trim().toLowerCase();
 }
 
+async function getGlobalRoleCounts() {
+  const roleCodes = ["student", "lawyer", "judge", "content_admin"] as const;
+
+  const counts = await Promise.all(
+    roleCodes.map(async (code) => {
+      const count = await prisma.user.count({
+        where: {
+          ...notDeletedUserWhere(),
+          roles: {
+            some: {
+              ...notDeletedUserRoleWhere(),
+              role: {
+                code
+              }
+            }
+          }
+        }
+      });
+
+      return [code, count] as const;
+    })
+  );
+
+  return Object.fromEntries(counts) as Record<(typeof roleCodes)[number], number>;
+}
+
 function matchesAdminUserSearch(
   user: {
     id: string;
@@ -301,8 +327,8 @@ function matchesAdminUserSearch(
 }
 
 function compareAdminUsers(
-  left: { createdAt: Date; email: string; fullName: string; status: string },
-  right: { createdAt: Date; email: string; fullName: string; status: string },
+  left: { createdAt: Date; email: string; fullName: string; status: string; roles?: Array<{ role: { code: string; name: string } }> },
+  right: { createdAt: Date; email: string; fullName: string; status: string; roles?: Array<{ role: { code: string; name: string } }> },
   sortBy: AdminUserFilters["sortBy"],
   sortOrder: AdminUserFilters["sortOrder"]
 ) {
@@ -310,6 +336,13 @@ function compareAdminUsers(
 
   if (sortBy === "createdAt") {
     return (left.createdAt.getTime() - right.createdAt.getTime()) * direction;
+  }
+
+  if (sortBy === "role") {
+    const leftRole = getPrimaryRoleName(left.roles ?? []);
+    const rightRole = getPrimaryRoleName(right.roles ?? []);
+    const roleComparison = leftRole.localeCompare(rightRole, undefined, { sensitivity: "base" }) * direction;
+    return roleComparison !== 0 ? roleComparison : left.fullName.localeCompare(right.fullName, undefined, { sensitivity: "base" }) * direction;
   }
 
   return left[sortBy].localeCompare(right[sortBy], undefined, { sensitivity: "base" }) * direction;
@@ -385,6 +418,15 @@ function getLastActiveAt(user: {
 }
 
 function getPrimaryRoleName(userRoles: Array<{ role: { code: string; name: string } }>) {
+  const precedence = ["super_admin", "content_admin", "judge", "lawyer", "student"];
+
+  for (const code of precedence) {
+    const found = userRoles.find((userRole) => userRole.role.code === code);
+    if (found) {
+      return found.role.name;
+    }
+  }
+
   return userRoles[0]?.role.name ?? "Unassigned";
 }
 
@@ -428,6 +470,7 @@ function normalizeUserSummary(user: {
   const latestSubscription = user.subscriptions[0];
   const latestPayment = user.payments[0];
   const lastActiveAt = getLastActiveAt(user);
+  const hasStudentRole = user.roles.some((userRole) => userRole.role.code === "student");
 
   return {
     id: user.id,
@@ -528,6 +571,7 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
         : { deletedAt: null })
     }
   });
+  const globalRoleCountsPromise = getGlobalRoleCounts();
   const search = filters.search.trim();
   const where = createUserWhere(filters);
   const baseWhere = createBaseUserWhere(filters);
@@ -538,7 +582,7 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
   const skip = (filters.page - 1) * filters.pageSize;
 
   if (usesMongoRuntime && search) {
-    const [allUsers, availableRoles, totalRegisteredUsers] = await Promise.all([
+    const [allUsers, availableRoles, totalRegisteredUsers, globalRoleCounts] = await Promise.all([
       prisma.user.findMany({
         where: baseWhere,
         include: {
@@ -603,7 +647,8 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
         }
       }),
       managedRolesPromise,
-      totalRegisteredUsersPromise
+      totalRegisteredUsersPromise,
+      globalRoleCountsPromise
     ]);
 
     const matchedUsers = allUsers
@@ -649,7 +694,8 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
 
     return {
       globalSummary: {
-        totalUsers: totalRegisteredUsers
+        totalUsers: totalRegisteredUsers,
+        roleCounts: globalRoleCounts
       },
       summary: {
         totalUsers: filteredTotal,
@@ -713,9 +759,9 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
     registrationsInWindow,
     registrationsInPreviousWindow,
     usersForTimeline,
-    pagedUsers,
     availableRoles,
-    totalRegisteredUsers
+    totalRegisteredUsers,
+    globalRoleCounts
   ] =
     await Promise.all([
       prisma.user.count({ where }),
@@ -770,77 +816,136 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
           createdAt: "asc"
         }
       }),
-      prisma.user.findMany({
-        where,
-        skip,
-        take: filters.pageSize,
-        orderBy: {
-          [filters.sortBy]: filters.sortOrder
-        },
-        include: {
-          roles: {
-            where: {
-              ...notDeletedUserRoleWhere()
-            },
-            include: {
-              role: true
-            }
+      managedRolesPromise,
+      totalRegisteredUsersPromise,
+      globalRoleCountsPromise
+    ]);
+
+  type UserFindManyArgs = NonNullable<Parameters<typeof prisma.user.findMany>[0]>;
+  type UserInclude = NonNullable<UserFindManyArgs["include"]>;
+
+  const includeForPagedUsers: UserInclude = {
+    roles: {
+      where: {
+        ...notDeletedUserRoleWhere()
+      },
+      include: {
+        role: true
+      }
+    },
+    devices: {
+      where: {
+        deletedAt: null
+      },
+      orderBy: {
+        lastSeenAt: "desc"
+      },
+      take: 5
+    },
+    sessions: {
+      where: {
+        deletedAt: null
+      },
+      orderBy: {
+        updatedAt: "desc"
+      },
+      take: 5
+    },
+    subscriptions: {
+      where: {
+        deletedAt: null
+      },
+      orderBy: {
+        createdAt: "desc"
+      },
+      take: 1,
+      include: {
+        plan: true
+      }
+    },
+    payments: {
+      where: {
+        deletedAt: null
+      },
+      orderBy: {
+        createdAt: "desc"
+      },
+      take: 1
+    },
+    _count: {
+      select: {
+        devices: true,
+        sessions: true,
+        payments: true,
+        topics: true,
+        answers: true,
+        comments: true,
+        replies: true
+      }
+    }
+  };
+
+  let pagedUsers: any[] = [];
+
+  if (filters.sortBy === "role") {
+    const sortCandidates = await prisma.user.findMany({
+      where,
+      select: {
+        id: true,
+        createdAt: true,
+        email: true,
+        fullName: true,
+        status: true,
+        roles: {
+          where: {
+            ...notDeletedUserRoleWhere()
           },
-          devices: {
-            where: {
-              deletedAt: null
-            },
-            orderBy: {
-              lastSeenAt: "desc"
-            },
-            take: 5
-          },
-          sessions: {
-            where: {
-              deletedAt: null
-            },
-            orderBy: {
-              updatedAt: "desc"
-            },
-            take: 5
-          },
-          subscriptions: {
-            where: {
-              deletedAt: null
-            },
-            orderBy: {
-              createdAt: "desc"
-            },
-            take: 1,
-            include: {
-              plan: true
-            }
-          },
-          payments: {
-            where: {
-              deletedAt: null
-            },
-            orderBy: {
-              createdAt: "desc"
-            },
-            take: 1
-          },
-          _count: {
-            select: {
-              devices: true,
-              sessions: true,
-              payments: true,
-              topics: true,
-              answers: true,
-              comments: true,
-              replies: true
+          select: {
+            role: {
+              select: {
+                code: true,
+                name: true
+              }
             }
           }
         }
-      }),
-      managedRolesPromise,
-      totalRegisteredUsersPromise
-    ]);
+      }
+    });
+
+    const sortedIds = sortCandidates
+      .slice()
+      .sort((left, right) => compareAdminUsers(left, right, filters.sortBy, filters.sortOrder))
+      .map((user) => user.id);
+
+    const pageIds = sortedIds.slice(skip, skip + filters.pageSize);
+
+    if (pageIds.length) {
+      const usersForPage = await prisma.user.findMany({
+        where: {
+          id: {
+            in: pageIds
+          }
+        },
+        include: includeForPagedUsers
+      });
+
+      const usersById = new Map(usersForPage.map((user) => [user.id, user]));
+      pagedUsers = pageIds.flatMap((id) => {
+        const user = usersById.get(id);
+        return user ? [user] : [];
+      });
+    }
+  } else {
+    pagedUsers = await prisma.user.findMany({
+      where,
+      skip,
+      take: filters.pageSize,
+      orderBy: {
+        [filters.sortBy]: filters.sortOrder
+      },
+      include: includeForPagedUsers
+    });
+  }
 
   const timelineMap = new Map<string, number>();
   const roleBreakdownMap = new Map<string, { code: string; name: string; count: number }>();
@@ -870,7 +975,8 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
 
   return {
     globalSummary: {
-      totalUsers: totalRegisteredUsers
+      totalUsers: totalRegisteredUsers,
+      roleCounts: globalRoleCounts
     },
     summary: {
       totalUsers: filteredTotal,
@@ -1080,6 +1186,7 @@ export async function getAdminUserDetail(userId: string) {
   }
 
   const lastActiveAt = getLastActiveAt(user);
+  const hasStudentRole = user.roles.some((userRole) => userRole.role.code === "student");
 
   return {
     id: user.id,
@@ -1103,12 +1210,17 @@ export async function getAdminUserDetail(userId: string) {
       postalCode: user.postalCode,
       country: user.country
     },
+    institution: {
+      name: user.institutionName ?? null,
+      state: user.institutionState ?? null,
+      otherName: user.institutionOtherName ?? null
+    },
     roles: user.roles.map((userRole) => ({
       code: userRole.role.code,
       name: userRole.role.name,
       description: userRole.role.description
     })),
-    profileType: user.student ? "student" : user.tutor ? "tutor" : "general",
+    profileType: user.student || hasStudentRole ? "student" : user.tutor ? "tutor" : "general",
     studentProfile: user.student
       ? {
           id: user.student.id,

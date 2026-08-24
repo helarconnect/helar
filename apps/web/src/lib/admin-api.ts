@@ -1058,7 +1058,7 @@ export type AdminUserListFilters = {
   registeredTo?: string;
   role?: string;
   search?: string;
-  sortBy?: "createdAt" | "fullName" | "email" | "status";
+  sortBy?: "createdAt" | "fullName" | "email" | "status" | "role";
   sortOrder?: "asc" | "desc";
   status?: "all" | "ACTIVE" | "PENDING" | "SUSPENDED";
 };
@@ -1107,6 +1107,11 @@ export type AdminUserDetail = {
     state: string | null;
   };
   avatarUrl: string | null;
+  institution: {
+    name: string | null;
+    otherName: string | null;
+    state: string | null;
+  };
   counts: {
     answers: number;
     certificates: number;
@@ -1206,6 +1211,12 @@ export type AdminUsersSnapshot = {
   }>;
   globalSummary: {
     totalUsers: number;
+    roleCounts: {
+      content_admin: number;
+      judge: number;
+      lawyer: number;
+      student: number;
+    };
   };
   metrics: DashboardMetric[];
   pagination: {
