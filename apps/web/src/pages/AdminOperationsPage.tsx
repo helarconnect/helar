@@ -166,6 +166,26 @@ function escapeHtml(value: string) {
     .replace(/'/g, '&#39;')
 }
 
+function decodeHtmlEntities(value: string) {
+  if (!value) return ''
+  return value
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/&#([0-9]+);/g, (_, dec) => String.fromCharCode(parseInt(dec, 10)))
+}
+
+function normalizePreviewText(value: string, maxLength = 140) {
+  const normalized = stripHtml(decodeHtmlEntities(value))
+  if (!normalized) return 'Untitled'
+  if (normalized.length <= maxLength) return normalized
+  return `${normalized.slice(0, maxLength).trim()}…`
+}
+
 function downloadBlob(blob: Blob, fileName: string) {
   const objectUrl = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
@@ -1185,14 +1205,17 @@ export function AdminContentReviewDetailPage() {
     }
     if (target.type === 'subject_summary_entry') {
       const original = data as Awaited<ReturnType<typeof fetchAdminSubjectSummaryEntryDetail>>
-      return editMode && draft ? (draft.question ?? original.question) : original.question
+      const value = editMode && draft ? (draft.question ?? original.question) : original.question
+      return normalizePreviewText(value)
     }
     if (target.type === 'bar_final_exam_question') {
       const original = data as Awaited<ReturnType<typeof fetchAdminBarFinalExamQuestionDetail>>
-      return editMode && draft ? (draft.question ?? original.question) : original.question
+      const value = editMode && draft ? (draft.question ?? original.question) : original.question
+      return normalizePreviewText(value)
     }
     const original = data as Awaited<ReturnType<typeof fetchAdminBarFinalExamMcqQuestionDetail>>
-    return editMode && draft ? (draft.question ?? original.question) : original.question
+    const value = editMode && draft ? (draft.question ?? original.question) : original.question
+    return normalizePreviewText(value)
   }, [data, draft, editMode, target])
 
   const approveMutation = useMutation({
@@ -2026,13 +2049,18 @@ function BarTheoryReview({ node, isDark }: { node: Awaited<ReturnType<typeof fet
             Exam date: {new Date(node.examDate).toLocaleDateString()}
           </p>
         ) : null}
-        <h4 className={cn('mt-3 font-heading text-xl', isDark ? 'text-white' : 'text-slate-950')}>{node.question}</h4>
+        <div className="mt-4">
+          <SectionHeading isDark={isDark}>Question</SectionHeading>
+          <div className="mt-3">
+            <RichTextContent html={decodeHtmlEntities(node.question)} isDark={isDark} />
+          </div>
+        </div>
       </ReviewBlock>
 
       {node.answer?.trim() ? (
         <ReviewBlock isDark={isDark}>
           <SectionHeading isDark={isDark}>Model answer</SectionHeading>
-          <div className="mt-3"><RichTextContent html={node.answer} isDark={isDark} /></div>
+          <div className="mt-3"><RichTextContent html={decodeHtmlEntities(node.answer)} isDark={isDark} /></div>
         </ReviewBlock>
       ) : null}
     </div>
@@ -2051,7 +2079,12 @@ function BarMcqReview({ node, isDark }: { node: Awaited<ReturnType<typeof fetchA
             Exam date: {new Date(node.examDate).toLocaleDateString()}
           </p>
         ) : null}
-        <h4 className={cn('mt-3 font-heading text-xl', isDark ? 'text-white' : 'text-slate-950')}>{node.question}</h4>
+        <div className="mt-4">
+          <SectionHeading isDark={isDark}>Question</SectionHeading>
+          <div className="mt-3">
+            <RichTextContent html={decodeHtmlEntities(node.question)} isDark={isDark} />
+          </div>
+        </div>
       </ReviewBlock>
 
       {options.length ? (

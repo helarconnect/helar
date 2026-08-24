@@ -59,6 +59,48 @@ function isSuperAdmin(roleCodes: string[]) {
   return hasRole(roleCodes, "super_admin");
 }
 
+function decodeHtmlEntities(value: string) {
+  if (!value) {
+    return "";
+  }
+
+  const replaced = value
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
+
+  return replaced
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/&#([0-9]+);/g, (_, dec) => String.fromCharCode(parseInt(dec, 10)));
+}
+
+function stripHtml(value: string) {
+  return value
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildPreviewTitle(value: string | null | undefined) {
+  const normalized = stripHtml(decodeHtmlEntities(value ?? ""));
+
+  if (!normalized) {
+    return "Untitled";
+  }
+
+  const maxLength = 180;
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxLength).trim()}…`;
+}
+
 async function createNotification(
   userId: string,
   title: string,
@@ -298,7 +340,7 @@ async function listPendingApprovalItems() {
       createdAt: item.updatedAt.toISOString(),
       id: `subject-summary-entry-${item.id}`,
       resourceId: item.id,
-      title: item.question,
+      title: buildPreviewTitle(item.question),
       type: "subject_summary_entry"
     })),
     ...pendingBarFinalExamQuestions.map<AdminNotificationCenterItem>((item) => ({
@@ -308,7 +350,7 @@ async function listPendingApprovalItems() {
       createdAt: item.updatedAt.toISOString(),
       id: `bar-final-exam-question-${item.id}`,
       resourceId: item.id,
-      title: item.question,
+      title: buildPreviewTitle(item.question),
       type: "bar_final_exam_question"
     }))
   ].sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
@@ -549,7 +591,7 @@ export async function getSuperAdminApprovalQueue(): Promise<AdminApprovalQueueSn
       submittedBy: actor.fullName,
       submittedRoleLabel: "Content Admin",
       subtitle: `${item.subject.name} revision guide`,
-      title: item.question,
+      title: buildPreviewTitle(item.question),
       type: "subject_summary_entry"
     };
   });
@@ -567,7 +609,7 @@ export async function getSuperAdminApprovalQueue(): Promise<AdminApprovalQueueSn
       submittedBy: actor.fullName,
       submittedRoleLabel: "Content Admin",
       subtitle: `${item.subject.name} bar final exams`,
-      title: item.question,
+      title: buildPreviewTitle(item.question),
       type: "bar_final_exam_question"
     };
   });
@@ -586,7 +628,7 @@ export async function getSuperAdminApprovalQueue(): Promise<AdminApprovalQueueSn
       submittedBy: actor.fullName,
       submittedRoleLabel: "Content Admin",
       subtitle: `${item.subject.name} bar final exams MCQ`,
-      title: item.question,
+      title: buildPreviewTitle(item.question),
       type: "bar_final_exam_mcq_question"
     };
   });
