@@ -270,7 +270,9 @@ function getGoogleMailConfig(): GoogleMailConfig | null {
   const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim() ?? "";
   const refreshToken = process.env.GOOGLE_OAUTH_REFRESH_TOKEN?.trim() ?? "";
   const smtpHost = process.env.MAIL_HOST?.trim() ?? "";
-  const smtpPort = Number.parseInt(process.env.MAIL_PORT?.trim() ?? "", 10);
+  const smtpPortRaw = process.env.MAIL_PORT?.trim() ?? "";
+  const smtpPortParsed = Number.parseInt(smtpPortRaw, 10);
+  const smtpPort = Number.isFinite(smtpPortParsed) ? smtpPortParsed : smtpHost ? 587 : NaN;
   const smtpSecureRaw = process.env.MAIL_SECURE?.trim().toLowerCase();
   const smtpSecure =
     smtpSecureRaw === "true" ? true : smtpSecureRaw === "false" ? false : smtpPort === 465;

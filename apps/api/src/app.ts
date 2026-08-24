@@ -1360,23 +1360,29 @@ async function persistRegister(payload: z.infer<typeof registerSchema>) {
   const apiUser = normalizeUser(createdSession.user);
   const emailVerificationToken = createEmailVerificationToken(createdSession.user.id, createdSession.user.email);
   const emailVerificationUrl = createEmailVerificationUrl(emailVerificationToken);
+  let verificationEmailStatus: "sent" | "skipped" | "failed" = "failed";
 
   try {
-    await sendRegistrationVerificationEmails({
+    const result = await sendRegistrationVerificationEmails({
       email: createdSession.user.email,
       fullName: createdSession.user.fullName,
       roleCodes: [payload.registrationRole],
       verificationUrl: emailVerificationUrl
     });
+    verificationEmailStatus = result.skipped ? "skipped" : "sent";
   } catch (error) {
     console.error("Failed to send registration verification emails:", error);
+    verificationEmailStatus = "failed";
   }
 
   return {
     status: 201 as const,
     body: {
       success: true,
-      data: createSessionPayload(apiUser, createdSession.refreshToken)
+      data: createSessionPayload(apiUser, createdSession.refreshToken),
+      meta: {
+        verificationEmailStatus
+      }
     }
   };
 }

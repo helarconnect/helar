@@ -1,13 +1,68 @@
 import { AxiosError } from "axios";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
-import { ArrowRight } from "lucide-react";
+import { AlertCircle, ArrowRight, CheckCircle2, X } from "lucide-react";
+import { useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useForm } from "react-hook-form";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { z } from "zod";
 
 import { signInDemo, signUpDemo } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth-store";
+
+type ToastTone = "error" | "success";
+
+function ToastViewport({
+  onDismiss,
+  toasts
+}: {
+  onDismiss: (id: number) => void;
+  toasts: Array<{ id: number; message: string; tone: ToastTone }>;
+}) {
+  if (!toasts.length || typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
+    <div className="pointer-events-none fixed inset-x-0 top-0 z-[999] flex justify-end px-4 pt-4 sm:px-6 sm:pt-6">
+      <div className="flex w-full max-w-sm flex-col gap-3">
+        {toasts.map((toast) => {
+          const Icon = toast.tone === "success" ? CheckCircle2 : AlertCircle;
+          return (
+            <div
+              className={cn(
+                "pointer-events-auto rounded-[22px] border px-4 py-4 shadow-[0_18px_50px_rgba(15,23,42,0.18)]",
+                toast.tone === "success"
+                  ? "border-emerald-500/30 bg-slate-950/95 text-emerald-100"
+                  : "border-rose-500/30 bg-slate-950/95 text-rose-100"
+              )}
+              key={toast.id}
+              role="status"
+            >
+              <div className="flex items-start gap-3">
+                <Icon className="mt-0.5 h-4 w-4" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium leading-6">{toast.message}</p>
+                </div>
+                <button
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-300 transition hover:bg-white/10"
+                  onClick={() => onDismiss(toast.id)}
+                  type="button"
+                >
+                  <span className="sr-only">Dismiss</span>
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>,
+    document.body
+  );
+}
 
 const baseAuthSchema = z.object({
   fullName: z.string().trim().max(80, "Full name is too long.").optional(),
@@ -59,6 +114,19 @@ export function AuthPlaceholderPage({ mode }: AuthPlaceholderPageProps) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const setSession = useAuthStore((state) => state.setSession);
+  const [toasts, setToasts] = useState<Array<{ id: number; message: string; tone: ToastTone }>>([]);
+  const toastCounterRef = useRef(0);
+
+  function showToast(message: string, tone: ToastTone) {
+    toastCounterRef.current += 1;
+    const id = toastCounterRef.current;
+    setToasts((current) => [...current, { id, message, tone }]);
+    window.setTimeout(() => dismissToast(id), 4500);
+  }
+
+  function dismissToast(id: number) {
+    setToasts((current) => current.filter((toast) => toast.id !== id));
+  }
 
   const form = useForm<AuthFormValues>({
     resolver: zodResolver(isSignIn ? signInSchema : signUpSchema),
@@ -106,7 +174,25 @@ export function AuthPlaceholderPage({ mode }: AuthPlaceholderPageProps) {
           : safeRedirectTarget;
 
       setSession(response.data);
-      navigate(destination, { replace: true });
+      if (isSignIn) {
+        showToast("Signed in successfully.", "success");
+      } else if (response.meta?.verificationEmailStatus === "sent") {
+        showToast("Account created successfully. Activation email sent.", "success");
+      } else if (response.meta?.verificationEmailStatus === "skipped") {
+        showToast("Account created successfully. Activation email is not configured yet.", "error");
+      } else if (response.meta?.verificationEmailStatus === "failed") {
+        showToast("Account created successfully. Activation email could not be sent.", "error");
+      } else {
+        showToast("Account created successfully.", "success");
+      }
+      window.setTimeout(() => navigate(destination, { replace: true }), 650);
+    },
+    onError: (error) => {
+      const message =
+        error instanceof AxiosError
+          ? error.response?.data?.error?.message ?? "We could not complete this request right now."
+          : "We could not complete this request right now.";
+      showToast(message, "error");
     }
   });
 
@@ -123,6 +209,7 @@ export function AuthPlaceholderPage({ mode }: AuthPlaceholderPageProps) {
 
   return (
     <div className="auth-cosmos">
+      <ToastViewport onDismiss={dismissToast} toasts={toasts} />
       <div className="auth-orb auth-orb-primary" />
       <div className="auth-orb auth-orb-secondary" />
       <div className="auth-grid" />
@@ -237,12 +324,6 @@ export function AuthPlaceholderPage({ mode }: AuthPlaceholderPageProps) {
             {authMutation.isError ? (
               <div className="auth-status-card">
                 <p>{authErrorMessage}</p>
-              </div>
-            ) : null}
-
-            {authMutation.isSuccess ? (
-              <div className="auth-status-card">
-                <p>{isSignIn ? "Signed in successfully. Redirecting you now." : "Account created successfully. Redirecting you now."}</p>
               </div>
             ) : null}
 

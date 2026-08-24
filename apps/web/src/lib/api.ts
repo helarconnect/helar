@@ -51,6 +51,9 @@ export type DemoSignInResponse = {
       country?: string | null;
     };
   };
+  meta?: {
+    verificationEmailStatus?: "sent" | "skipped" | "failed";
+  };
 };
 
 export type DemoAuthPayload = {
