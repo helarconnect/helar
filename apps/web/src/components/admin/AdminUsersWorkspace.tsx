@@ -743,8 +743,12 @@ export function AdminUsersWorkspace() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.adminUsers(filters) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.adminUserDetail(updatedUser.id) });
     },
-    onError: () => {
-      showToast("Could not update the user roles right now.", "error");
+    onError: (error) => {
+      const errorMessage =
+        error instanceof AxiosError
+          ? error.response?.data?.error?.message ?? "Could not update the user roles right now."
+          : "Could not update the user roles right now.";
+      showToast(errorMessage, "error");
     }
   });
 
@@ -755,8 +759,12 @@ export function AdminUsersWorkspace() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.adminUsers(filters) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.adminUserDetail(updatedUser.id) });
     },
-    onError: () => {
-      showToast("Could not update the user profile right now.", "error");
+    onError: (error) => {
+      const errorMessage =
+        error instanceof AxiosError
+          ? error.response?.data?.error?.message ?? "Could not update the user profile right now."
+          : "Could not update the user profile right now.";
+      showToast(errorMessage, "error");
     }
   });
 

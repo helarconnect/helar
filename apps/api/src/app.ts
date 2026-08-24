@@ -3171,8 +3171,11 @@ export function createApp(options: AppOptions = {}) {
     }
 
     if (!useDatabase && allowAuthFallback) {
+      const localPart = parsed.data.email.split("@")[0]?.toLowerCase() ?? "";
+      const fallbackRoleCodes = localPart.includes("admin") ? undefined : [parsed.data.registrationRole];
       const fallbackUser = buildFallbackUser(parsed.data.email, {
-        fullName: parsed.data.fullName
+        fullName: parsed.data.fullName,
+        ...(fallbackRoleCodes ? { roleCodes: fallbackRoleCodes } : {})
       });
       return response.status(201).json({
         success: true,
@@ -3196,8 +3199,11 @@ export function createApp(options: AppOptions = {}) {
 
       console.error(error);
       if (allowAuthFallback) {
+        const localPart = parsed.data.email.split("@")[0]?.toLowerCase() ?? "";
+        const fallbackRoleCodes = localPart.includes("admin") ? undefined : [parsed.data.registrationRole];
         const fallbackUser = buildFallbackUser(parsed.data.email, {
-          fullName: parsed.data.fullName
+          fullName: parsed.data.fullName,
+          ...(fallbackRoleCodes ? { roleCodes: fallbackRoleCodes } : {})
         });
         return response.status(201).json({
           success: true,
@@ -9924,6 +9930,16 @@ export function createApp(options: AppOptions = {}) {
               code: "VALIDATION_ERROR",
               message: "The roles update payload is invalid.",
               details: error.flatten()
+            }
+          });
+        }
+
+        if (error instanceof Error && (error.message.startsWith("Unknown role codes:") || error.message === "At least one role code is required.")) {
+          return response.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: error.message
             }
           });
         }

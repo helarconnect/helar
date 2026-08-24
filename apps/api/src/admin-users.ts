@@ -8,6 +8,7 @@ import { containsText } from "./lib/text-search.js";
 import { runInTransaction } from "./lib/transactions.js";
 
 type UserWhereInput = NonNullable<NonNullable<Parameters<typeof prisma.user.findMany>[0]>["where"]>;
+type UserRoleWhereInput = NonNullable<NonNullable<Parameters<typeof prisma.userRole.findMany>[0]>["where"]>;
 
 const adminUserFiltersSchema = z.object({
   search: z.string().trim().max(120).optional().default(""),
@@ -77,6 +78,14 @@ const adminManagedRoles = [
 
 const activeDatabaseUrl = process.env.DATABASE_URL ?? "";
 const usesMongoRuntime = activeDatabaseUrl.startsWith("mongodb");
+
+function notDeletedUserWhere(): UserWhereInput {
+  return usesMongoRuntime ? { OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }] } : { deletedAt: null };
+}
+
+function notDeletedUserRoleWhere(): UserRoleWhereInput {
+  return usesMongoRuntime ? { OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }] } : { deletedAt: null };
+}
 
 export type AdminUserFilters = z.infer<typeof adminUserFiltersSchema>;
 export type AdminUserStatusInput = z.infer<typeof adminUserStatusSchema>;
@@ -1488,7 +1497,7 @@ export async function updateAdminUserStatus(userId: string, nextStatus: AdminUse
   const user = await prisma.user.findFirst({
     where: {
       id: userId,
-      deletedAt: null
+      ...notDeletedUserWhere()
     },
     select: {
       id: true,
@@ -1553,7 +1562,7 @@ export async function updateAdminUserRoles(userId: string, roleCodes: string[], 
     prisma.user.findFirst({
       where: {
         id: userId,
-        deletedAt: null
+        ...notDeletedUserWhere()
       },
       select: {
         id: true,
@@ -1564,7 +1573,7 @@ export async function updateAdminUserRoles(userId: string, roleCodes: string[], 
     prisma.userRole.findMany({
       where: {
         userId,
-        deletedAt: null
+        ...notDeletedUserRoleWhere()
       },
       include: {
         role: true
@@ -1669,7 +1678,7 @@ export async function updateAdminUserProfile(userId: string, input: AdminUserPro
   const existingUser = await prisma.user.findFirst({
     where: {
       id: userId,
-      deletedAt: null
+      ...notDeletedUserWhere()
     },
     select: {
       id: true,
@@ -1692,7 +1701,7 @@ export async function updateAdminUserProfile(userId: string, input: AdminUserPro
   const conflictingUser = await prisma.user.findFirst({
     where: {
       email: input.email,
-      deletedAt: null,
+      ...notDeletedUserWhere(),
       NOT: {
         id: userId
       }
@@ -1760,14 +1769,14 @@ export async function updateAdminUserPassword(
   const targetUser = await prisma.user.findFirst({
     where: {
       id: userId,
-      deletedAt: null
+      ...notDeletedUserWhere()
     },
     select: {
       id: true,
       fullName: true,
       roles: {
         where: {
-          deletedAt: null
+          ...notDeletedUserRoleWhere()
         },
         select: {
           role: {
