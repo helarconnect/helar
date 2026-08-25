@@ -561,32 +561,66 @@ export async function listStudentStudyDownloads(userId: string, query: z.infer<t
 
 export async function searchStudentStudyCenter(userId: string, query: z.infer<typeof searchQuerySchema>) {
   const dateRange = parseSearchDateRange(query.query);
+  const terms = query.query
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .map((term) => term.trim())
+    .filter((term) => term.length >= 2);
+
+  const bookmarkTermsWhere: Prisma.StudentStudyBookmarkWhereInput = {
+    AND: terms.map((term) => ({
+      OR: [{ title: containsText(term) }, { subjectName: containsText(term) }, { topicName: containsText(term) }]
+    }))
+  };
+  const notesTermsWhere: Prisma.StudentStudyNoteWhereInput = {
+    AND: terms.map((term) => ({
+      OR: [
+        { title: containsText(term) },
+        { referenceTitle: containsText(term) },
+        { contentPlainText: containsText(term) }
+      ]
+    }))
+  };
+  const downloadsTermsWhere: Prisma.StudentStudyDownloadWhereInput = {
+    AND: terms.map((term) => ({
+      OR: [{ fileName: containsText(term) }, { title: containsText(term) }]
+    }))
+  };
+  const historyTermsWhere: Prisma.StudentStudyProgressWhereInput = {
+    AND: terms.map((term) => ({
+      OR: [{ title: containsText(term) }, { subjectName: containsText(term) }, { topicName: containsText(term) }]
+    }))
+  };
+
   const [bookmarks, notes, downloads, history] = await Promise.all([
     prisma.studentStudyBookmark.findMany({
       where: {
         ...notDeletedStudyBookmarkWhere,
         userId,
-        OR: [
-          { title: containsText(query.query) },
-          { subjectName: containsText(query.query) },
-          { topicName: containsText(query.query) },
-          ...(dateRange
-            ? [
+        ...(dateRange
+          ? {
+              OR: [
+                bookmarkTermsWhere,
                 {
-                  createdAt: {
-                    gte: dateRange.start,
-                    lt: dateRange.end
-                  }
-                },
-                {
-                  updatedAt: {
-                    gte: dateRange.start,
-                    lt: dateRange.end
-                  }
+                  OR: [
+                    {
+                      createdAt: {
+                        gte: dateRange.start,
+                        lt: dateRange.end
+                      }
+                    },
+                    {
+                      updatedAt: {
+                        gte: dateRange.start,
+                        lt: dateRange.end
+                      }
+                    }
+                  ]
                 }
               ]
-            : [])
-        ]
+            }
+          : bookmarkTermsWhere)
       },
       orderBy: [{ updatedAt: "desc" }],
       take: 5
@@ -595,27 +629,29 @@ export async function searchStudentStudyCenter(userId: string, query: z.infer<ty
       where: {
         ...notDeletedStudyNoteWhere,
         userId,
-        OR: [
-          { title: containsText(query.query) },
-          { referenceTitle: containsText(query.query) },
-          { contentPlainText: containsText(query.query) },
-          ...(dateRange
-            ? [
+        ...(dateRange
+          ? {
+              OR: [
+                notesTermsWhere,
                 {
-                  createdAt: {
-                    gte: dateRange.start,
-                    lt: dateRange.end
-                  }
-                },
-                {
-                  updatedAt: {
-                    gte: dateRange.start,
-                    lt: dateRange.end
-                  }
+                  OR: [
+                    {
+                      createdAt: {
+                        gte: dateRange.start,
+                        lt: dateRange.end
+                      }
+                    },
+                    {
+                      updatedAt: {
+                        gte: dateRange.start,
+                        lt: dateRange.end
+                      }
+                    }
+                  ]
                 }
               ]
-            : [])
-        ]
+            }
+          : notesTermsWhere)
       },
       orderBy: [{ updatedAt: "desc" }],
       take: 5
@@ -624,11 +660,10 @@ export async function searchStudentStudyCenter(userId: string, query: z.infer<ty
       where: {
         ...notDeletedStudyDownloadWhere,
         userId,
-        OR: [
-          { fileName: containsText(query.query) },
-          { title: containsText(query.query) },
-          ...(dateRange
-            ? [
+        ...(dateRange
+          ? {
+              OR: [
+                downloadsTermsWhere,
                 {
                   createdAt: {
                     gte: dateRange.start,
@@ -636,8 +671,8 @@ export async function searchStudentStudyCenter(userId: string, query: z.infer<ty
                   }
                 }
               ]
-            : [])
-        ]
+            }
+          : downloadsTermsWhere)
       },
       orderBy: [{ createdAt: "desc" }],
       take: 5
@@ -646,33 +681,35 @@ export async function searchStudentStudyCenter(userId: string, query: z.infer<ty
       where: {
         ...notDeletedStudyProgressWhere,
         userId,
-        OR: [
-          { title: containsText(query.query) },
-          { subjectName: containsText(query.query) },
-          { topicName: containsText(query.query) },
-          ...(dateRange
-            ? [
+        ...(dateRange
+          ? {
+              OR: [
+                historyTermsWhere,
                 {
-                  createdAt: {
-                    gte: dateRange.start,
-                    lt: dateRange.end
-                  }
-                },
-                {
-                  updatedAt: {
-                    gte: dateRange.start,
-                    lt: dateRange.end
-                  }
-                },
-                {
-                  lastOpenedAt: {
-                    gte: dateRange.start,
-                    lt: dateRange.end
-                  }
+                  OR: [
+                    {
+                      createdAt: {
+                        gte: dateRange.start,
+                        lt: dateRange.end
+                      }
+                    },
+                    {
+                      updatedAt: {
+                        gte: dateRange.start,
+                        lt: dateRange.end
+                      }
+                    },
+                    {
+                      lastOpenedAt: {
+                        gte: dateRange.start,
+                        lt: dateRange.end
+                      }
+                    }
+                  ]
                 }
               ]
-            : [])
-        ]
+            }
+          : historyTermsWhere)
       },
       orderBy: [{ lastOpenedAt: "desc" }],
       take: 6

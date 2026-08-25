@@ -318,10 +318,21 @@ function normalizeSearchText(value: string | null | undefined) {
   return stripHtml(value ?? "").toLowerCase();
 }
 
+function tokenizeSearchQuery(query: string) {
+  return query
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .map((term) => term.trim())
+    .filter((term) => term.length >= 2);
+}
+
 function matchesSearch(query: string, ...values: Array<string | null | undefined>) {
-  const needle = query.trim().toLowerCase();
-  if (!needle) return true;
-  return values.some((value) => normalizeSearchText(value).includes(needle));
+  const terms = tokenizeSearchQuery(query);
+  if (!terms.length) return true;
+  const haystack = values.map((value) => normalizeSearchText(value)).filter(Boolean).join(" • ");
+  if (!haystack) return false;
+  return terms.every((term) => haystack.includes(term));
 }
 
 function calculateEstimatedMinutesFromBody(body: string) {
@@ -1808,43 +1819,54 @@ async function searchLibraryMaterials({ limit, query }: AdminLibrarySearchQuery,
   const categoryIds = categories.map((category) => category.id);
   const categoryById = new Map(categories.map((category) => [category.id, category]));
   const dateRange = parseSearchDateRange(query);
+  const terms = tokenizeSearchQuery(query);
+  const notDeletedWhere = { OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }] };
   const materialWhere: Prisma.StudyMaterialWhereInput = {
     categoryId: {
       in: categoryIds
     },
-    deletedAt: null,
-    ...(audience === "student" ? { publicationStatus: ContentPublicationStatus.PUBLISHED } : {})
+    ...(audience === "student" ? { publicationStatus: ContentPublicationStatus.PUBLISHED } : {}),
+    AND: [notDeletedWhere]
   };
+  const termsWhere: Prisma.StudyMaterialWhereInput = {
+    AND: terms.map((term) => ({
+      OR: [
+        {
+          title: containsText(term)
+        },
+        {
+          reportNumber: containsText(term)
+        },
+        {
+          storageUrl: containsText(term)
+        },
+        {
+          summary: containsText(term)
+        },
+        {
+          body: containsText(term)
+        }
+      ]
+    }))
+  };
+  const dateWhere: Prisma.StudyMaterialWhereInput | null = dateRange
+    ? {
+        reportDate: {
+          gte: dateRange.start,
+          lt: dateRange.end
+        }
+      }
+    : null;
 
   const materials = await prisma.studyMaterial.findMany({
     where: {
-      ...materialWhere,
-      OR: [
-        {
-          title: containsText(query)
-        },
-        {
-          reportNumber: containsText(query)
-        },
-        {
-          storageUrl: containsText(query)
-        },
-        {
-          summary: containsText(query)
-        },
-        {
-          body: containsText(query)
-        },
-        ...(dateRange
-          ? [
-              {
-                reportDate: {
-                  gte: dateRange.start,
-                  lt: dateRange.end
-                }
-              }
-            ]
-          : [])
+      AND: [
+        materialWhere,
+        dateWhere
+          ? {
+              OR: [termsWhere, dateWhere]
+            }
+          : termsWhere
       ]
     },
     orderBy: {
@@ -1866,9 +1888,20 @@ async function searchLibraryMaterials({ limit, query }: AdminLibrarySearchQuery,
   let matchingChunks: Array<{ content: string; field: number; materialId: string }> = [];
 
   try {
+    const chunkNeedle: Prisma.StudyMaterialBodyChunkWhereInput =
+      terms.length > 1
+        ? {
+            OR: terms.map((term) => ({
+              content: containsText(term)
+            }))
+          }
+        : {
+            content: containsText(query)
+          };
+
     matchingChunks = await prisma.studyMaterialBodyChunk.findMany({
       where: {
-        content: containsText(query)
+        ...chunkNeedle
       },
       orderBy: {
         updatedAt: "desc"

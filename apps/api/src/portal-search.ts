@@ -4,6 +4,8 @@ import { prisma } from "./lib/prisma.js";
 import { parseSearchDateRange, parseSearchYear } from "./lib/search-utils.js";
 import { containsText } from "./lib/text-search.js";
 
+const notDeletedWhere = { OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }] };
+
 const adminPortalSearchQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(8).default(5),
   query: z.string().trim().min(2).max(120)
@@ -27,6 +29,14 @@ export type AdminPortalSearchGroup = {
   label: string;
 };
 
+type AdminPortalSearchResponse = {
+  groups: AdminPortalSearchGroup[];
+  totalResults: number;
+};
+
+const adminSearchCache = new Map<string, { expiresAt: number; value: AdminPortalSearchResponse }>();
+const adminSearchCacheTtlMs = 10_000;
+
 function stripHtml(value: string | null | undefined) {
   if (!value) {
     return "";
@@ -49,14 +59,28 @@ function normalizeSearchText(value: string | null | undefined) {
   return stripHtml(value).toLowerCase();
 }
 
-function matchesSearch(query: string, ...values: Array<string | null | undefined>) {
-  const normalizedQuery = query.trim().toLowerCase();
+function tokenizeSearchQuery(query: string) {
+  return query
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .map((term) => term.trim())
+    .filter((term) => term.length >= 2);
+}
 
-  if (!normalizedQuery) {
+function matchesSearch(query: string, ...values: Array<string | null | undefined>) {
+  const terms = tokenizeSearchQuery(query);
+
+  if (!terms.length) {
     return true;
   }
 
-  return values.some((value) => normalizeSearchText(value).includes(normalizedQuery));
+  const haystack = values.map((value) => normalizeSearchText(value)).filter(Boolean).join(" • ");
+  if (!haystack) {
+    return false;
+  }
+
+  return terms.every((term) => haystack.includes(term));
 }
 
 async function settleOrFallback<T>(promise: Promise<T>, fallback: T): Promise<T> {
@@ -195,33 +219,64 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
   const limit = query.limit;
   const dateRange = parseSearchDateRange(search);
   const yearQuery = parseSearchYear(search);
+  const cacheKey = `${limit}:${search.toLowerCase()}`;
+  const cached = adminSearchCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+
+  const terms = tokenizeSearchQuery(search);
+  const candidateTake = Math.min(Math.max(limit * 90, 240), 900);
 
   const usersPromise = prisma.user.findMany({
       where: {
-        deletedAt: null,
-        OR: [
-          { fullName: containsText(search) },
-          { email: containsText(search) },
-          { phoneNumber: containsText(search) },
-          { city: containsText(search) },
-          { state: containsText(search) },
-          { country: containsText(search) },
-          ...(dateRange
-            ? [
-                {
-                  createdAt: {
-                    gte: dateRange.start,
-                    lt: dateRange.end
+        AND: [
+          notDeletedWhere,
+          dateRange
+            ? {
+                OR: [
+                  {
+                    AND: terms.map((term) => ({
+                      OR: [
+                        { fullName: containsText(term) },
+                        { email: containsText(term) },
+                        { phoneNumber: containsText(term) },
+                        { city: containsText(term) },
+                        { state: containsText(term) },
+                        { country: containsText(term) }
+                      ]
+                    }))
+                  },
+                  {
+                    OR: [
+                      {
+                        createdAt: {
+                          gte: dateRange.start,
+                          lt: dateRange.end
+                        }
+                      },
+                      {
+                        updatedAt: {
+                          gte: dateRange.start,
+                          lt: dateRange.end
+                        }
+                      }
+                    ]
                   }
-                },
-                {
-                  updatedAt: {
-                    gte: dateRange.start,
-                    lt: dateRange.end
-                  }
-                }
-              ]
-            : [])
+                ]
+              }
+            : {
+                AND: terms.map((term) => ({
+                  OR: [
+                    { fullName: containsText(term) },
+                    { email: containsText(term) },
+                    { phoneNumber: containsText(term) },
+                    { city: containsText(term) },
+                    { state: containsText(term) },
+                    { country: containsText(term) }
+                  ]
+                }))
+              }
         ]
       },
       orderBy: {
@@ -231,7 +286,7 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
       include: {
         roles: {
           where: {
-            deletedAt: null
+            ...notDeletedWhere
           },
           include: {
             role: {
@@ -246,40 +301,59 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
     });
   const libraryPromise = prisma.studyMaterial.findMany({
       where: {
-        deletedAt: null,
-        OR: [
-          { title: containsText(search) },
-          { reportNumber: containsText(search) },
-          { storageUrl: containsText(search) },
-          { summary: containsText(search) },
-          { body: containsText(search) },
-          ...(dateRange
-            ? [
-                {
-                  reportDate: {
-                    gte: dateRange.start,
-                    lt: dateRange.end
+        AND: [
+          notDeletedWhere,
+          dateRange
+            ? {
+                OR: [
+                  {
+                    AND: terms.map((term) => ({
+                      OR: [
+                        { title: containsText(term) },
+                        { reportNumber: containsText(term) },
+                        { storageUrl: containsText(term) },
+                        { summary: containsText(term) },
+                        { body: containsText(term) },
+                        { category: { name: containsText(term) } }
+                      ]
+                    }))
+                  },
+                  {
+                    OR: [
+                      {
+                        reportDate: {
+                          gte: dateRange.start,
+                          lt: dateRange.end
+                        }
+                      },
+                      {
+                        createdAt: {
+                          gte: dateRange.start,
+                          lt: dateRange.end
+                        }
+                      },
+                      {
+                        updatedAt: {
+                          gte: dateRange.start,
+                          lt: dateRange.end
+                        }
+                      }
+                    ]
                   }
-                },
-                {
-                  createdAt: {
-                    gte: dateRange.start,
-                    lt: dateRange.end
-                  }
-                },
-                {
-                  updatedAt: {
-                    gte: dateRange.start,
-                    lt: dateRange.end
-                  }
-                }
-              ]
-            : []),
-          {
-            category: {
-              name: containsText(search)
-            }
-          }
+                ]
+              }
+            : {
+                AND: terms.map((term) => ({
+                  OR: [
+                    { title: containsText(term) },
+                    { reportNumber: containsText(term) },
+                    { storageUrl: containsText(term) },
+                    { summary: containsText(term) },
+                    { body: containsText(term) },
+                    { category: { name: containsText(term) } }
+                  ]
+                }))
+              }
         ]
       },
       orderBy: {
@@ -297,8 +371,14 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
     });
   const subjectsPromise = prisma.subjectSummarySubject.findMany({
       where: {
-        deletedAt: null,
-        OR: [{ name: containsText(search) }, { description: containsText(search) }]
+        AND: [
+          notDeletedWhere,
+          {
+            AND: terms.map((term) => ({
+              OR: [{ name: containsText(term) }, { description: containsText(term) }]
+            }))
+          }
+        ]
       },
       orderBy: [{ displayOrder: "asc" }, { updatedAt: "desc" }],
       take: limit,
@@ -310,17 +390,25 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
     });
   const topicsPromise = prisma.subjectSummaryTopic.findMany({
       where: {
-        deletedAt: null,
-        subject: {
-          deletedAt: null
-        },
-        OR: [
-          { name: containsText(search) },
-          { description: containsText(search) },
+        AND: [
+          notDeletedWhere,
           {
             subject: {
-              name: containsText(search)
+              ...notDeletedWhere
             }
+          },
+          {
+            AND: terms.map((term) => ({
+              OR: [
+                { name: containsText(term) },
+                { description: containsText(term) },
+                {
+                  subject: {
+                    name: containsText(term)
+                  }
+                }
+              ]
+            }))
           }
         ]
       },
@@ -337,44 +425,52 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
     });
   const casesPromise = prisma.subjectSummaryCase.findMany({
       where: {
-        deletedAt: null,
-        subject: {
-          deletedAt: null
-        },
-        topic: {
-          deletedAt: null
-        },
-        OR: [
-          { title: containsText(search) },
-          { citation: containsText(search) },
-          { court: containsText(search) },
-          { jurisdiction: containsText(search) },
-          { ratioDecidendi: containsText(search) },
-          { caseSummary: containsText(search) },
-          { facts: containsText(search) },
-          { issues: containsText(search) },
-          { decisionHolding: containsText(search) },
-          ...(yearQuery !== null
-            ? [
-                {
-                  year: yearQuery
-                }
-              ]
-            : []),
-          { judges: { has: search } },
-          { legalPrinciples: { has: search } },
-          { relatedStatutes: { has: search } },
-          { relatedCases: { has: search } },
-          { keywords: { has: search } },
+        AND: [
+          notDeletedWhere,
           {
             subject: {
-              name: containsText(search)
+              ...notDeletedWhere
             }
           },
           {
             topic: {
-              name: containsText(search)
+              ...notDeletedWhere
             }
+          },
+          {
+            OR: [
+              {
+                AND: terms.map((term) => ({
+                  OR: [
+                    { title: containsText(term) },
+                    { citation: containsText(term) },
+                    { court: containsText(term) },
+                    { jurisdiction: containsText(term) },
+                    { ratioDecidendi: containsText(term) },
+                    { caseSummary: containsText(term) },
+                    { facts: containsText(term) },
+                    { issues: containsText(term) },
+                    { decisionHolding: containsText(term) },
+                    { judges: { has: term } },
+                    { legalPrinciples: { has: term } },
+                    { relatedStatutes: { has: term } },
+                    { relatedCases: { has: term } },
+                    { keywords: { has: term } },
+                    {
+                      subject: {
+                        name: containsText(term)
+                      }
+                    },
+                    {
+                      topic: {
+                        name: containsText(term)
+                      }
+                    }
+                  ]
+                }))
+              },
+              ...(yearQuery !== null ? [{ year: yearQuery }] : [])
+            ]
           }
         ]
       },
@@ -399,24 +495,30 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
     });
   const entriesPromise = prisma.subjectSummaryEntry.findMany({
       where: {
-        deletedAt: null,
-        subject: {
-          deletedAt: null
-        },
-        OR: [
-          { question: containsText(search) },
-          { answer: containsText(search) },
-          { keyPrinciple: containsText(search) },
-          { examTip: containsText(search) },
-          // FACULTY / NLS entries have unique serial numbers (e.g. FAC-0422) that
-          // admins/students use to look up a specific revision card directly.
-          { serialNumber: containsText(search) },
-          { relatedStatutes: { has: search } },
-          { tags: { has: search } },
+        AND: [
+          notDeletedWhere,
           {
             subject: {
-              name: containsText(search)
+              ...notDeletedWhere
             }
+          },
+          {
+            AND: terms.map((term) => ({
+              OR: [
+                { question: containsText(term) },
+                { answer: containsText(term) },
+                { keyPrinciple: containsText(term) },
+                { examTip: containsText(term) },
+                { serialNumber: containsText(term) },
+                { relatedStatutes: { has: term } },
+                { tags: { has: term } },
+                {
+                  subject: {
+                    name: containsText(term)
+                  }
+                }
+              ]
+            }))
           }
         ]
       },
@@ -449,13 +551,13 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
     });
 
   const [initialUsers, initialLibraryMaterials, initialSubjects, initialTopics, initialCases, initialEntries, matchingChunks] = await Promise.all([
-    settleOrFallback(usersPromise, []),
-    settleOrFallback(libraryPromise, []),
-    settleOrFallback(subjectsPromise, []),
-    settleOrFallback(topicsPromise, []),
-    settleOrFallback(casesPromise, []),
-    settleOrFallback(entriesPromise, []),
-    settleOrFallback(chunksPromise, [])
+    settleOrFallback(usersPromise, [] as Awaited<typeof usersPromise>),
+    settleOrFallback(libraryPromise, [] as Awaited<typeof libraryPromise>),
+    settleOrFallback(subjectsPromise, [] as Awaited<typeof subjectsPromise>),
+    settleOrFallback(topicsPromise, [] as Awaited<typeof topicsPromise>),
+    settleOrFallback(casesPromise, [] as Awaited<typeof casesPromise>),
+    settleOrFallback(entriesPromise, [] as Awaited<typeof entriesPromise>),
+    settleOrFallback(chunksPromise, [] as Awaited<typeof chunksPromise>)
   ]);
 
   const chunkMatchesByMaterialId = new Map<
@@ -491,10 +593,14 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
     ? await settleOrFallback(
         prisma.studyMaterial.findMany({
           where: {
-            deletedAt: null,
-            id: {
-              in: missingChunkMaterialIds
-            }
+            AND: [
+              notDeletedWhere,
+              {
+                id: {
+                  in: missingChunkMaterialIds
+                }
+              }
+            ]
           },
           orderBy: {
             updatedAt: "desc"
@@ -522,15 +628,16 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
       loadCandidates: () =>
         prisma.user.findMany({
           where: {
-            deletedAt: null
+            ...notDeletedWhere
           },
           orderBy: {
             updatedAt: "desc"
           },
+          take: candidateTake,
           include: {
             roles: {
               where: {
-                deletedAt: null
+                ...notDeletedWhere
               },
               include: {
                 role: {
@@ -561,11 +668,12 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
       loadCandidates: () =>
         prisma.studyMaterial.findMany({
           where: {
-            deletedAt: null
+            ...notDeletedWhere
           },
           orderBy: {
             updatedAt: "desc"
           },
+          take: candidateTake,
           include: {
             category: {
               select: {
@@ -594,9 +702,10 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
       loadCandidates: () =>
         prisma.subjectSummarySubject.findMany({
           where: {
-            deletedAt: null
+            ...notDeletedWhere
           },
           orderBy: [{ displayOrder: "asc" }, { updatedAt: "desc" }],
+          take: candidateTake,
           select: {
             id: true,
             name: true,
@@ -611,12 +720,17 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
       loadCandidates: () =>
         prisma.subjectSummaryTopic.findMany({
           where: {
-            deletedAt: null,
-            subject: {
-              deletedAt: null
-            }
+            AND: [
+              notDeletedWhere,
+              {
+                subject: {
+                  ...notDeletedWhere
+                }
+              }
+            ]
           },
           orderBy: [{ displayOrder: "asc" }, { updatedAt: "desc" }],
+          take: candidateTake,
           include: {
             subject: {
               select: {
@@ -634,17 +748,24 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
       loadCandidates: () =>
         prisma.subjectSummaryCase.findMany({
           where: {
-            deletedAt: null,
-            subject: {
-              deletedAt: null
-            },
-            topic: {
-              deletedAt: null
-            }
+            AND: [
+              notDeletedWhere,
+              {
+                subject: {
+                  ...notDeletedWhere
+                }
+              },
+              {
+                topic: {
+                  ...notDeletedWhere
+                }
+              }
+            ]
           },
           orderBy: {
             updatedAt: "desc"
           },
+          take: candidateTake,
           include: {
             subject: {
               select: {
@@ -681,14 +802,19 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
       loadCandidates: () =>
         prisma.subjectSummaryEntry.findMany({
           where: {
-            deletedAt: null,
-            subject: {
-              deletedAt: null
-            }
+            AND: [
+              notDeletedWhere,
+              {
+                subject: {
+                  ...notDeletedWhere
+                }
+              }
+            ]
           },
           orderBy: {
             updatedAt: "desc"
           },
+          take: candidateTake,
           include: {
             subject: {
               select: {
@@ -825,8 +951,17 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
     }
   ].filter((group) => group.items.length > 0);
 
-  return {
+  const response: AdminPortalSearchResponse = {
     groups,
     totalResults: groups.reduce((total, group) => total + group.items.length, 0)
   };
+
+  adminSearchCache.set(cacheKey, { expiresAt: Date.now() + adminSearchCacheTtlMs, value: response });
+  while (adminSearchCache.size > 700) {
+    const oldestKey = adminSearchCache.keys().next().value as string | undefined;
+    if (!oldestKey) break;
+    adminSearchCache.delete(oldestKey);
+  }
+
+  return response;
 }

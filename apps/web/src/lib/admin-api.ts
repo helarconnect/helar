@@ -2981,23 +2981,25 @@ export async function searchAdminLibrary(query: string, limit = 12) {
   return response.data.data;
 }
 
-export async function searchAdminPortal(query: string, limit = 5) {
+export async function searchAdminPortal(query: string, limit = 5, signal?: AbortSignal) {
   const response = await authenticatedHttp.get<{ success: true; data: AdminPortalSearchResponse }>("/api/v1/admin/search", {
     params: {
       limit,
       query
-    }
+    },
+    signal
   });
 
   return response.data.data;
 }
 
-export async function searchStudentPortal(query: string, limit = 5) {
+export async function searchStudentPortal(query: string, limit = 5, signal?: AbortSignal) {
   const response = await authenticatedHttp.get<{ success: true; data: StudentPortalSearchResponse }>("/api/v1/portal/search", {
     params: {
       limit,
       query
-    }
+    },
+    signal
   });
 
   return response.data.data;

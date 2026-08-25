@@ -35,6 +35,9 @@ export type StudentPortalSearchResponse = {
   totalResults: number;
 };
 
+const studentSearchCache = new Map<string, { expiresAt: number; value: StudentPortalSearchResponse }>();
+const studentSearchCacheTtlMs = 7_000;
+
 export function parseStudentPortalSearchQuery(query: Record<string, string | string[] | undefined>) {
   return studentPortalSearchQuerySchema.parse({
     limit: Array.isArray(query.limit) ? query.limit[0] : query.limit,
@@ -52,6 +55,12 @@ async function settleOrFallback<T>(promise: Promise<T>, fallback: T): Promise<T>
 }
 
 export async function searchStudentPortal(userId: string, query: StudentPortalSearchQuery): Promise<StudentPortalSearchResponse> {
+  const cacheKey = `${userId}:${query.limit}:${query.query.trim().toLowerCase()}`;
+  const cached = studentSearchCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+
   const [libraryItems, studyCenter] = await Promise.all([
     settleOrFallback(
       searchLibraryMaterialsForStudents({
@@ -100,8 +109,17 @@ export async function searchStudentPortal(userId: string, query: StudentPortalSe
     }
   ].filter((group) => group.items.length > 0);
 
-  return {
+  const response: StudentPortalSearchResponse = {
     groups,
     totalResults: groups.reduce((total, group) => total + group.items.length, 0)
   };
+
+  studentSearchCache.set(cacheKey, { expiresAt: Date.now() + studentSearchCacheTtlMs, value: response });
+  while (studentSearchCache.size > 1000) {
+    const oldestKey = studentSearchCache.keys().next().value as string | undefined;
+    if (!oldestKey) break;
+    studentSearchCache.delete(oldestKey);
+  }
+
+  return response;
 }

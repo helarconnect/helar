@@ -9,6 +9,17 @@ import { searchAdminPortal, searchStudentPortal, type AdminPortalSearchItem, typ
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 
+function useDebouncedValue<T>(value: T, delayMs: number) {
+  const [debounced, setDebounced] = useState(value);
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => setDebounced(value), delayMs);
+    return () => window.clearTimeout(handle);
+  }, [delayMs, value]);
+
+  return debounced;
+}
+
 function prettifyMaterialType(value: string) {
   return value
     .split(/[_\s-]+/)
@@ -22,6 +33,7 @@ export function LibrarySearchControl({ audience = "admin" }: { audience?: "admin
   const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const debouncedQuery = useDebouncedValue(query, 160);
 
   useEffect(() => {
     if (!isOpen) {
@@ -36,15 +48,15 @@ export function LibrarySearchControl({ audience = "admin" }: { audience?: "admin
     };
   }, [isOpen]);
 
-  const trimmedQuery = query.trim();
+  const trimmedQuery = debouncedQuery.trim();
   const adminSearchQuery = useQuery({
     enabled: audience === "admin" && isOpen && trimmedQuery.length >= 2,
-    queryFn: () => searchAdminPortal(trimmedQuery),
+    queryFn: ({ signal }) => searchAdminPortal(trimmedQuery, 5, signal),
     queryKey: queryKeys.adminPortalSearch(trimmedQuery)
   });
   const studentSearchQuery = useQuery({
     enabled: audience === "student" && isOpen && trimmedQuery.length >= 2,
-    queryFn: () => searchStudentPortal(trimmedQuery),
+    queryFn: ({ signal }) => searchStudentPortal(trimmedQuery, 5, signal),
     queryKey: queryKeys.studentPortalSearch(trimmedQuery)
   });
 
