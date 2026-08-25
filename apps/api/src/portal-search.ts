@@ -56,16 +56,22 @@ function usesMongoRuntime() {
 }
 
 function normalizeSearchText(value: string | null | undefined) {
-  return stripHtml(value).toLowerCase();
+  return stripHtml(value).toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function tokenizeSearchQuery(query: string) {
-  return query
-    .trim()
-    .toLowerCase()
+  const normalized = query.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+  const terms = normalized
     .split(/\s+/)
     .map((term) => term.trim())
     .filter((term) => term.length >= 2);
+
+  const collapsed = query.toLowerCase().replace(/[^a-z0-9]+/g, "").trim();
+  if (collapsed.length >= 3 && !terms.includes(collapsed)) {
+    terms.push(collapsed);
+  }
+
+  return Array.from(new Set(terms));
 }
 
 function matchesSearch(query: string, ...values: Array<string | null | undefined>) {
@@ -75,12 +81,13 @@ function matchesSearch(query: string, ...values: Array<string | null | undefined
     return true;
   }
 
-  const haystack = values.map((value) => normalizeSearchText(value)).filter(Boolean).join(" • ");
+  const haystack = values.map((value) => normalizeSearchText(value)).filter(Boolean).join(" ");
+  const collapsedHaystack = haystack.replace(/[^a-z0-9]+/g, "");
   if (!haystack) {
     return false;
   }
 
-  return terms.every((term) => haystack.includes(term));
+  return terms.every((term) => haystack.includes(term) || collapsedHaystack.includes(term));
 }
 
 async function settleOrFallback<T>(promise: Promise<T>, fallback: T): Promise<T> {

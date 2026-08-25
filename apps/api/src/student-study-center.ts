@@ -118,6 +118,81 @@ const notDeletedStudyDownloadWhere: Prisma.StudentStudyDownloadWhereInput = {
   OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }]
 };
 
+function usesMongoRuntime() {
+  return (process.env.DATABASE_URL ?? "").startsWith("mongodb");
+}
+
+function normalizeSearchText(value: string | null | undefined) {
+  return (value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function matchesSearchTerms(terms: string[], ...values: Array<string | null | undefined>) {
+  if (!terms.length) {
+    return true;
+  }
+
+  const haystack = values.map((value) => normalizeSearchText(value)).filter(Boolean).join(" ");
+  if (!haystack) {
+    return false;
+  }
+
+  const collapsedHaystack = haystack.replace(/[^a-z0-9]+/g, "");
+  return terms.every((term) => haystack.includes(term) || collapsedHaystack.includes(term));
+}
+
+async function completeMongoMatches<T extends { id: string }>(params: {
+  items: T[];
+  limit: number;
+  loadCandidates: () => Promise<T[]>;
+  matches: (item: T) => boolean;
+}) {
+  if (!usesMongoRuntime() || params.items.length >= params.limit) {
+    return params.items;
+  }
+
+  const completedItems = [...params.items];
+  const seenIds = new Set(completedItems.map((item) => item.id));
+  let candidates: T[] = [];
+
+  try {
+    candidates = await params.loadCandidates();
+  } catch (error) {
+    console.error(error);
+    return completedItems;
+  }
+
+  for (const candidate of candidates) {
+    if (seenIds.has(candidate.id)) {
+      continue;
+    }
+
+    let isMatch = false;
+    try {
+      isMatch = params.matches(candidate);
+    } catch (error) {
+      console.error(error);
+      isMatch = false;
+    }
+
+    if (!isMatch) {
+      continue;
+    }
+
+    completedItems.push(candidate);
+    seenIds.add(candidate.id);
+
+    if (completedItems.length >= params.limit) {
+      break;
+    }
+  }
+
+  return completedItems;
+}
+
 function buildAchievementBadges(params: {
   completedItems: number;
   streakDays: number;
@@ -561,12 +636,16 @@ export async function listStudentStudyDownloads(userId: string, query: z.infer<t
 
 export async function searchStudentStudyCenter(userId: string, query: z.infer<typeof searchQuerySchema>) {
   const dateRange = parseSearchDateRange(query.query);
-  const terms = query.query
-    .trim()
-    .toLowerCase()
+  const normalizedQuery = query.query.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+  const terms = normalizedQuery
     .split(/\s+/)
     .map((term) => term.trim())
     .filter((term) => term.length >= 2);
+
+  const collapsed = query.query.toLowerCase().replace(/[^a-z0-9]+/g, "").trim();
+  if (collapsed.length >= 3 && !terms.includes(collapsed)) {
+    terms.push(collapsed);
+  }
 
   const bookmarkTermsWhere: Prisma.StudentStudyBookmarkWhereInput = {
     AND: terms.map((term) => ({
@@ -716,30 +795,108 @@ export async function searchStudentStudyCenter(userId: string, query: z.infer<ty
     })
   ]);
 
+  const candidateTake = 320;
+  const [finalBookmarks, finalNotes, finalDownloads, finalHistory] = await Promise.all([
+    completeMongoMatches({
+      items: bookmarks,
+      limit: 5,
+      loadCandidates: () =>
+        prisma.studentStudyBookmark.findMany({
+          where: {
+            ...notDeletedStudyBookmarkWhere,
+            userId
+          },
+          orderBy: [{ updatedAt: "desc" }],
+          take: candidateTake
+        }),
+      matches: (item) =>
+        matchesSearchTerms(terms, item.title, item.subjectName, item.topicName, item.note) ||
+        (dateRange
+          ? (item.createdAt >= dateRange.start && item.createdAt < dateRange.end) ||
+            (item.updatedAt >= dateRange.start && item.updatedAt < dateRange.end)
+          : false)
+    }),
+    completeMongoMatches({
+      items: notes,
+      limit: 5,
+      loadCandidates: () =>
+        prisma.studentStudyNote.findMany({
+          where: {
+            ...notDeletedStudyNoteWhere,
+            userId
+          },
+          orderBy: [{ updatedAt: "desc" }],
+          take: candidateTake
+        }),
+      matches: (item) =>
+        matchesSearchTerms(terms, item.title, item.referenceTitle, item.contentPlainText) ||
+        (dateRange
+          ? (item.createdAt >= dateRange.start && item.createdAt < dateRange.end) ||
+            (item.updatedAt >= dateRange.start && item.updatedAt < dateRange.end)
+          : false)
+    }),
+    completeMongoMatches({
+      items: downloads,
+      limit: 5,
+      loadCandidates: () =>
+        prisma.studentStudyDownload.findMany({
+          where: {
+            ...notDeletedStudyDownloadWhere,
+            userId
+          },
+          orderBy: [{ createdAt: "desc" }],
+          take: candidateTake
+        }),
+      matches: (item) =>
+        matchesSearchTerms(terms, item.fileName, item.title) ||
+        (dateRange ? item.createdAt >= dateRange.start && item.createdAt < dateRange.end : false)
+    }),
+    completeMongoMatches({
+      items: history,
+      limit: 6,
+      loadCandidates: () =>
+        prisma.studentStudyProgress.findMany({
+          where: {
+            ...notDeletedStudyProgressWhere,
+            userId
+          },
+          orderBy: [{ lastOpenedAt: "desc" }],
+          take: candidateTake
+        }),
+      matches: (item) =>
+        matchesSearchTerms(terms, item.title, item.subjectName, item.topicName, item.lastPositionLabel) ||
+        (dateRange
+          ? (item.createdAt >= dateRange.start && item.createdAt < dateRange.end) ||
+            (item.updatedAt >= dateRange.start && item.updatedAt < dateRange.end) ||
+            (item.lastOpenedAt >= dateRange.start && item.lastOpenedAt < dateRange.end)
+          : false)
+    })
+  ]);
+
   return {
     items: [
-      ...bookmarks.map((item) => ({
+      ...finalBookmarks.map((item) => ({
         id: item.id,
         kind: "bookmark" as const,
         label: item.title,
         meta: [item.subjectName, item.topicName].filter(Boolean).join(" / "),
         path: item.path
       })),
-      ...notes.map((item) => ({
+      ...finalNotes.map((item) => ({
         id: item.id,
         kind: "note" as const,
         label: item.title,
         meta: item.referenceTitle || [item.subjectName, item.topicName].filter(Boolean).join(" / "),
         path: item.path || "/app/dashboard"
       })),
-      ...downloads.map((item) => ({
+      ...finalDownloads.map((item) => ({
         id: item.id,
         kind: "download" as const,
         label: item.fileName,
         meta: item.title,
         path: item.path
       })),
-      ...history.map((item) => ({
+      ...finalHistory.map((item) => ({
         id: item.id,
         kind: "history" as const,
         label: item.title,
