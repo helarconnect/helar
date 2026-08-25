@@ -1971,10 +1971,10 @@ async function searchLibraryMaterials({ limit, query }: AdminLibrarySearchQuery,
 
   let finalMaterials = uniqueMaterials;
 
-  if (usesMongoRuntime() && finalMaterials.length < limit) {
+  if (usesMongoRuntime()) {
     const completed = [...finalMaterials];
     const seenIds = new Set(completed.map((material) => material.id));
-    const candidateLimit = Math.min(Math.max(limit * 60, 120), 600);
+    const candidateLimit = Math.min(Math.max(limit * 180, 400), 1200);
 
     const candidates = await prisma.studyMaterial.findMany({
       where: materialWhere,
@@ -2002,7 +2002,7 @@ async function searchLibraryMaterials({ limit, query }: AdminLibrarySearchQuery,
           field: true,
           materialId: true
         },
-        take: Math.min(candidateIds.length * 6, 1200)
+        take: Math.min(candidateIds.length * 4, 1800)
       });
 
       for (const chunk of candidateChunks) {
