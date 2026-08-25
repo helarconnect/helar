@@ -247,7 +247,7 @@ async function listPendingApprovalItems() {
     }),
     prisma.subjectSummaryCase.findMany({
       where: {
-        deletedAt: null,
+        OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
         status: SubjectSummaryCaseStatus.PENDING_APPROVAL
       },
       orderBy: {
@@ -272,7 +272,7 @@ async function listPendingApprovalItems() {
     }),
     prisma.subjectSummaryEntry.findMany({
       where: {
-        deletedAt: null,
+        OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
         status: SubjectSummaryCaseStatus.PENDING_APPROVAL
       },
       orderBy: {
@@ -382,7 +382,7 @@ export async function getSuperAdminApprovalQueue(): Promise<AdminApprovalQueueSn
       }
     }),
     prisma.subjectSummaryCase.findMany({
-      where: { deletedAt: null, status: SubjectSummaryCaseStatus.PENDING_APPROVAL },
+      where: { OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }], status: SubjectSummaryCaseStatus.PENDING_APPROVAL },
       orderBy: { updatedAt: "desc" },
       select: {
         createdAt: true,
@@ -394,7 +394,7 @@ export async function getSuperAdminApprovalQueue(): Promise<AdminApprovalQueueSn
       }
     }),
     prisma.subjectSummaryEntry.findMany({
-      where: { deletedAt: null, status: SubjectSummaryCaseStatus.PENDING_APPROVAL },
+      where: { OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }], status: SubjectSummaryCaseStatus.PENDING_APPROVAL },
       orderBy: { updatedAt: "desc" },
       select: {
         createdAt: true,
@@ -788,7 +788,7 @@ export async function approveSubjectSummaryCase(caseId: string) {
     loadPendingItem: (tx) =>
       tx.subjectSummaryCase.findFirst({
         where: {
-          deletedAt: null,
+          OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
           id: caseId,
           status: SubjectSummaryCaseStatus.PENDING_APPROVAL
         },
@@ -826,7 +826,7 @@ export async function approveSubjectSummaryEntry(entryId: string) {
     loadPendingItem: (tx) =>
       tx.subjectSummaryEntry.findFirst({
         where: {
-          deletedAt: null,
+          OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
           id: entryId,
           status: SubjectSummaryCaseStatus.PENDING_APPROVAL
         },
@@ -1034,7 +1034,7 @@ export async function approveAllPendingContent(approverUserId: string) {
       }),
       tx.subjectSummaryCase.updateMany({
         where: {
-          deletedAt: null,
+          OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
           status: SubjectSummaryCaseStatus.PENDING_APPROVAL
         },
         data: {
@@ -1045,7 +1045,7 @@ export async function approveAllPendingContent(approverUserId: string) {
       }),
       tx.subjectSummaryEntry.updateMany({
         where: {
-          deletedAt: null,
+          OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
           status: SubjectSummaryCaseStatus.PENDING_APPROVAL
         },
         data: {
