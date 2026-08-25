@@ -13,6 +13,35 @@ import { containsText } from "./lib/text-search.js";
 import { getPremiumContentAccess, truncateWords, PREMIUM_PREVIEW_WORD_LIMIT, createPreviewHtml } from "./premium-access.js";
 import { runInTransaction } from "./lib/transactions.js";
 
+function coerceSubjectSummaryModuleType(value: unknown) {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const normalized = value.trim().toUpperCase();
+  if (normalized === "NLS") {
+    return SubjectSummaryModuleType.HANDBOOK;
+  }
+
+  if (normalized === "FACULTY") {
+    return SubjectSummaryModuleType.TEXTBOOK;
+  }
+
+  return value;
+}
+
+const subjectSummaryModuleTypeSchema = z
+  .preprocess(coerceSubjectSummaryModuleType, z.nativeEnum(SubjectSummaryModuleType))
+  .default(SubjectSummaryModuleType.TEXTBOOK);
+
+const notDeletedWhere = {
+  OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }]
+} satisfies Prisma.SubjectSummaryEntryWhereInput;
+
+const notDeletedSubjectWhere = {
+  OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }]
+} satisfies Prisma.SubjectSummarySubjectWhereInput;
+
 const entryFiltersSchema = z.object({
   page: z.coerce.number().int().min(1).max(10_000).default(1),
   // 90 questions per page is the shared default between FACULTY/NLS admin +
@@ -26,7 +55,7 @@ const entryFiltersSchema = z.object({
   sortOrder: z.enum(["asc", "desc"]).default("desc"),
   status: z.union([z.nativeEnum(SubjectSummaryCaseStatus), z.literal("all")]).default("all"),
   subjectId: recordIdSchema.optional(),
-  moduleType: z.nativeEnum(SubjectSummaryModuleType).default(SubjectSummaryModuleType.TEXTBOOK),
+  moduleType: subjectSummaryModuleTypeSchema,
   topic: z.string().trim().optional().default("")
 });
 
@@ -44,7 +73,7 @@ const entryInputSchema = z
     status: z.nativeEnum(SubjectSummaryCaseStatus).default(SubjectSummaryCaseStatus.DRAFT),
     subjectId: recordIdSchema,
     tags: z.array(z.string().trim().min(1).max(120)).max(50).default([]),
-    moduleType: z.nativeEnum(SubjectSummaryModuleType).default(SubjectSummaryModuleType.TEXTBOOK),
+    moduleType: subjectSummaryModuleTypeSchema,
     topic: z.string().trim().optional().default("")
   })
   .strict();
@@ -65,7 +94,7 @@ const topicBulkEntrySchema = z
 
 const topicBulkInputSchema = z
   .object({
-    moduleType: z.nativeEnum(SubjectSummaryModuleType).default(SubjectSummaryModuleType.TEXTBOOK),
+    moduleType: subjectSummaryModuleTypeSchema,
     subjectId: recordIdSchema,
     topic: z.string().trim().min(2),
     status: z.nativeEnum(SubjectSummaryCaseStatus).default(SubjectSummaryCaseStatus.DRAFT),
@@ -75,7 +104,7 @@ const topicBulkInputSchema = z
 
 const studentSubjectsQuerySchema = z.object({
   search: z.string().trim().max(120).default(""),
-  moduleType: z.nativeEnum(SubjectSummaryModuleType).default(SubjectSummaryModuleType.TEXTBOOK)
+  moduleType: subjectSummaryModuleTypeSchema
 });
 
 const studentEntriesQuerySchema = z.object({
@@ -86,7 +115,7 @@ const studentEntriesQuerySchema = z.object({
   filter: z.enum(["all", "bookmarked", "difficult", "easy", "read", "recentlyViewed", "unread"]).default("all"),
   query: z.string().trim().max(160).default(""),
   subjectId: recordIdSchema,
-  moduleType: z.nativeEnum(SubjectSummaryModuleType).default(SubjectSummaryModuleType.TEXTBOOK),
+  moduleType: subjectSummaryModuleTypeSchema,
   topic: z.string().trim().optional().default("")
 });
 
@@ -96,13 +125,13 @@ type TopicBulkInput = z.infer<typeof topicBulkInputSchema>;
 type StudentEntriesQuery = z.infer<typeof studentEntriesQuerySchema>;
 
 const topicsQuerySchema = z.object({
-  moduleType: z.nativeEnum(SubjectSummaryModuleType).default(SubjectSummaryModuleType.TEXTBOOK),
+  moduleType: subjectSummaryModuleTypeSchema,
   subjectId: recordIdSchema,
   status: z.union([z.nativeEnum(SubjectSummaryCaseStatus), z.literal("all")]).default("all")
 });
 
 const studentTopicsQuerySchema = z.object({
-  moduleType: z.nativeEnum(SubjectSummaryModuleType).default(SubjectSummaryModuleType.TEXTBOOK),
+  moduleType: subjectSummaryModuleTypeSchema,
   subjectId: recordIdSchema
 });
 
@@ -127,9 +156,9 @@ function entryContentKey(entryId: string) {
 
 function buildEntryWhere(filters: EntryFilters): Prisma.SubjectSummaryEntryWhereInput {
   return {
-    deletedAt: null,
+    ...notDeletedWhere,
     subject: {
-      deletedAt: null
+      ...notDeletedSubjectWhere
     },
     moduleType: filters.moduleType,
     ...(filters.subjectId ? { subjectId: filters.subjectId } : {}),
@@ -167,7 +196,7 @@ function buildEntryWhere(filters: EntryFilters): Prisma.SubjectSummaryEntryWhere
               caseLinks: {
                 some: {
                   case: {
-                    deletedAt: null,
+                    OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
                     OR: [
                       {
                         title: containsText(filters.search)
@@ -191,9 +220,9 @@ function buildEntryWhere(filters: EntryFilters): Prisma.SubjectSummaryEntryWhere
 
 function buildEntrySummaryWhere(filters: EntryFilters): Prisma.SubjectSummaryEntryWhereInput {
   return {
-    deletedAt: null,
+    ...notDeletedWhere,
     subject: {
-      deletedAt: null
+      ...notDeletedSubjectWhere
     },
     moduleType: filters.moduleType,
     ...(filters.subjectId ? { subjectId: filters.subjectId } : {}),
@@ -249,7 +278,7 @@ function mapEntry(item: {
     examTip: item.examTip ?? "",
     id: item.id,
     keyPrinciple: item.keyPrinciple ?? "",
-    moduleType: item.moduleType,
+    moduleType: item.moduleType === SubjectSummaryModuleType.HANDBOOK ? "NLS" : "FACULTY",
     serialNumber: item.serialNumber ?? "",
     topic: item.topic ?? "",
     question: item.question,
@@ -328,7 +357,7 @@ async function createAuditLog(actorUserId: string, action: string, resourceId: s
 async function assertSubjectExists(subjectId: string) {
   const subject = await prisma.subjectSummarySubject.findFirst({
     where: {
-      deletedAt: null,
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
       id: subjectId
     },
     select: {
@@ -395,7 +424,7 @@ async function assertCasesBelongToSubject(
 
   const count = await db.subjectSummaryCase.count({
     where: {
-      deletedAt: null,
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
       id: {
         in: relatedCaseIds
       },
@@ -477,7 +506,7 @@ export async function listSubjectSummaryEntries(filters: EntryFilters) {
     prisma.subjectSummaryEntry.count({ where }),
     prisma.subjectSummarySubject.findMany({
       where: {
-        deletedAt: null,
+        ...notDeletedSubjectWhere,
         // If a subject only has NLS entries and the admin is viewing the FACULTY
         // page (or vice-versa) showing it in the dropdown creates false "I selected
         // a subject but can't see any uploaded content" confusion. Restrict the list
@@ -486,7 +515,7 @@ export async function listSubjectSummaryEntries(filters: EntryFilters) {
         // "deletedAt: null only" when filters.status = "all".
         entries: {
           some: {
-            deletedAt: null,
+            ...notDeletedWhere,
             moduleType: filters.moduleType,
             ...(filters.status === "all" ? {} : { status: filters.status })
           }
@@ -588,10 +617,10 @@ export async function listSubjectSummaryEntries(filters: EntryFilters) {
 export async function listSubjectSummaryModuleTopics(query: TopicsQuery) {
   const rows = await prisma.subjectSummaryEntry.findMany({
     where: {
-      deletedAt: null,
+      ...notDeletedWhere,
       moduleType: query.moduleType,
       subject: {
-        deletedAt: null
+        ...notDeletedSubjectWhere
       },
       subjectId: query.subjectId,
       ...(query.status === "all" ? {} : { status: query.status }),
@@ -669,7 +698,7 @@ export async function getSubjectSummaryEntryFormOptions(subjectId?: string) {
   const [subjects, relatedCases] = await Promise.all([
     prisma.subjectSummarySubject.findMany({
       where: {
-        deletedAt: null
+        ...notDeletedSubjectWhere
       },
       orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
       select: {
@@ -679,7 +708,7 @@ export async function getSubjectSummaryEntryFormOptions(subjectId?: string) {
     }),
     prisma.subjectSummaryCase.findMany({
       where: {
-        deletedAt: null,
+        OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
         ...(subjectId ? { subjectId } : {})
       },
       orderBy: [{ title: "asc" }],
@@ -855,7 +884,7 @@ export async function createSubjectSummaryTopicEntries(input: TopicBulkInput, ac
     const serialStart = await allocateSubjectSummarySerialRange(tx, input.moduleType, input.entries.length);
     const existingMax = await tx.subjectSummaryEntry.findFirst({
       where: {
-        deletedAt: null,
+        ...notDeletedWhere,
         moduleType: input.moduleType,
         subjectId: input.subjectId,
         topic: trimmedTopic || null
@@ -931,7 +960,7 @@ export async function createSubjectSummaryTopicEntries(input: TopicBulkInput, ac
 export async function getAdminSubjectSummaryEntry(entryId: string) {
   const entry = await prisma.subjectSummaryEntry.findFirst({
     where: {
-      deletedAt: null,
+      ...notDeletedWhere,
       id: entryId
     },
     include: {
@@ -976,7 +1005,7 @@ export async function updateSubjectSummaryEntry(
 
   const existing = await prisma.subjectSummaryEntry.findFirst({
     where: {
-      deletedAt: null,
+      ...notDeletedWhere,
       id: entryId
     },
     select: {
@@ -1051,7 +1080,7 @@ export async function updateSubjectSummaryEntry(
 export async function deleteSubjectSummaryEntry(entryId: string, actorUserId: string) {
   const existing = await prisma.subjectSummaryEntry.findFirst({
     where: {
-      deletedAt: null,
+      ...notDeletedWhere,
       id: entryId
     },
     select: {
@@ -1083,10 +1112,10 @@ export async function deleteSubjectSummaryEntry(entryId: string, actorUserId: st
 export async function listStudentSubjectSummarySubjects(userId: string, search: string, moduleType: SubjectSummaryModuleType) {
   const subjects = await prisma.subjectSummarySubject.findMany({
     where: {
-      deletedAt: null,
+      ...notDeletedSubjectWhere,
       entries: {
         some: {
-          deletedAt: null,
+          ...notDeletedWhere,
           moduleType,
           status: SubjectSummaryCaseStatus.PUBLISHED
         }
@@ -1101,7 +1130,7 @@ export async function listStudentSubjectSummarySubjects(userId: string, search: 
     include: {
       entries: {
         where: {
-          deletedAt: null,
+          ...notDeletedWhere,
           moduleType,
           status: SubjectSummaryCaseStatus.PUBLISHED
         },
@@ -1121,7 +1150,7 @@ export async function listStudentSubjectSummarySubjects(userId: string, search: 
           contentKey: {
             in: allEntryIds.map((entryId) => entryContentKey(entryId))
           },
-          deletedAt: null,
+          OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
           userId
         },
         select: {
@@ -1166,11 +1195,11 @@ export async function listStudentSubjectSummarySubjects(userId: string, search: 
 export async function listStudentSubjectSummaryTopics(_userId: string, query: StudentTopicsQuery) {
   const rows = await prisma.subjectSummaryEntry.findMany({
     where: {
-      deletedAt: null,
+      ...notDeletedWhere,
       moduleType: query.moduleType,
       status: SubjectSummaryCaseStatus.PUBLISHED,
       subject: {
-        deletedAt: null
+        ...notDeletedSubjectWhere
       },
       subjectId: query.subjectId,
       topic: {
@@ -1220,7 +1249,7 @@ export async function getStudentSubjectSummaryRevisionView(userId: string, query
   const contentAccess = await getPremiumContentAccess(userId);
   const subject = await prisma.subjectSummarySubject.findFirst({
     where: {
-      deletedAt: null,
+      ...notDeletedSubjectWhere,
       id: query.subjectId
     },
     select: {
@@ -1235,7 +1264,7 @@ export async function getStudentSubjectSummaryRevisionView(userId: string, query
 
   const allEntries = await prisma.subjectSummaryEntry.findMany({
     where: {
-      deletedAt: null,
+      ...notDeletedWhere,
       moduleType: query.moduleType,
       status: SubjectSummaryCaseStatus.PUBLISHED,
       subjectId: query.subjectId,
@@ -1278,7 +1307,7 @@ export async function getStudentSubjectSummaryRevisionView(userId: string, query
             contentKey: {
               in: contentKeys
             },
-            deletedAt: null,
+            OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
             userId
           }
         })
@@ -1290,7 +1319,7 @@ export async function getStudentSubjectSummaryRevisionView(userId: string, query
               in: contentKeys
             },
             contentType: StudentStudyContentType.SUBJECT_SUMMARY_ENTRY,
-            deletedAt: null,
+            OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
             userId
           }
         })
@@ -1302,7 +1331,7 @@ export async function getStudentSubjectSummaryRevisionView(userId: string, query
               in: contentKeys
             },
             contentType: StudentStudyContentType.SUBJECT_SUMMARY_ENTRY,
-            deletedAt: null,
+            OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
             userId
           },
           orderBy: {
