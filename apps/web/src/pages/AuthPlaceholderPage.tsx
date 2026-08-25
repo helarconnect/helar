@@ -72,7 +72,11 @@ const baseAuthSchema = z.object({
     .min(8, "Password must be at least 8 characters.")
     .max(72, "Password is too long."),
   confirmPassword: z.string().optional(),
-  registrationRole: z.enum(["student", "lawyer"]).optional(),
+  registrationRole: z
+    .enum(["student", "lawyer"])
+    .nullable()
+    .default("student")
+    .transform((value) => value ?? "student"),
 }).strict();
 
 const signInSchema = baseAuthSchema;
