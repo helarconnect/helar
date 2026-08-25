@@ -401,7 +401,12 @@ export function HelarConnectPage() {
     const answerButtonLabel = isAuthenticated ? "Answer" : "Login to answer";
     const shareUrl =
       typeof window !== "undefined"
-        ? `${window.location.origin}/connect?question=${encodeURIComponent(question.id)}`
+        ? (() => {
+            const url = new URL(`${window.location.origin}/connect`);
+            url.searchParams.set("question", question.id);
+            url.searchParams.set("sort", selectedSort);
+            return url.toString();
+          })()
         : "";
 
     return (

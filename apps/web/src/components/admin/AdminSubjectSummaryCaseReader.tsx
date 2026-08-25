@@ -110,6 +110,15 @@ export function AdminSubjectSummaryCaseReader() {
   }, [caseId]);
 
   const item = caseQuery.data ?? null;
+  const shareUrl =
+    typeof window !== "undefined" && caseId
+      ? (() => {
+          const url = new URL(`${window.location.origin}/app/library/subject-summaries/cases/${String(caseId)}`);
+          url.search = location.search;
+          url.hash = location.hash;
+          return url.toString();
+        })()
+      : "";
   const activeBookmark = item
     ? bookmarksQuery.data?.items.find((bookmark) => bookmark.contentKey === `SUBJECT_SUMMARY_CASE:${item.id}`)
     : undefined;
@@ -220,7 +229,7 @@ export function AdminSubjectSummaryCaseReader() {
               size="sm"
               text={item.caseSummary?.slice(0, 220) ?? ""}
               title={item.title}
-              url={typeof window !== "undefined" ? window.location.href : ""}
+              url={shareUrl}
             />
             {item.citation ? (
               <span className={cn("inline-flex rounded-full border px-3 py-1.5 text-sm break-words max-w-full", isDark ? "border-slate-700 bg-slate-900 text-slate-200" : "border-slate-200 bg-white text-slate-700")}>

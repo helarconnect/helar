@@ -151,10 +151,6 @@ export function ShareButton({ url, title, text, className, buttonClassName, butt
         )}
         disabled={isDisabled}
         onClick={() => {
-          if (hasNativeShare) {
-            void handleShare("native");
-            return;
-          }
           setIsOpen((current) => !current);
         }}
         type="button"

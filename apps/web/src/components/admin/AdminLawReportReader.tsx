@@ -489,6 +489,24 @@ export function AdminLawReportReader() {
   const isDeepLinkEnabled = Boolean(report?.sharingEnabled);
   const canUseSharingTools = hasAdminAccess(roleCodes) && isDeepLinkEnabled;
   const bodyBlocks = useMemo(() => (isDeepLinkEnabled ? parseHtmlBlocks(highlightedBody) : []), [highlightedBody, isDeepLinkEnabled]);
+  const shareUrl =
+    typeof window !== "undefined" && report?.publicationStatus === "PUBLISHED"
+      ? (() => {
+          const sectionSlug = isHelarpedia ? "helarpedia" : "law-reports";
+          const url = new URL(`${window.location.origin}/app/library/${sectionSlug}/${materialId}`);
+          const incomingParams = new URLSearchParams(location.search);
+          const quote = incomingParams.get("quote");
+          const dl = incomingParams.get("dl");
+          if (quote) {
+            url.searchParams.set("quote", quote);
+          }
+          if (dl) {
+            url.searchParams.set("dl", dl);
+          }
+          url.hash = location.hash;
+          return url.toString();
+        })()
+      : "";
 
   useEffect(() => {
     if (!shareNotice) {
@@ -979,13 +997,15 @@ export function AdminLawReportReader() {
           </h1>
         </div>
         <div className="flex flex-wrap items-center gap-2 min-w-0">
-          <ShareButton
-            buttonLabel="Share"
-            size="sm"
-            text={stripHtml(report.summary ?? report.body ?? "").slice(0, 220)}
-            title={stripHtml(report.title)}
-            url={typeof window !== "undefined" ? window.location.href : ""}
-          />
+          {shareUrl ? (
+            <ShareButton
+              buttonLabel="Share"
+              size="sm"
+              text={stripHtml(report.summary ?? report.body ?? "").slice(0, 220)}
+              title={stripHtml(report.title)}
+              url={shareUrl}
+            />
+          ) : null}
           {[
             report.reportNumber ?? "Pending case number",
             prettifyCourt(report.materialType),
