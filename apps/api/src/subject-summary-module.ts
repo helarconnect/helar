@@ -196,16 +196,22 @@ function buildEntryWhere(filters: EntryFilters): Prisma.SubjectSummaryEntryWhere
               caseLinks: {
                 some: {
                   case: {
-                    OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
-                    OR: [
+                    AND: [
                       {
-                        title: containsText(filters.search)
+                        OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }]
                       },
                       {
-                        citation: containsText(filters.search)
-                      },
-                      {
-                        ratioDecidendi: containsText(filters.search)
+                        OR: [
+                          {
+                            title: containsText(filters.search)
+                          },
+                          {
+                            citation: containsText(filters.search)
+                          },
+                          {
+                            ratioDecidendi: containsText(filters.search)
+                          }
+                        ]
                       }
                     ]
                   }
