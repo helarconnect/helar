@@ -13,6 +13,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import uploadedHeroImage from "@/assets/helar-hero-upload.png";
+import { ShareButton } from "@/components/common/ShareButton";
 import { SocialLinks } from "@/components/layout/SocialLinks";
 import { fetchLatestPublications, type LatestPublicationItem } from "@/lib/catalog-api";
 import { fetchHelarConnectQuestionsPublic, type HelarConnectSnapshot } from "@/lib/connect-api";
@@ -593,16 +594,32 @@ export function LandingPage() {
               ) : (
                 <div className="mt-6 space-y-4">
                   <div className="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-2 [scrollbar-width:auto]">
-                    {(connectSnapshot?.items ?? []).slice(0, 3).map((question) => (
-                      <Link
-                        className="min-w-[18rem] snap-start rounded-2xl border border-white/10 bg-white/5 px-4 py-4 transition hover:bg-white/10"
-                        key={question.id}
-                        to={`/connect?sort=${connectSort}&question=${encodeURIComponent(question.id)}`}
-                      >
-                        <p className="font-semibold text-white">{question.title}</p>
-                        <p className="mt-2 text-sm leading-6 text-white/70">{question.excerpt}</p>
-                      </Link>
-                    ))}
+                    {(connectSnapshot?.items ?? []).slice(0, 3).map((question) => {
+                      const href = `/connect?sort=${connectSort}&question=${encodeURIComponent(question.id)}`;
+                      const shareUrl = typeof window !== "undefined" ? `${window.location.origin}${href}` : "";
+
+                      return (
+                        <div
+                          className="min-w-[18rem] snap-start rounded-2xl border border-white/10 bg-white/5 px-4 py-4 transition hover:bg-white/10"
+                          key={question.id}
+                        >
+                          <Link className="block" to={href}>
+                            <p className="font-semibold text-white">{question.title}</p>
+                            <p className="mt-2 text-sm leading-6 text-white/70">{question.excerpt}</p>
+                          </Link>
+                          <div className="mt-4 flex items-center justify-end">
+                            <ShareButton
+                              buttonLabel="Share"
+                              size="sm"
+                              text={question.excerpt}
+                              title={question.title}
+                              url={shareUrl}
+                              variant="ghost"
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -665,22 +682,27 @@ export function LandingPage() {
                           : publication.category?.name ?? "Publication";
                     const dateLabel = formatDateDMY(publication.reportDate ?? publication.createdAt, "Not dated");
                     const href = getPublicationHref(publication);
+                    const shareUrl = typeof window !== "undefined" ? `${window.location.origin}${href}` : "";
 
                     return (
-                      <Link
+                      <div
                         className="min-w-[18rem] snap-start rounded-2xl border border-white/10 bg-white/5 p-4 transition hover:bg-white/10"
                         key={publication.id}
-                        to={href}
                       >
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/65">{label}</p>
-                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/65">{dateLabel}</p>
+                        <Link className="block" to={href}>
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/65">{label}</p>
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/65">{dateLabel}</p>
+                          </div>
+                          <p className="mt-3 font-semibold text-white">{publication.title}</p>
+                          {publication.reportNumber ? (
+                            <p className="mt-2 text-sm text-white/70">Report number: {publication.reportNumber}</p>
+                          ) : null}
+                        </Link>
+                        <div className="mt-4 flex items-center justify-end">
+                          <ShareButton buttonLabel="Share" size="sm" title={publication.title} url={shareUrl} variant="ghost" />
                         </div>
-                        <p className="mt-3 font-semibold text-white">{publication.title}</p>
-                        {publication.reportNumber ? (
-                          <p className="mt-2 text-sm text-white/70">Report number: {publication.reportNumber}</p>
-                        ) : null}
-                      </Link>
+                      </div>
                     );
                   })}
                 </div>

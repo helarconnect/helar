@@ -3,6 +3,7 @@ import { ArrowLeft, BookOpenText, Bookmark, ExternalLink, Tag } from "lucide-rea
 import { useEffect, useRef } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 
+import { ShareButton } from "@/components/common/ShareButton";
 import { useTheme } from "@/hooks/useTheme";
 import {
   createStudentStudyBookmark,
@@ -214,6 +215,13 @@ export function AdminSubjectSummaryCaseReader() {
           </div>
           <h2 className={cn("font-heading text-3xl sm:text-4xl leading-tight break-words max-w-full", isDark ? "text-white" : "text-slate-950")}>{item.title}</h2>
           <div className="flex flex-wrap items-center gap-3 min-w-0">
+            <ShareButton
+              buttonLabel="Share"
+              size="sm"
+              text={item.caseSummary?.slice(0, 220) ?? ""}
+              title={item.title}
+              url={typeof window !== "undefined" ? window.location.href : ""}
+            />
             {item.citation ? (
               <span className={cn("inline-flex rounded-full border px-3 py-1.5 text-sm break-words max-w-full", isDark ? "border-slate-700 bg-slate-900 text-slate-200" : "border-slate-200 bg-white text-slate-700")}>
                 {item.citation}

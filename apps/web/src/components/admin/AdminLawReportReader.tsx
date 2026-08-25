@@ -3,6 +3,7 @@ import { ArrowLeft, CalendarDays, Copy, FileSearch, Link2, Scale, Search } from 
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
+import { ShareButton } from "@/components/common/ShareButton";
 import { useTheme } from "@/hooks/useTheme";
 import {
   createLawReportReadingSession,
@@ -977,7 +978,14 @@ export function AdminLawReportReader() {
             {renderHighlightedText(report.title, searchTerm, highlightClassName, "title")}
           </h1>
         </div>
-        <div className="flex flex-wrap gap-2 min-w-0">
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
+          <ShareButton
+            buttonLabel="Share"
+            size="sm"
+            text={stripHtml(report.summary ?? report.body ?? "").slice(0, 220)}
+            title={stripHtml(report.title)}
+            url={typeof window !== "undefined" ? window.location.href : ""}
+          />
           {[
             report.reportNumber ?? "Pending case number",
             prettifyCourt(report.materialType),

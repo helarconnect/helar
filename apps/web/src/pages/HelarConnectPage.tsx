@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
+import { ShareButton } from "@/components/common/ShareButton";
 import {
   createHelarConnectAnswer,
   createHelarConnectComment,
@@ -398,6 +399,10 @@ export function HelarConnectPage() {
     const answerDraft = answerDrafts[question.id] ?? "";
     const commentButtonLabel = isAuthenticated ? "Comment" : "Login to comment";
     const answerButtonLabel = isAuthenticated ? "Answer" : "Login to answer";
+    const shareUrl =
+      typeof window !== "undefined"
+        ? `${window.location.origin}/connect?question=${encodeURIComponent(question.id)}`
+        : "";
 
     return (
       <article className="connect-question-row" key={question.id}>
@@ -445,6 +450,15 @@ export function HelarConnectPage() {
             >
               {question.viewerHasUpvoted ? "Upvoted" : isAuthenticated ? "Upvote" : "Login to vote"}
             </button>
+            <ShareButton
+              buttonClassName="connect-engagement-button"
+              buttonLabel="Share"
+              size="sm"
+              text={question.excerpt}
+              title={question.title}
+              url={shareUrl}
+              variant="ghost"
+            />
             <button
               className="connect-engagement-button"
               onClick={() => {

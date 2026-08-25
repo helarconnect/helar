@@ -3,6 +3,7 @@ import { BookOpenText, Bookmark, CalendarDays, ChevronDown, ChevronLeft, Chevron
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
+import { ShareButton } from "@/components/common/ShareButton";
 import { useTheme } from "@/hooks/useTheme";
 import {
   createStudentStudyBookmark,
@@ -495,6 +496,12 @@ export function StudentLawReportsPage() {
                             });
                           }}
                         />
+                        <ShareButton
+                          buttonLabel="Share"
+                          size="sm"
+                          title={material.title}
+                          url={typeof window !== "undefined" ? `${window.location.origin}/app/library/law-reports/${material.id}` : ""}
+                        />
                         <Link
                           className={cn(
                             "inline-flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-semibold transition",
@@ -737,6 +744,12 @@ export function StudentHelarpediaPage() {
                                 title: material.title
                               });
                             }}
+                          />
+                          <ShareButton
+                            buttonLabel="Share"
+                            size="sm"
+                            title={material.title}
+                            url={typeof window !== "undefined" ? `${window.location.origin}/app/library/helarpedia/${material.id}` : ""}
                           />
                         </div>
                         <Link
