@@ -1330,8 +1330,6 @@ async function persistRegister(payload: z.infer<typeof registerSchema>) {
         passwordHash,
         status: "ACTIVE",
         emailVerifiedAt: null,
-        country: "Nigeria",
-        state: "Lagos",
         roles: {
           create: {
             roleId: selectedRole.id

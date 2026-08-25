@@ -137,7 +137,7 @@ export function ShareButton({ url, title, text, className, buttonClassName, butt
   }
 
   return (
-    <div className={cn("relative inline-flex", className)} ref={rootRef}>
+    <div className={cn("relative inline-flex ml-auto shrink-0", className)} ref={rootRef}>
       <button
         aria-label={buttonLabel}
         className={cn(
