@@ -1116,107 +1116,127 @@ export async function deleteSubjectSummaryEntry(entryId: string, actorUserId: st
 }
 
 export async function listStudentSubjectSummarySubjects(userId: string, search: string, moduleType: SubjectSummaryModuleType) {
-  const subjects = await prisma.subjectSummarySubject.findMany({
-    where: {
-      ...notDeletedSubjectWhere,
-      entries: {
-        some: {
-          ...notDeletedWhere,
-          moduleType,
-          status: SubjectSummaryCaseStatus.PUBLISHED
-        }
-      },
-      ...(search
-        ? {
-            name: containsText(search)
+  const loadSubjects = async (targetModuleType: SubjectSummaryModuleType) => {
+    const subjects = await prisma.subjectSummarySubject.findMany({
+      where: {
+        ...notDeletedSubjectWhere,
+        entries: {
+          some: {
+            ...notDeletedWhere,
+            moduleType: targetModuleType,
+            status: SubjectSummaryCaseStatus.PUBLISHED
           }
-        : {})
-    },
-    orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
-    include: {
-      entries: {
-        where: {
-          ...notDeletedWhere,
-          moduleType,
-          status: SubjectSummaryCaseStatus.PUBLISHED
         },
-        select: {
-          id: true,
-          estimatedReadingTime: true,
-          updatedAt: true
+        ...(search
+          ? {
+              name: containsText(search)
+            }
+          : {})
+      },
+      orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+      include: {
+        entries: {
+          where: {
+            ...notDeletedWhere,
+            moduleType: targetModuleType,
+            status: SubjectSummaryCaseStatus.PUBLISHED
+          },
+          select: {
+            id: true,
+            estimatedReadingTime: true,
+            updatedAt: true
+          }
         }
       }
-    }
-  });
+    });
 
-  const allEntryIds = subjects.flatMap((subject) => subject.entries.map((entry) => entry.id));
-  const progressItems = allEntryIds.length
-    ? await prisma.studentStudyProgress.findMany({
-        where: {
-          contentKey: {
-            in: allEntryIds.map((entryId) => entryContentKey(entryId))
+    const allEntryIds = subjects.flatMap((subject) => subject.entries.map((entry) => entry.id));
+    const progressItems = allEntryIds.length
+      ? await prisma.studentStudyProgress.findMany({
+          where: {
+            contentKey: {
+              in: allEntryIds.map((entryId) => entryContentKey(entryId))
+            },
+            OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
+            userId
           },
-          OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
-          userId
-        },
-        select: {
-          completed: true,
-          contentKey: true,
-          lastOpenedAt: true
-        }
+          select: {
+            completed: true,
+            contentKey: true,
+            lastOpenedAt: true
+          }
+        })
+      : [];
+
+    const progressByKey = new Map(progressItems.map((item) => [item.contentKey, item]));
+
+    return {
+      items: subjects.map((subject) => {
+        const completedCount = subject.entries.reduce((sum, entry) => {
+          const progress = progressByKey.get(entryContentKey(entry.id));
+          return sum + (progress?.completed ? 1 : 0);
+        }, 0);
+
+        const lastOpenedAt = subject.entries
+          .map((entry) => progressByKey.get(entryContentKey(entry.id))?.lastOpenedAt ?? null)
+          .filter((value): value is Date => Boolean(value))
+          .sort((left, right) => right.getTime() - left.getTime())[0] ?? null;
+
+        return {
+          completionPct: subject.entries.length ? Math.round((completedCount / subject.entries.length) * 100) : 0,
+          completedCount,
+          estimatedReadingTime: subject.entries.reduce((sum, entry) => sum + entry.estimatedReadingTime, 0),
+          id: subject.id,
+          lastOpenedAt: lastOpenedAt?.toISOString() ?? null,
+          lastUpdated: subject.entries
+            .map((entry) => entry.updatedAt)
+            .sort((left, right) => right.getTime() - left.getTime())[0]
+            .toISOString(),
+          name: subject.name,
+          questionCount: subject.entries.length
+        };
       })
-    : [];
-
-  const progressByKey = new Map(progressItems.map((item) => [item.contentKey, item]));
-
-  return {
-    items: subjects.map((subject) => {
-      const completedCount = subject.entries.reduce((sum, entry) => {
-        const progress = progressByKey.get(entryContentKey(entry.id));
-        return sum + (progress?.completed ? 1 : 0);
-      }, 0);
-
-      const lastOpenedAt = subject.entries
-        .map((entry) => progressByKey.get(entryContentKey(entry.id))?.lastOpenedAt ?? null)
-        .filter((value): value is Date => Boolean(value))
-        .sort((left, right) => right.getTime() - left.getTime())[0] ?? null;
-
-      return {
-        completionPct: subject.entries.length ? Math.round((completedCount / subject.entries.length) * 100) : 0,
-        completedCount,
-        estimatedReadingTime: subject.entries.reduce((sum, entry) => sum + entry.estimatedReadingTime, 0),
-        id: subject.id,
-        lastOpenedAt: lastOpenedAt?.toISOString() ?? null,
-        lastUpdated: subject.entries
-          .map((entry) => entry.updatedAt)
-          .sort((left, right) => right.getTime() - left.getTime())[0]
-          .toISOString(),
-        name: subject.name,
-        questionCount: subject.entries.length
-      };
-    })
+    };
   };
+
+  const primary = await loadSubjects(moduleType);
+  if (primary.items.length) {
+    return primary;
+  }
+
+  const fallbackModuleType =
+    moduleType === SubjectSummaryModuleType.TEXTBOOK ? SubjectSummaryModuleType.HANDBOOK : SubjectSummaryModuleType.TEXTBOOK;
+
+  return loadSubjects(fallbackModuleType);
 }
 
 export async function listStudentSubjectSummaryTopics(_userId: string, query: StudentTopicsQuery) {
-  const rows = await prisma.subjectSummaryEntry.findMany({
-    where: {
-      ...notDeletedWhere,
-      moduleType: query.moduleType,
-      status: SubjectSummaryCaseStatus.PUBLISHED,
-      subject: {
-        ...notDeletedSubjectWhere
+  const loadRows = (targetModuleType: SubjectSummaryModuleType) =>
+    prisma.subjectSummaryEntry.findMany({
+      where: {
+        ...notDeletedWhere,
+        moduleType: targetModuleType,
+        status: SubjectSummaryCaseStatus.PUBLISHED,
+        subject: {
+          ...notDeletedSubjectWhere
+        },
+        subjectId: query.subjectId,
+        topic: {
+          not: null
+        }
       },
-      subjectId: query.subjectId,
-      topic: {
-        not: null
+      select: {
+        topic: true,
+        updatedAt: true
       }
-    },
-    select: {
-      topic: true,
-      updatedAt: true
-    }
-  });
+    });
+
+  let rows = await loadRows(query.moduleType);
+  if (!rows.length) {
+    const fallbackModuleType =
+      query.moduleType === SubjectSummaryModuleType.TEXTBOOK ? SubjectSummaryModuleType.HANDBOOK : SubjectSummaryModuleType.TEXTBOOK;
+    rows = await loadRows(fallbackModuleType);
+  }
 
   const topics = new Map<string, { lastUpdated: string; questionCount: number; topic: string }>();
 
@@ -1268,37 +1288,45 @@ export async function getStudentSubjectSummaryRevisionView(userId: string, query
     return null;
   }
 
-  const allEntries = await prisma.subjectSummaryEntry.findMany({
-    where: {
-      ...notDeletedWhere,
-      moduleType: query.moduleType,
-      status: SubjectSummaryCaseStatus.PUBLISHED,
-      subjectId: query.subjectId,
-      ...(query.topic ? { topic: query.topic } : {})
-    },
-    include: {
-      subject: {
-        select: {
-          id: true,
-          name: true
-        }
+  const loadEntries = (targetModuleType: SubjectSummaryModuleType) =>
+    prisma.subjectSummaryEntry.findMany({
+      where: {
+        ...notDeletedWhere,
+        moduleType: targetModuleType,
+        status: SubjectSummaryCaseStatus.PUBLISHED,
+        subjectId: query.subjectId,
+        ...(query.topic ? { topic: query.topic } : {})
       },
-      caseLinks: {
-        include: {
-          case: {
-            include: {
-              topic: {
-                select: {
-                  id: true,
-                  name: true
+      include: {
+        subject: {
+          select: {
+            id: true,
+            name: true
+          }
+        },
+        caseLinks: {
+          include: {
+            case: {
+              include: {
+                topic: {
+                  select: {
+                    id: true,
+                    name: true
+                  }
                 }
               }
             }
           }
         }
       }
-    }
-  });
+    });
+
+  let allEntries = await loadEntries(query.moduleType);
+  if (!allEntries.length) {
+    const fallbackModuleType =
+      query.moduleType === SubjectSummaryModuleType.TEXTBOOK ? SubjectSummaryModuleType.HANDBOOK : SubjectSummaryModuleType.TEXTBOOK;
+    allEntries = await loadEntries(fallbackModuleType);
+  }
   // DB-level orderBy was removed above so we can perform a single canonical
   // numeric-suffix sort below (Helar-FAC-100 > Helar-FAC-99) instead of the
   // wrong lexical ordering.

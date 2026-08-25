@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AxiosError } from "axios";
 import {
   AlignCenter,
   AlignLeft,
@@ -60,6 +61,18 @@ import {
 } from "@/lib/admin-api";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
+
+function getErrorMessage(error: unknown, fallbackMessage: string) {
+  if (error instanceof AxiosError) {
+    return (error.response?.data as { error?: { message?: string } } | undefined)?.error?.message ?? fallbackMessage;
+  }
+
+  if (error instanceof Error) {
+    return error.message || fallbackMessage;
+  }
+
+  return fallbackMessage;
+}
 
 type AdminFilters = {
   moduleType: SubjectSummaryModuleType;
@@ -2281,32 +2294,42 @@ export function StudentSubjectSummaryModulePage() {
         </label>
 
         <div className="mt-5 space-y-3">
-          {subjectsQuery.data?.items.map((subject: SubjectSummaryModuleStudentSubject) => (
-            <button
-              className={cn(
-                "w-full rounded-[24px] border px-4 py-4 text-left transition",
-                selectedSubjectId === subject.id
-                  ? isDark
-                    ? "border-orange-400/60 bg-slate-950 text-white"
-                    : "border-orange-300 bg-orange-50 text-slate-950"
-                  : isDark
-                    ? "border-slate-800 bg-slate-950 text-slate-200 hover:border-slate-700"
-                    : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300"
-              )}
-              key={subject.id}
-              onClick={() => {
-                setSelectedSubjectId(subject.id);
-                setOpenEntryIds([]);
-              }}
-              type="button"
-            >
-              <p className="font-medium">{subject.name}</p>
-              <div className={cn("mt-2 flex flex-wrap items-center gap-3 text-xs", isDark ? "text-slate-400" : "text-slate-500")}>
-                <span>{subject.questionCount} questions</span>
-                <span>{subject.completionPct}% complete</span>
-              </div>
-            </button>
-          ))}
+          {subjectsQuery.isLoading ? (
+            <p className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-500")}>Loading subjects...</p>
+          ) : subjectsQuery.isError ? (
+            <p className={cn("text-sm", isDark ? "text-rose-300" : "text-rose-600")}>
+              {getErrorMessage(subjectsQuery.error, "We could not load subject summaries right now.")}
+            </p>
+          ) : subjectsQuery.data?.items.length ? (
+            subjectsQuery.data.items.map((subject: SubjectSummaryModuleStudentSubject) => (
+              <button
+                className={cn(
+                  "w-full rounded-[24px] border px-4 py-4 text-left transition",
+                  selectedSubjectId === subject.id
+                    ? isDark
+                      ? "border-orange-400/60 bg-slate-950 text-white"
+                      : "border-orange-300 bg-orange-50 text-slate-950"
+                    : isDark
+                      ? "border-slate-800 bg-slate-950 text-slate-200 hover:border-slate-700"
+                      : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300"
+                )}
+                key={subject.id}
+                onClick={() => {
+                  setSelectedSubjectId(subject.id);
+                  setOpenEntryIds([]);
+                }}
+                type="button"
+              >
+                <p className="font-medium">{subject.name}</p>
+                <div className={cn("mt-2 flex flex-wrap items-center gap-3 text-xs", isDark ? "text-slate-400" : "text-slate-500")}>
+                  <span>{subject.questionCount} questions</span>
+                  <span>{subject.completionPct}% complete</span>
+                </div>
+              </button>
+            ))
+          ) : (
+            <p className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-500")}>No published subjects yet.</p>
+          )}
         </div>
 
         {selectedSubjectId ? (
@@ -2315,6 +2338,10 @@ export function StudentSubjectSummaryModulePage() {
             <div className="mt-4 space-y-2">
               {topicsQuery.isLoading ? (
                 <p className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-500")}>Loading topics...</p>
+              ) : topicsQuery.isError ? (
+                <p className={cn("text-sm", isDark ? "text-rose-300" : "text-rose-600")}>
+                  {getErrorMessage(topicsQuery.error, "We could not load topics right now.")}
+                </p>
               ) : topicsQuery.data?.items.length ? (
                 topicsQuery.data.items.map((topic: SubjectSummaryModuleStudentTopic) => (
                   <button
