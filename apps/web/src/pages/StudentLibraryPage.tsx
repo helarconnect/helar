@@ -399,14 +399,6 @@ export function StudentLawReportsPage() {
                           New
                         </span>
                       ) : null}
-                      <span
-                        className={cn(
-                          "inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium",
-                          isDark ? "border border-slate-700 bg-slate-900 text-slate-300" : "border border-slate-200 bg-white text-slate-700"
-                        )}
-                      >
-                        #{index + 1} of {totalItems}
-                      </span>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 text-[11px]">
                       <span

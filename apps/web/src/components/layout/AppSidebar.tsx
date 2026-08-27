@@ -8,7 +8,7 @@ import { useTheme } from '@/hooks/useTheme'
 import { fetchLibraryHelarpedia, fetchLibraryLawReports } from '@/lib/admin-api'
 import { getDashboardNav } from '@/lib/mock-api'
 import { queryKeys } from '@/lib/query-keys'
-import { cn, hasAdminAccess, isContentAdmin, isSuperAdmin } from '@/lib/utils'
+import { cn, getWorkspaceLabel, hasAdminAccess } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth-store'
 import { useUiStore } from '@/store/ui-store'
 
@@ -45,13 +45,7 @@ export function AppSidebar() {
   const roleCodes = session?.user.roleCodes ?? []
   const userName = session?.user.fullName ?? 'Chidi Adebayo'
   const isAdminWorkspace = hasAdminAccess(roleCodes)
-  const userTrack = isSuperAdmin(roleCodes)
-    ? 'Super admin workspace'
-    : isContentAdmin(roleCodes)
-      ? 'Content admin workspace'
-      : isAdminWorkspace
-        ? 'Admin workspace'
-        : 'Student workspace'
+  const userTrack = getWorkspaceLabel(roleCodes)
   const navigationItems = getDashboardNav(roleCodes)
 
   // Deduplicated prefetch helper. Checks both the React Query cache state AND

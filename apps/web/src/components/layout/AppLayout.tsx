@@ -10,7 +10,7 @@ import { StudyNotesFab } from '@/components/layout/StudyNotesFab'
 import { ThemeToggle } from '@/components/layout/ThemeToggle'
 import { useTheme } from '@/hooks/useTheme'
 import { resendEmailVerification } from '@/lib/api'
-import { cn, hasAdminAccess, isContentAdmin, isSuperAdmin } from '@/lib/utils'
+import { cn, getWorkspaceLabel, hasAdminAccess, isContentAdmin, isJudge, isLawyer, isStudent, isSuperAdmin, resolveWorkspaceTier } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth-store'
 import { useUiStore } from '@/store/ui-store'
 
@@ -78,14 +78,19 @@ export function AppLayout() {
   const isAdminWorkspace = hasAdminAccess(roleCodes)
   const isSuperAdminWorkspace = isSuperAdmin(roleCodes)
   const isContentAdminWorkspace = isContentAdmin(roleCodes)
+  const workspaceTier = resolveWorkspaceTier(roleCodes)
+  const dashboardTitleByTier: Record<typeof workspaceTier, string> = {
+    super_admin: 'Super Admin Dashboard',
+    content_admin: 'Content Admin Dashboard',
+    admin: 'Admin Dashboard',
+    judge: 'Judge Dashboard',
+    lawyer: 'Lawyer Dashboard',
+    student: 'Student Dashboard',
+  }
   const pageTitles = isAdminWorkspace ? adminPageTitles : studentPageTitles
   const pageTitle =
     (location.pathname === '/app/dashboard'
-      ? isSuperAdminWorkspace
-        ? 'Super Admin Dashboard'
-        : isContentAdminWorkspace
-          ? 'Content Admin Dashboard'
-          : pageTitles[location.pathname]
+      ? dashboardTitleByTier[workspaceTier]
       : pageTitles[location.pathname]) ??
     (location.pathname.startsWith('/app/library/law-reports/')
       ? 'Law Report Reader'
@@ -238,7 +243,7 @@ export function AppLayout() {
     <div
       className={cn(
         'min-h-screen',
-        !isAdminWorkspace && 'student-no-copy',
+        isStudent(roleCodes) && 'student-no-copy',
         isDark
           ? 'bg-[radial-gradient(circle_at_top_left,rgba(254,83,61,0.08),transparent_20%),linear-gradient(180deg,#0b1220_0%,#111827_100%)]'
           : 'bg-[radial-gradient(circle_at_top_left,rgba(254,83,61,0.08),transparent_20%),linear-gradient(180deg,#f5f7fb_0%,#eef3f8_100%)]',

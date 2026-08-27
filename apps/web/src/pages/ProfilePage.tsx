@@ -10,7 +10,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { countries, statesByCountry, type Country } from "@/lib/countries";
 import { nigerianInstitutionsByState, nigerianStates, type NigerianState } from "@/lib/nigeria-institutions";
 import { type DemoProfilePayload, updateMyPassword, updateProfileDemo } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { cn, getPrimaryRoleLabel } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth-store";
 
 const sexOptions = [
@@ -107,11 +107,7 @@ export function ProfilePage() {
   const isStudentUser = currentUser?.roleCodes.includes("student") ?? false;
   const [activeSection, setActiveSection] = useState<ProfileSection>("details");
 
-  const roleLabel = currentUser?.roleCodes.includes("student")
-    ? "Student account"
-    : currentUser?.roleCodes.includes("lawyer")
-      ? "Lawyer account"
-      : "Member account";
+  const roleLabel = getPrimaryRoleLabel(currentUser?.roleCodes ?? []);
 
   const resolvedCountry = (countries.includes(currentUser?.country as Country) ? (currentUser?.country as Country) : "Nigeria") as Country;
 
