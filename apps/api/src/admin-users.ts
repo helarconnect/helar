@@ -7,6 +7,86 @@ import { revokeUserSessions } from "./lib/sessions.js";
 import { containsText } from "./lib/text-search.js";
 import { runInTransaction } from "./lib/transactions.js";
 
+// --- Case-insensitive + punctuation-tolerant search helpers (same semantics as portal-search) ---
+
+function stripHtmlForSearch(value: string): string {
+  return value.replace(/<[^>]+>/g, " ");
+}
+
+function normalizeUserSearchText(value: string): string {
+  const withoutHtml = stripHtmlForSearch(value);
+  const lower = withoutHtml.toLowerCase();
+  const normalized = lower.replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+  return normalized;
+}
+
+function tokenizeUserSearchQuery(query: string): string[] {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+
+  const normalized = normalizeUserSearchText(trimmed);
+  if (!normalized) return [];
+
+  const tokens = new Set<string>();
+  for (const term of normalized.split(" ")) {
+    if (term.length >= 2) tokens.add(term);
+  }
+
+  // Also add collapsed-punctuation variant for serial-style tokens
+  const collapsed = trimmed.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (collapsed.length >= 3) tokens.add(collapsed);
+
+  return Array.from(tokens);
+}
+
+function matchesUserSearch(query: string, ...fields: Array<string | null | undefined>): boolean {
+  const terms = tokenizeUserSearchQuery(query);
+  if (terms.length === 0) return true;
+
+  const rawHaystack = fields.filter((f): f is string => typeof f === "string" && f.length > 0).join(" ");
+  const haystack = normalizeUserSearchText(rawHaystack);
+  const collapsedHaystack = rawHaystack.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  return terms.every((term) => haystack.includes(term) || collapsedHaystack.includes(term));
+}
+
+// Generic deterministic sort helper with tiebreaks
+function userCompareWithTiebreak<T>(
+  a: T,
+  b: T,
+  direction: "asc" | "desc",
+  createdAtOf: (row: T) => Date,
+  idOf: (row: T) => string,
+  sortFieldOf?: (row: T) => string | number | Date | null | undefined
+): number {
+  const directionMul = direction === "asc" ? 1 : -1;
+  // Primary: sortField if provided, else createdAt
+  if (sortFieldOf) {
+    const aPrimary = sortFieldOf(a);
+    const bPrimary = sortFieldOf(b);
+    let cmp: number;
+    if (typeof aPrimary === "number" && typeof bPrimary === "number") {
+      cmp = (aPrimary - bPrimary) * directionMul;
+    } else if (aPrimary instanceof Date && bPrimary instanceof Date) {
+      cmp = (aPrimary.getTime() - bPrimary.getTime()) * directionMul;
+    } else {
+      const aStr = String(aPrimary ?? "");
+      const bStr = String(bPrimary ?? "");
+      cmp = aStr.localeCompare(bStr, undefined, { sensitivity: "base" }) * directionMul;
+    }
+    if (cmp !== 0) return cmp;
+  }
+  // Tiebreak 1: createdAt DESC (fixed direction per requirement)
+  const aC = createdAtOf(a).getTime();
+  const bC = createdAtOf(b).getTime();
+  let cmp = (aC - bC) * -1; // DESC tiebreak
+  if (cmp !== 0) return cmp;
+  // Tiebreak 2: id ASC
+  const aId = idOf(a);
+  const bId = idOf(b);
+  return aId < bId ? -1 : aId > bId ? 1 : 0;
+}
+
 type UserWhereInput = NonNullable<NonNullable<Parameters<typeof prisma.user.findMany>[0]>["where"]>;
 type UserRoleWhereInput = NonNullable<NonNullable<Parameters<typeof prisma.userRole.findMany>[0]>["where"]>;
 
@@ -581,79 +661,100 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
   const previousWindowEnd = new Date(registrationWindow.start.getTime() - 1);
   const skip = (filters.page - 1) * filters.pageSize;
 
+  const strictWhere = where;
+  const broadWhere = baseWhere;
+  const hasActiveSearch = search.length >= 2;
+
+  type UserFindManyArgs = NonNullable<Parameters<typeof prisma.user.findMany>[0]>;
+  type UserInclude = NonNullable<UserFindManyArgs["include"]>;
+
+  const includeForPagedUsers: UserInclude = {
+    roles: {
+      where: {
+        ...notDeletedUserRoleWhere()
+      },
+      include: {
+        role: true
+      }
+    },
+    devices: {
+      where: {
+        deletedAt: null
+      },
+      orderBy: {
+        lastSeenAt: "desc"
+      },
+      take: 5
+    },
+    sessions: {
+      where: {
+        deletedAt: null
+      },
+      orderBy: {
+        updatedAt: "desc"
+      },
+      take: 5
+    },
+    subscriptions: {
+      where: {
+        deletedAt: null
+      },
+      orderBy: {
+        createdAt: "desc"
+      },
+      take: 1,
+      include: {
+        plan: true
+      }
+    },
+    payments: {
+      where: {
+        deletedAt: null
+      },
+      orderBy: {
+        createdAt: "desc"
+      },
+      take: 1
+    },
+    _count: {
+      select: {
+        devices: true,
+        sessions: true,
+        payments: true,
+        topics: true,
+        answers: true,
+        comments: true,
+        replies: true
+      }
+    }
+  };
+
   if (usesMongoRuntime && search) {
-    const [allUsers, availableRoles, totalRegisteredUsers, globalRoleCounts] = await Promise.all([
+    const [allUsersRaw, availableRoles, totalRegisteredUsers, globalRoleCounts] = await Promise.all([
       prisma.user.findMany({
         where: baseWhere,
-        include: {
-          roles: {
-            where: {
-              ...notDeletedUserRoleWhere()
-            },
-            include: {
-              role: true
-            }
-          },
-          devices: {
-            where: {
-              deletedAt: null
-            },
-            orderBy: {
-              lastSeenAt: "desc"
-            },
-            take: 5
-          },
-          sessions: {
-            where: {
-              deletedAt: null
-            },
-            orderBy: {
-              updatedAt: "desc"
-            },
-            take: 5
-          },
-          subscriptions: {
-            where: {
-              deletedAt: null
-            },
-            orderBy: {
-              createdAt: "desc"
-            },
-            take: 1,
-            include: {
-              plan: true
-            }
-          },
-          payments: {
-            where: {
-              deletedAt: null
-            },
-            orderBy: {
-              createdAt: "desc"
-            },
-            take: 1
-          },
-          _count: {
-            select: {
-              devices: true,
-              sessions: true,
-              payments: true,
-              topics: true,
-              answers: true,
-              comments: true,
-              replies: true
-            }
-          }
-        }
+        include: includeForPagedUsers
       }),
       managedRolesPromise,
       totalRegisteredUsersPromise,
       globalRoleCountsPromise
     ]);
 
+    type UserWithRoleRelations = Parameters<typeof normalizeUserSummary>[0];
+    const allUsers = allUsersRaw as unknown as UserWithRoleRelations[];
+    type MatchesUserParam = Parameters<typeof matchesAdminUserSearch>[0];
+    type CompareUserParam = Parameters<typeof compareAdminUsers>[0];
+
     const matchedUsers = allUsers
-      .filter((user) => matchesAdminUserSearch(user, search))
-      .sort((left, right) => compareAdminUsers(left, right, filters.sortBy, filters.sortOrder));
+      .filter((user) => matchesAdminUserSearch(user as unknown as MatchesUserParam, search))
+      .sort((left, right) =>
+        compareAdminUsers(
+          left as unknown as CompareUserParam,
+          right as unknown as CompareUserParam,
+          filters.sortBy,
+          filters.sortOrder
+        )
+      );
 
     const filteredTotal = matchedUsers.length;
     const activeUsers = matchedUsers.filter((user) => user.status === "ACTIVE").length;
@@ -674,10 +775,11 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
       timelineMap.set(dateKey, (timelineMap.get(dateKey) ?? 0) + 1);
 
       for (const userRole of user.roles) {
-        const existingRole = roleBreakdownMap.get(userRole.role.code);
-        roleBreakdownMap.set(userRole.role.code, {
-          code: userRole.role.code,
-          name: userRole.role.name,
+        const role = userRole.role;
+        const existingRole = roleBreakdownMap.get(role.code);
+        roleBreakdownMap.set(role.code, {
+          code: role.code,
+          name: role.name,
           count: (existingRole?.count ?? 0) + 1
         });
       }
@@ -750,6 +852,225 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
     };
   }
 
+  if (!usesMongoRuntime && hasActiveSearch) {
+    // Memory pipeline: merge strict+broad candidates → filter by matchesUserSearch → sort → paginate → hydrate
+    type CandidateRow = {
+      id: string;
+      fullName: string;
+      email: string;
+      phoneNumber: string | null;
+      addressLine1: string | null;
+      addressLine2: string | null;
+      city: string | null;
+      state: string | null;
+      postalCode: string | null;
+      country: string | null;
+      status: string;
+      emailVerifiedAt: Date | null;
+      createdAt: Date;
+      roles: Array<{
+        role: { code: string; name: string };
+      }>;
+    };
+
+    // Minimal select: searchable fields + sortable + createdAt/emailVerifiedAt + id + role relation
+    const candidateSelect = {
+      id: true,
+      fullName: true,
+      email: true,
+      phoneNumber: true,
+      addressLine1: true,
+      addressLine2: true,
+      city: true,
+      state: true,
+      postalCode: true,
+      country: true,
+      status: true,
+      emailVerifiedAt: true,
+      createdAt: true,
+      roles: {
+        where: { ...notDeletedUserRoleWhere() },
+        select: {
+          role: { select: { code: true, name: true } }
+        }
+      }
+    } as const;
+
+    // Fetch both strict and broad candidates, plus global summary promises
+    const [dbStrictRows, dbBroadRows, availableRoles, totalRegisteredUsers, globalRoleCounts] = await Promise.all([
+      prisma.user.findMany({ select: candidateSelect, where: strictWhere }),
+      prisma.user.findMany({ select: candidateSelect, where: broadWhere }),
+      managedRolesPromise,
+      totalRegisteredUsersPromise,
+      globalRoleCountsPromise
+    ]);
+
+    // Merge candidates by id (broad first, strict overwrites)
+    const merged = new Map<string, CandidateRow>();
+    for (const row of dbBroadRows as unknown as CandidateRow[]) merged.set(row.id, row);
+    for (const row of dbStrictRows as unknown as CandidateRow[]) merged.set(row.id, row);
+    const candidates = Array.from(merged.values());
+
+    // Apply in-memory authoritative search (case-insensitive, punctuation-tolerant, AND semantics)
+    // Search across all text-searchable fields + status
+    const matched = candidates.filter((row) =>
+      matchesUserSearch(
+        filters.search,
+        row.fullName,
+        row.email,
+        row.phoneNumber,
+        row.addressLine1,
+        row.addressLine2,
+        row.city,
+        row.state,
+        row.postalCode,
+        row.country,
+        row.status
+      )
+    );
+
+    // Deterministic sort: primary sort direction → createdAt DESC tiebreak → id ASC
+    matched.sort((a, b) => {
+      const sortFieldOf = (row: CandidateRow): string | Date | null => {
+        switch (filters.sortBy) {
+          case "fullName":
+            return row.fullName;
+          case "email":
+            return row.email;
+          case "status":
+            return row.status;
+          case "role":
+            return getPrimaryRoleName(row.roles);
+          case "createdAt":
+          default:
+            return row.createdAt;
+        }
+      };
+      return userCompareWithTiebreak(
+        a,
+        b,
+        filters.sortOrder,
+        (row) => row.createdAt,
+        (row) => row.id,
+        sortFieldOf
+      );
+    });
+
+    // Compute summary stats from matched in-memory set (authoritative)
+    const filteredTotal = matched.length;
+    const activeUsers = matched.filter((user) => user.status === "ACTIVE").length;
+    const pendingUsers = matched.filter((user) => user.status === "PENDING").length;
+    const suspendedUsers = matched.filter((user) => user.status === "SUSPENDED").length;
+    const verifiedUsers = matched.filter((user) => user.emailVerifiedAt !== null).length;
+    const registrationsInWindow = matched.filter(
+      (user) => user.createdAt >= registrationWindow.start && user.createdAt <= registrationWindow.end
+    ).length;
+    const registrationsInPreviousWindow = matched.filter(
+      (user) => user.createdAt >= previousWindowStart && user.createdAt <= previousWindowEnd
+    ).length;
+
+    // Build timeline and role breakdown from matched users
+    const timelineMap = new Map<string, number>();
+    const roleBreakdownMap = new Map<string, { code: string; name: string; count: number }>();
+
+    for (const user of matched) {
+      const dateKey = formatDateKey(user.createdAt);
+      timelineMap.set(dateKey, (timelineMap.get(dateKey) ?? 0) + 1);
+
+      for (const userRole of user.roles) {
+        const existingRole = roleBreakdownMap.get(userRole.role.code);
+        roleBreakdownMap.set(userRole.role.code, {
+          code: userRole.role.code,
+          name: userRole.role.name,
+          count: (existingRole?.count ?? 0) + 1
+        });
+      }
+    }
+
+    const registrationTimeline = Array.from(timelineMap.entries()).map(([date, count]) => ({
+      date,
+      label: date,
+      count
+    }));
+    const roleBreakdown = Array.from(roleBreakdownMap.values()).sort((left, right) => right.count - left.count);
+
+    // Paginate and hydrate the exact page with full include
+    const totalPages = Math.max(1, Math.ceil(filteredTotal / filters.pageSize));
+    const pageIds = matched.slice(skip, skip + filters.pageSize).map((r) => r.id);
+
+    let pagedUsers: any[] = [];
+    if (pageIds.length) {
+      const hydrated = await prisma.user.findMany({
+        where: { id: { in: pageIds } },
+        include: includeForPagedUsers
+      });
+      // Reorder to match pageIds (Prisma `IN` does not preserve order)
+      const hydratedById = new Map(hydrated.map((item) => [item.id, item]));
+      pagedUsers = pageIds.flatMap((id) => {
+        const user = hydratedById.get(id);
+        return user ? [user] : [];
+      });
+    }
+
+    return {
+      globalSummary: {
+        totalUsers: totalRegisteredUsers,
+        roleCounts: globalRoleCounts
+      },
+      summary: {
+        totalUsers: filteredTotal,
+        activeUsers,
+        pendingUsers,
+        suspendedUsers,
+        verifiedUsers,
+        registrationsInWindow
+      },
+      metrics: [
+        {
+          id: "total-users",
+          label: "Matched users",
+          value: filteredTotal.toLocaleString(),
+          change: filters.search || filters.role !== "all" || filters.status !== "all" ? "Based on the active filters" : "Across the full user base"
+        },
+        {
+          id: "registrations-window",
+          label: "Registrations",
+          value: registrationsInWindow.toLocaleString(),
+          change: formatPercentageChange(registrationsInWindow, registrationsInPreviousWindow)
+        },
+        {
+          id: "verified-users",
+          label: "Verified email",
+          value: verifiedUsers.toLocaleString(),
+          change: filteredTotal === 0 ? "No users in this view yet" : `${Math.round((verifiedUsers / filteredTotal) * 100)}% of matched users`
+        },
+        {
+          id: "active-users",
+          label: "Active accounts",
+          value: activeUsers.toLocaleString(),
+          change: filteredTotal === 0 ? "No users in this view yet" : `${Math.round((activeUsers / filteredTotal) * 100)}% of matched users`
+        }
+      ],
+      registrationTimeline,
+      roleBreakdown,
+      users: pagedUsers.map(normalizeUserSummary),
+      pagination: {
+        page: filters.page,
+        pageSize: filters.pageSize,
+        totalItems: filteredTotal,
+        totalPages
+      },
+      availableRoles: availableRoles
+        .filter((role) => assignableRoleCodes.includes(role.code))
+        .map((role) => ({
+          code: role.code,
+          name: role.name
+        })),
+      appliedFilters: filters
+    };
+  }
+
+  // Fast path: no active search (or empty search), use native Prisma count + pagination
   const [
     filteredTotal,
     activeUsers,
@@ -820,70 +1141,6 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
       totalRegisteredUsersPromise,
       globalRoleCountsPromise
     ]);
-
-  type UserFindManyArgs = NonNullable<Parameters<typeof prisma.user.findMany>[0]>;
-  type UserInclude = NonNullable<UserFindManyArgs["include"]>;
-
-  const includeForPagedUsers: UserInclude = {
-    roles: {
-      where: {
-        ...notDeletedUserRoleWhere()
-      },
-      include: {
-        role: true
-      }
-    },
-    devices: {
-      where: {
-        deletedAt: null
-      },
-      orderBy: {
-        lastSeenAt: "desc"
-      },
-      take: 5
-    },
-    sessions: {
-      where: {
-        deletedAt: null
-      },
-      orderBy: {
-        updatedAt: "desc"
-      },
-      take: 5
-    },
-    subscriptions: {
-      where: {
-        deletedAt: null
-      },
-      orderBy: {
-        createdAt: "desc"
-      },
-      take: 1,
-      include: {
-        plan: true
-      }
-    },
-    payments: {
-      where: {
-        deletedAt: null
-      },
-      orderBy: {
-        createdAt: "desc"
-      },
-      take: 1
-    },
-    _count: {
-      select: {
-        devices: true,
-        sessions: true,
-        payments: true,
-        topics: true,
-        answers: true,
-        comments: true,
-        replies: true
-      }
-    }
-  };
 
   let pagedUsers: any[] = [];
 

@@ -5,6 +5,74 @@ import { prisma } from "./lib/prisma.js";
 import { parseSearchDateRange } from "./lib/search-utils.js";
 import { containsText } from "./lib/text-search.js";
 
+// --- Case-insensitive + punctuation-tolerant search helpers (same semantics as portal-search) ---
+
+function stripHtmlForSearch(value: string): string {
+  return value.replace(/<[^>]+>/g, " ");
+}
+
+function normalizeStudySearchText(value: string): string {
+  const withoutHtml = stripHtmlForSearch(value);
+  const lower = withoutHtml.toLowerCase();
+  const normalized = lower.replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+  return normalized;
+}
+
+function tokenizeStudySearchQuery(query: string): string[] {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+
+  const normalized = normalizeStudySearchText(trimmed);
+  if (!normalized) return [];
+
+  const tokens = new Set<string>();
+  for (const term of normalized.split(" ")) {
+    if (term.length >= 2) tokens.add(term);
+  }
+
+  // Also add collapsed-punctuation variant for serial-style tokens
+  const collapsed = trimmed.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (collapsed.length >= 3) tokens.add(collapsed);
+
+  return Array.from(tokens);
+}
+
+function matchesStudySearch(query: string, ...fields: Array<string | null | undefined>): boolean {
+  const terms = tokenizeStudySearchQuery(query);
+  if (terms.length === 0) return true;
+
+  const rawHaystack = fields.filter((f): f is string => typeof f === "string" && f.length > 0).join(" ");
+  const haystack = normalizeStudySearchText(rawHaystack);
+  const collapsedHaystack = rawHaystack.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  return terms.every((term) => haystack.includes(term) || collapsedHaystack.includes(term));
+}
+
+// Generic deterministic sort helper with tiebreaks
+function studyCompareWithTiebreak<T>(
+  a: T,
+  b: T,
+  direction: "asc" | "desc",
+  createdAtOf: (row: T) => Date,
+  updatedAtOf?: (row: T) => Date
+): number {
+  const directionMul = direction === "asc" ? 1 : -1;
+  // Primary: updatedAt if available, else createdAt
+  const aPrimary = updatedAtOf ? updatedAtOf(a).getTime() : createdAtOf(a).getTime();
+  const bPrimary = updatedAtOf ? updatedAtOf(b).getTime() : createdAtOf(b).getTime();
+  let cmp = (aPrimary - bPrimary) * directionMul;
+  if (cmp !== 0) return cmp;
+  // Tiebreak 1: createdAt
+  const aC = createdAtOf(a).getTime();
+  const bC = createdAtOf(b).getTime();
+  cmp = (aC - bC) * directionMul;
+  if (cmp !== 0) return cmp;
+  // Tiebreak 2: id ASC
+  const aId = (a as { id: string }).id;
+  const bId = (b as { id: string }).id;
+  return aId < bId ? -1 : aId > bId ? 1 : 0;
+}
+
 const progressInputSchema = z
   .object({
     completed: z.boolean().optional(),
@@ -365,27 +433,73 @@ export async function listStudentStudyBookmarks(userId: string, query: z.infer<t
           ? [{ topicName: "asc" as const }, { createdAt: "desc" as const }]
           : [{ createdAt: "desc" as const }];
 
-  const items = await prisma.studentStudyBookmark.findMany({
-    where: {
-      ...notDeletedStudyBookmarkWhere,
-      userId,
-      ...(query.contentType ? { contentType: query.contentType } : {}),
-      ...(query.search
-        ? {
-            OR: [
-              { title: containsText(query.search) },
-              { subjectName: containsText(query.search) },
-              { topicName: containsText(query.search) },
-              { note: containsText(query.search) }
-            ]
-          }
-        : {})
-    },
-    orderBy
+  const trimmedSearch = query.search.trim();
+  const hasActiveSearch = trimmedSearch.length >= 2;
+
+  if (!hasActiveSearch) {
+    const items = await prisma.studentStudyBookmark.findMany({
+      where: {
+        ...notDeletedStudyBookmarkWhere,
+        userId,
+        ...(query.contentType ? { contentType: query.contentType } : {})
+      },
+      orderBy
+    });
+
+    return {
+      items: items.map((item) => ({
+        ...item,
+        createdAt: item.createdAt.toISOString(),
+        updatedAt: item.updatedAt.toISOString()
+      }))
+    };
+  }
+
+  const baseWhere: Prisma.StudentStudyBookmarkWhereInput = {
+    ...notDeletedStudyBookmarkWhere,
+    userId,
+    ...(query.contentType ? { contentType: query.contentType } : {})
+  };
+  const strictWhere: Prisma.StudentStudyBookmarkWhereInput = {
+    ...baseWhere,
+    OR: [
+      { title: containsText(trimmedSearch) },
+      { subjectName: containsText(trimmedSearch) },
+      { topicName: containsText(trimmedSearch) },
+      { note: containsText(trimmedSearch) }
+    ]
+  };
+  const broadWhere: Prisma.StudentStudyBookmarkWhereInput = baseWhere;
+
+  const [strictRows, broadRows] = await Promise.all([
+    prisma.studentStudyBookmark.findMany({ where: strictWhere, orderBy }),
+    prisma.studentStudyBookmark.findMany({ where: broadWhere, orderBy })
+  ]);
+
+  const mergedMap = new Map<string, typeof strictRows[number]>();
+  for (const row of strictRows) mergedMap.set(row.id, row);
+  for (const row of broadRows) if (!mergedMap.has(row.id)) mergedMap.set(row.id, row);
+
+  const merged = Array.from(mergedMap.values());
+  const matched = merged.filter((row) =>
+    matchesStudySearch(trimmedSearch, row.title, row.subjectName, row.topicName, row.note)
+  );
+
+  matched.sort((a, b) => {
+    let cmp = 0;
+    if (query.sortBy === "title") {
+      cmp = (a.title ?? "").localeCompare(b.title ?? "");
+    } else if (query.sortBy === "subject") {
+      cmp = (a.subjectName ?? "").localeCompare(b.subjectName ?? "");
+    } else if (query.sortBy === "topic") {
+      cmp = (a.topicName ?? "").localeCompare(b.topicName ?? "");
+    }
+    if (cmp !== 0) return cmp;
+    return studyCompareWithTiebreak(a, b, "desc", (r) => r.createdAt, (r) => r.updatedAt);
   });
 
   return {
-    items: items.map((item) => ({
+    items: matched.map((item) => ({
       ...item,
       createdAt: item.createdAt.toISOString(),
       updatedAt: item.updatedAt.toISOString()
@@ -464,27 +578,62 @@ export async function removeStudentStudyBookmark(userId: string, bookmarkId: str
 }
 
 export async function listStudentStudyNotes(userId: string, query: z.infer<typeof notesQuerySchema>) {
-  const items = await prisma.studentStudyNote.findMany({
-    where: {
-      ...notDeletedStudyNoteWhere,
-      userId,
-      ...(query.search
-        ? {
-            OR: [
-              { title: containsText(query.search) },
-              { referenceTitle: containsText(query.search) },
-              { subjectName: containsText(query.search) },
-              { topicName: containsText(query.search) },
-              { contentPlainText: containsText(query.search) }
-            ]
-          }
-        : {})
-    },
-    orderBy: [{ updatedAt: "desc" }]
-  });
+  const orderBy = [{ updatedAt: "desc" as const }];
+  const trimmedSearch = query.search.trim();
+  const hasActiveSearch = trimmedSearch.length >= 2;
+
+  if (!hasActiveSearch) {
+    const items = await prisma.studentStudyNote.findMany({
+      where: {
+        ...notDeletedStudyNoteWhere,
+        userId
+      },
+      orderBy
+    });
+
+    return {
+      items: items.map((item) => ({
+        ...item,
+        createdAt: item.createdAt.toISOString(),
+        updatedAt: item.updatedAt.toISOString()
+      }))
+    };
+  }
+
+  const baseWhere: Prisma.StudentStudyNoteWhereInput = {
+    ...notDeletedStudyNoteWhere,
+    userId
+  };
+  const strictWhere: Prisma.StudentStudyNoteWhereInput = {
+    ...baseWhere,
+    OR: [
+      { title: containsText(trimmedSearch) },
+      { referenceTitle: containsText(trimmedSearch) },
+      { subjectName: containsText(trimmedSearch) },
+      { topicName: containsText(trimmedSearch) },
+      { contentPlainText: containsText(trimmedSearch) }
+    ]
+  };
+  const broadWhere: Prisma.StudentStudyNoteWhereInput = baseWhere;
+
+  const [strictRows, broadRows] = await Promise.all([
+    prisma.studentStudyNote.findMany({ where: strictWhere, orderBy }),
+    prisma.studentStudyNote.findMany({ where: broadWhere, orderBy })
+  ]);
+
+  const mergedMap = new Map<string, typeof strictRows[number]>();
+  for (const row of strictRows) mergedMap.set(row.id, row);
+  for (const row of broadRows) if (!mergedMap.has(row.id)) mergedMap.set(row.id, row);
+
+  const merged = Array.from(mergedMap.values());
+  const matched = merged.filter((row) =>
+    matchesStudySearch(trimmedSearch, row.title, row.referenceTitle, row.subjectName, row.topicName, row.contentPlainText)
+  );
+
+  matched.sort((a, b) => studyCompareWithTiebreak(a, b, "desc", (r) => r.createdAt, (r) => r.updatedAt));
 
   return {
-    items: items.map((item) => ({
+    items: matched.map((item) => ({
       ...item,
       createdAt: item.createdAt.toISOString(),
       updatedAt: item.updatedAt.toISOString()
@@ -607,26 +756,61 @@ export async function recordStudentStudyDownload(userId: string, input: z.infer<
 }
 
 export async function listStudentStudyDownloads(userId: string, query: z.infer<typeof notesQuerySchema>) {
-  const items = await prisma.studentStudyDownload.findMany({
-    where: {
-      ...notDeletedStudyDownloadWhere,
-      userId,
-      ...(query.search
-        ? {
-            OR: [
-              { fileName: containsText(query.search) },
-              { title: containsText(query.search) },
-              { subjectName: containsText(query.search) },
-              { topicName: containsText(query.search) }
-            ]
-          }
-        : {})
-    },
-    orderBy: [{ createdAt: "desc" }]
-  });
+  const orderBy = [{ createdAt: "desc" as const }];
+  const trimmedSearch = query.search.trim();
+  const hasActiveSearch = trimmedSearch.length >= 2;
+
+  if (!hasActiveSearch) {
+    const items = await prisma.studentStudyDownload.findMany({
+      where: {
+        ...notDeletedStudyDownloadWhere,
+        userId
+      },
+      orderBy
+    });
+
+    return {
+      items: items.map((item) => ({
+        ...item,
+        createdAt: item.createdAt.toISOString(),
+        updatedAt: item.updatedAt.toISOString()
+      }))
+    };
+  }
+
+  const baseWhere: Prisma.StudentStudyDownloadWhereInput = {
+    ...notDeletedStudyDownloadWhere,
+    userId
+  };
+  const strictWhere: Prisma.StudentStudyDownloadWhereInput = {
+    ...baseWhere,
+    OR: [
+      { fileName: containsText(trimmedSearch) },
+      { title: containsText(trimmedSearch) },
+      { subjectName: containsText(trimmedSearch) },
+      { topicName: containsText(trimmedSearch) }
+    ]
+  };
+  const broadWhere: Prisma.StudentStudyDownloadWhereInput = baseWhere;
+
+  const [strictRows, broadRows] = await Promise.all([
+    prisma.studentStudyDownload.findMany({ where: strictWhere, orderBy }),
+    prisma.studentStudyDownload.findMany({ where: broadWhere, orderBy })
+  ]);
+
+  const mergedMap = new Map<string, typeof strictRows[number]>();
+  for (const row of strictRows) mergedMap.set(row.id, row);
+  for (const row of broadRows) if (!mergedMap.has(row.id)) mergedMap.set(row.id, row);
+
+  const merged = Array.from(mergedMap.values());
+  const matched = merged.filter((row) =>
+    matchesStudySearch(trimmedSearch, row.fileName, row.title, row.subjectName, row.topicName)
+  );
+
+  matched.sort((a, b) => studyCompareWithTiebreak(a, b, "desc", (r) => r.createdAt, (r) => r.updatedAt));
 
   return {
-    items: items.map((item) => ({
+    items: matched.map((item) => ({
       ...item,
       createdAt: item.createdAt.toISOString(),
       updatedAt: item.updatedAt.toISOString()
@@ -636,242 +820,207 @@ export async function listStudentStudyDownloads(userId: string, query: z.infer<t
 
 export async function searchStudentStudyCenter(userId: string, query: z.infer<typeof searchQuerySchema>) {
   const dateRange = parseSearchDateRange(query.query);
-  const normalizedQuery = query.query.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
-  const terms = normalizedQuery
-    .split(/\s+/)
-    .map((term) => term.trim())
-    .filter((term) => term.length >= 2);
+  const trimmedSearch = query.query.trim();
+  const hasActiveSearch = trimmedSearch.length >= 2;
 
-  const collapsed = query.query.toLowerCase().replace(/[^a-z0-9]+/g, "").trim();
-  if (collapsed.length >= 3 && !terms.includes(collapsed)) {
-    terms.push(collapsed);
+  const bookmarkBaseWhere: Prisma.StudentStudyBookmarkWhereInput = {
+    ...notDeletedStudyBookmarkWhere,
+    userId
+  };
+  const bookmarkDateRangeWhere: Prisma.StudentStudyBookmarkWhereInput | undefined = dateRange
+    ? {
+        OR: [
+          { createdAt: { gte: dateRange.start, lt: dateRange.end } },
+          { updatedAt: { gte: dateRange.start, lt: dateRange.end } }
+        ]
+      }
+    : undefined;
+  const bookmarkStrictTermsWhere: Prisma.StudentStudyBookmarkWhereInput = hasActiveSearch
+    ? {
+        OR: [
+          { title: containsText(trimmedSearch) },
+          { subjectName: containsText(trimmedSearch) },
+          { topicName: containsText(trimmedSearch) },
+          { note: containsText(trimmedSearch) }
+        ]
+      }
+    : {};
+  const bookmarkStrictWhere: Prisma.StudentStudyBookmarkWhereInput = dateRange
+    ? { ...bookmarkBaseWhere, OR: [bookmarkStrictTermsWhere, bookmarkDateRangeWhere!] }
+    : { ...bookmarkBaseWhere, ...bookmarkStrictTermsWhere };
+  const bookmarkBroadWhere: Prisma.StudentStudyBookmarkWhereInput = dateRange
+    ? { ...bookmarkBaseWhere, ...bookmarkDateRangeWhere }
+    : bookmarkBaseWhere;
+
+  const notesBaseWhere: Prisma.StudentStudyNoteWhereInput = {
+    ...notDeletedStudyNoteWhere,
+    userId
+  };
+  const notesDateRangeWhere: Prisma.StudentStudyNoteWhereInput | undefined = dateRange
+    ? {
+        OR: [
+          { createdAt: { gte: dateRange.start, lt: dateRange.end } },
+          { updatedAt: { gte: dateRange.start, lt: dateRange.end } }
+        ]
+      }
+    : undefined;
+  const notesStrictTermsWhere: Prisma.StudentStudyNoteWhereInput = hasActiveSearch
+    ? {
+        OR: [
+          { title: containsText(trimmedSearch) },
+          { referenceTitle: containsText(trimmedSearch) },
+          { subjectName: containsText(trimmedSearch) },
+          { topicName: containsText(trimmedSearch) },
+          { contentPlainText: containsText(trimmedSearch) }
+        ]
+      }
+    : {};
+  const notesStrictWhere: Prisma.StudentStudyNoteWhereInput = dateRange
+    ? { ...notesBaseWhere, OR: [notesStrictTermsWhere, notesDateRangeWhere!] }
+    : { ...notesBaseWhere, ...notesStrictTermsWhere };
+  const notesBroadWhere: Prisma.StudentStudyNoteWhereInput = dateRange
+    ? { ...notesBaseWhere, ...notesDateRangeWhere }
+    : notesBaseWhere;
+
+  const downloadsBaseWhere: Prisma.StudentStudyDownloadWhereInput = {
+    ...notDeletedStudyDownloadWhere,
+    userId
+  };
+  const downloadsDateRangeWhere: Prisma.StudentStudyDownloadWhereInput | undefined = dateRange
+    ? { createdAt: { gte: dateRange.start, lt: dateRange.end } }
+    : undefined;
+  const downloadsStrictTermsWhere: Prisma.StudentStudyDownloadWhereInput = hasActiveSearch
+    ? {
+        OR: [
+          { fileName: containsText(trimmedSearch) },
+          { title: containsText(trimmedSearch) },
+          { subjectName: containsText(trimmedSearch) },
+          { topicName: containsText(trimmedSearch) }
+        ]
+      }
+    : {};
+  const downloadsStrictWhere: Prisma.StudentStudyDownloadWhereInput = dateRange
+    ? { ...downloadsBaseWhere, OR: [downloadsStrictTermsWhere, downloadsDateRangeWhere!] }
+    : { ...downloadsBaseWhere, ...downloadsStrictTermsWhere };
+  const downloadsBroadWhere: Prisma.StudentStudyDownloadWhereInput = dateRange
+    ? { ...downloadsBaseWhere, ...downloadsDateRangeWhere }
+    : downloadsBaseWhere;
+
+  const historyBaseWhere: Prisma.StudentStudyProgressWhereInput = {
+    ...notDeletedStudyProgressWhere,
+    userId
+  };
+  const historyDateRangeWhere: Prisma.StudentStudyProgressWhereInput | undefined = dateRange
+    ? {
+        OR: [
+          { createdAt: { gte: dateRange.start, lt: dateRange.end } },
+          { updatedAt: { gte: dateRange.start, lt: dateRange.end } },
+          { lastOpenedAt: { gte: dateRange.start, lt: dateRange.end } }
+        ]
+      }
+    : undefined;
+  const historyStrictTermsWhere: Prisma.StudentStudyProgressWhereInput = hasActiveSearch
+    ? {
+        OR: [
+          { title: containsText(trimmedSearch) },
+          { subjectName: containsText(trimmedSearch) },
+          { topicName: containsText(trimmedSearch) },
+          { lastPositionLabel: containsText(trimmedSearch) }
+        ]
+      }
+    : {};
+  const historyStrictWhere: Prisma.StudentStudyProgressWhereInput = dateRange
+    ? { ...historyBaseWhere, OR: [historyStrictTermsWhere, historyDateRangeWhere!] }
+    : { ...historyBaseWhere, ...historyStrictTermsWhere };
+  const historyBroadWhere: Prisma.StudentStudyProgressWhereInput = dateRange
+    ? { ...historyBaseWhere, ...historyDateRangeWhere }
+    : historyBaseWhere;
+
+  const [
+    strictBookmarks, broadBookmarks,
+    strictNotes, broadNotes,
+    strictDownloads, broadDownloads,
+    strictHistory, broadHistory
+  ] = await Promise.all([
+    prisma.studentStudyBookmark.findMany({ where: bookmarkStrictWhere, orderBy: [{ updatedAt: "desc" }] }),
+    prisma.studentStudyBookmark.findMany({ where: bookmarkBroadWhere, orderBy: [{ updatedAt: "desc" }] }),
+    prisma.studentStudyNote.findMany({ where: notesStrictWhere, orderBy: [{ updatedAt: "desc" }] }),
+    prisma.studentStudyNote.findMany({ where: notesBroadWhere, orderBy: [{ updatedAt: "desc" }] }),
+    prisma.studentStudyDownload.findMany({ where: downloadsStrictWhere, orderBy: [{ createdAt: "desc" }] }),
+    prisma.studentStudyDownload.findMany({ where: downloadsBroadWhere, orderBy: [{ createdAt: "desc" }] }),
+    prisma.studentStudyProgress.findMany({ where: historyStrictWhere, orderBy: [{ lastOpenedAt: "desc" }] }),
+    prisma.studentStudyProgress.findMany({ where: historyBroadWhere, orderBy: [{ lastOpenedAt: "desc" }] })
+  ]);
+
+  function mergeById<T extends { id: string }>(strict: T[], broad: T[]): T[] {
+    const map = new Map<string, T>();
+    for (const row of strict) map.set(row.id, row);
+    for (const row of broad) if (!map.has(row.id)) map.set(row.id, row);
+    return Array.from(map.values());
   }
 
-  const bookmarkTermsWhere: Prisma.StudentStudyBookmarkWhereInput = {
-    AND: terms.map((term) => ({
-      OR: [{ title: containsText(term) }, { subjectName: containsText(term) }, { topicName: containsText(term) }]
-    }))
-  };
-  const notesTermsWhere: Prisma.StudentStudyNoteWhereInput = {
-    AND: terms.map((term) => ({
-      OR: [
-        { title: containsText(term) },
-        { referenceTitle: containsText(term) },
-        { contentPlainText: containsText(term) }
-      ]
-    }))
-  };
-  const downloadsTermsWhere: Prisma.StudentStudyDownloadWhereInput = {
-    AND: terms.map((term) => ({
-      OR: [{ fileName: containsText(term) }, { title: containsText(term) }]
-    }))
-  };
-  const historyTermsWhere: Prisma.StudentStudyProgressWhereInput = {
-    AND: terms.map((term) => ({
-      OR: [{ title: containsText(term) }, { subjectName: containsText(term) }, { topicName: containsText(term) }]
-    }))
-  };
+  const mergedBookmarks = mergeById(strictBookmarks, broadBookmarks);
+  const matchedBookmarks = mergedBookmarks.filter((row) => {
+    const textMatch = hasActiveSearch
+      ? matchesStudySearch(trimmedSearch, row.title, row.subjectName, row.topicName, row.note)
+      : true;
+    const dateMatch = dateRange
+      ? (row.createdAt >= dateRange.start && row.createdAt < dateRange.end) ||
+        (row.updatedAt >= dateRange.start && row.updatedAt < dateRange.end)
+      : false;
+    return textMatch || dateMatch;
+  });
+  matchedBookmarks.sort((a, b) => studyCompareWithTiebreak(a, b, "desc", (r) => r.createdAt, (r) => r.updatedAt));
+  const finalBookmarks = matchedBookmarks.slice(0, 5);
 
-  const [bookmarks, notes, downloads, history] = await Promise.all([
-    prisma.studentStudyBookmark.findMany({
-      where: {
-        ...notDeletedStudyBookmarkWhere,
-        userId,
-        ...(dateRange
-          ? {
-              OR: [
-                bookmarkTermsWhere,
-                {
-                  OR: [
-                    {
-                      createdAt: {
-                        gte: dateRange.start,
-                        lt: dateRange.end
-                      }
-                    },
-                    {
-                      updatedAt: {
-                        gte: dateRange.start,
-                        lt: dateRange.end
-                      }
-                    }
-                  ]
-                }
-              ]
-            }
-          : bookmarkTermsWhere)
-      },
-      orderBy: [{ updatedAt: "desc" }],
-      take: 5
-    }),
-    prisma.studentStudyNote.findMany({
-      where: {
-        ...notDeletedStudyNoteWhere,
-        userId,
-        ...(dateRange
-          ? {
-              OR: [
-                notesTermsWhere,
-                {
-                  OR: [
-                    {
-                      createdAt: {
-                        gte: dateRange.start,
-                        lt: dateRange.end
-                      }
-                    },
-                    {
-                      updatedAt: {
-                        gte: dateRange.start,
-                        lt: dateRange.end
-                      }
-                    }
-                  ]
-                }
-              ]
-            }
-          : notesTermsWhere)
-      },
-      orderBy: [{ updatedAt: "desc" }],
-      take: 5
-    }),
-    prisma.studentStudyDownload.findMany({
-      where: {
-        ...notDeletedStudyDownloadWhere,
-        userId,
-        ...(dateRange
-          ? {
-              OR: [
-                downloadsTermsWhere,
-                {
-                  createdAt: {
-                    gte: dateRange.start,
-                    lt: dateRange.end
-                  }
-                }
-              ]
-            }
-          : downloadsTermsWhere)
-      },
-      orderBy: [{ createdAt: "desc" }],
-      take: 5
-    }),
-    prisma.studentStudyProgress.findMany({
-      where: {
-        ...notDeletedStudyProgressWhere,
-        userId,
-        ...(dateRange
-          ? {
-              OR: [
-                historyTermsWhere,
-                {
-                  OR: [
-                    {
-                      createdAt: {
-                        gte: dateRange.start,
-                        lt: dateRange.end
-                      }
-                    },
-                    {
-                      updatedAt: {
-                        gte: dateRange.start,
-                        lt: dateRange.end
-                      }
-                    },
-                    {
-                      lastOpenedAt: {
-                        gte: dateRange.start,
-                        lt: dateRange.end
-                      }
-                    }
-                  ]
-                }
-              ]
-            }
-          : historyTermsWhere)
-      },
-      orderBy: [{ lastOpenedAt: "desc" }],
-      take: 6
-    })
-  ]);
+  const mergedNotes = mergeById(strictNotes, broadNotes);
+  const matchedNotes = mergedNotes.filter((row) => {
+    const textMatch = hasActiveSearch
+      ? matchesStudySearch(trimmedSearch, row.title, row.referenceTitle, row.subjectName, row.topicName, row.contentPlainText)
+      : true;
+    const dateMatch = dateRange
+      ? (row.createdAt >= dateRange.start && row.createdAt < dateRange.end) ||
+        (row.updatedAt >= dateRange.start && row.updatedAt < dateRange.end)
+      : false;
+    return textMatch || dateMatch;
+  });
+  matchedNotes.sort((a, b) => studyCompareWithTiebreak(a, b, "desc", (r) => r.createdAt, (r) => r.updatedAt));
+  const finalNotes = matchedNotes.slice(0, 5);
 
-  const candidateTake = 320;
-  const [finalBookmarks, finalNotes, finalDownloads, finalHistory] = await Promise.all([
-    completeMongoMatches({
-      items: bookmarks,
-      limit: 5,
-      loadCandidates: () =>
-        prisma.studentStudyBookmark.findMany({
-          where: {
-            ...notDeletedStudyBookmarkWhere,
-            userId
-          },
-          orderBy: [{ updatedAt: "desc" }],
-          take: candidateTake
-        }),
-      matches: (item) =>
-        matchesSearchTerms(terms, item.title, item.subjectName, item.topicName, item.note) ||
-        (dateRange
-          ? (item.createdAt >= dateRange.start && item.createdAt < dateRange.end) ||
-            (item.updatedAt >= dateRange.start && item.updatedAt < dateRange.end)
-          : false)
-    }),
-    completeMongoMatches({
-      items: notes,
-      limit: 5,
-      loadCandidates: () =>
-        prisma.studentStudyNote.findMany({
-          where: {
-            ...notDeletedStudyNoteWhere,
-            userId
-          },
-          orderBy: [{ updatedAt: "desc" }],
-          take: candidateTake
-        }),
-      matches: (item) =>
-        matchesSearchTerms(terms, item.title, item.referenceTitle, item.contentPlainText) ||
-        (dateRange
-          ? (item.createdAt >= dateRange.start && item.createdAt < dateRange.end) ||
-            (item.updatedAt >= dateRange.start && item.updatedAt < dateRange.end)
-          : false)
-    }),
-    completeMongoMatches({
-      items: downloads,
-      limit: 5,
-      loadCandidates: () =>
-        prisma.studentStudyDownload.findMany({
-          where: {
-            ...notDeletedStudyDownloadWhere,
-            userId
-          },
-          orderBy: [{ createdAt: "desc" }],
-          take: candidateTake
-        }),
-      matches: (item) =>
-        matchesSearchTerms(terms, item.fileName, item.title) ||
-        (dateRange ? item.createdAt >= dateRange.start && item.createdAt < dateRange.end : false)
-    }),
-    completeMongoMatches({
-      items: history,
-      limit: 6,
-      loadCandidates: () =>
-        prisma.studentStudyProgress.findMany({
-          where: {
-            ...notDeletedStudyProgressWhere,
-            userId
-          },
-          orderBy: [{ lastOpenedAt: "desc" }],
-          take: candidateTake
-        }),
-      matches: (item) =>
-        matchesSearchTerms(terms, item.title, item.subjectName, item.topicName, item.lastPositionLabel) ||
-        (dateRange
-          ? (item.createdAt >= dateRange.start && item.createdAt < dateRange.end) ||
-            (item.updatedAt >= dateRange.start && item.updatedAt < dateRange.end) ||
-            (item.lastOpenedAt >= dateRange.start && item.lastOpenedAt < dateRange.end)
-          : false)
-    })
-  ]);
+  const mergedDownloads = mergeById(strictDownloads, broadDownloads);
+  const matchedDownloads = mergedDownloads.filter((row) => {
+    const textMatch = hasActiveSearch
+      ? matchesStudySearch(trimmedSearch, row.fileName, row.title, row.subjectName, row.topicName)
+      : true;
+    const dateMatch = dateRange
+      ? row.createdAt >= dateRange.start && row.createdAt < dateRange.end
+      : false;
+    return textMatch || dateMatch;
+  });
+  matchedDownloads.sort((a, b) => studyCompareWithTiebreak(a, b, "desc", (r) => r.createdAt, (r) => r.updatedAt));
+  const finalDownloads = matchedDownloads.slice(0, 5);
+
+  const mergedHistory = mergeById(strictHistory, broadHistory);
+  const matchedHistory = mergedHistory.filter((row) => {
+    const textMatch = hasActiveSearch
+      ? matchesStudySearch(trimmedSearch, row.title, row.subjectName, row.topicName, row.lastPositionLabel)
+      : true;
+    const dateMatch = dateRange
+      ? (row.createdAt >= dateRange.start && row.createdAt < dateRange.end) ||
+        (row.updatedAt >= dateRange.start && row.updatedAt < dateRange.end) ||
+        (row.lastOpenedAt >= dateRange.start && row.lastOpenedAt < dateRange.end)
+      : false;
+    return textMatch || dateMatch;
+  });
+  matchedHistory.sort((a, b) => {
+    const directionMul = -1;
+    const aPrimary = a.lastOpenedAt.getTime();
+    const bPrimary = b.lastOpenedAt.getTime();
+    let cmp = (aPrimary - bPrimary) * directionMul;
+    if (cmp !== 0) return cmp;
+    return studyCompareWithTiebreak(a, b, "desc", (r) => r.createdAt, (r) => r.updatedAt);
+  });
+  const finalHistory = matchedHistory.slice(0, 6);
 
   return {
     items: [

@@ -5,6 +5,97 @@ import { recordIdSchema } from "./lib/record-id.js";
 import { prisma } from "./lib/prisma.js";
 import { containsText } from "./lib/text-search.js";
 
+// --- Case-insensitive + punctuation-tolerant search helpers (same semantics as portal-search) ---
+
+function stripHtmlForSearch(value: string): string {
+  return value.replace(/<[^>]+>/g, " ");
+}
+
+function normalizeCbtSearchText(value: string): string {
+  const withoutHtml = stripHtmlForSearch(value);
+  const lower = withoutHtml.toLowerCase();
+  const normalized = lower.replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+  return normalized;
+}
+
+function tokenizeCbtSearchQuery(query: string): string[] {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+
+  const normalized = normalizeCbtSearchText(trimmed);
+  if (!normalized) return [];
+
+  const tokens = new Set<string>();
+  for (const term of normalized.split(" ")) {
+    if (term.length >= 2) tokens.add(term);
+  }
+
+  // Also add collapsed-punctuation variant for serial-style tokens
+  const collapsed = trimmed.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (collapsed.length >= 3) tokens.add(collapsed);
+
+  return Array.from(tokens);
+}
+
+function matchesCbtSearch(query: string, ...fields: Array<string | null | undefined>): boolean {
+  const terms = tokenizeCbtSearchQuery(query);
+  if (terms.length === 0) return true;
+
+  const rawHaystack = fields.filter((f): f is string => typeof f === "string" && f.length > 0).join(" ");
+  const haystack = normalizeCbtSearchText(rawHaystack);
+  const collapsedHaystack = rawHaystack.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  return terms.every((term) => haystack.includes(term) || collapsedHaystack.includes(term));
+}
+
+// Generic deterministic sort helper with tiebreaks
+function cbtCompareWithTiebreak<T>(
+  a: T,
+  b: T,
+  sortField: string,
+  direction: "asc" | "desc",
+  createdAtOf: (row: T) => Date,
+  updatedAtOf: (row: T) => Date,
+  fieldValueOf?: (row: T, field: string) => string | number | Date | null | undefined
+): number {
+  const directionMul = direction === "asc" ? 1 : -1;
+
+  // Primary: sort by the requested field if we can resolve it
+  if (fieldValueOf && sortField !== "createdAt" && sortField !== "updatedAt") {
+    const aVal = fieldValueOf(a, sortField);
+    const bVal = fieldValueOf(b, sortField);
+    if (aVal != null && bVal != null) {
+      let cmp = 0;
+      if (typeof aVal === "string" && typeof bVal === "string") {
+        cmp = aVal.localeCompare(bVal);
+      } else if (typeof aVal === "number" && typeof bVal === "number") {
+        cmp = aVal - bVal;
+      } else if (aVal instanceof Date && bVal instanceof Date) {
+        cmp = aVal.getTime() - bVal.getTime();
+      }
+      cmp *= directionMul;
+      if (cmp !== 0) return cmp;
+    }
+  }
+
+  // Primary fallback: requested createdAt or updatedAt directly
+  const aPrimary = sortField === "createdAt" ? createdAtOf(a).getTime() : updatedAtOf(a).getTime();
+  const bPrimary = sortField === "createdAt" ? createdAtOf(b).getTime() : updatedAtOf(b).getTime();
+  let cmp = (aPrimary - bPrimary) * directionMul;
+  if (cmp !== 0) return cmp;
+
+  // Tiebreak 1: updatedAt (if not already primary) else createdAt
+  const aTie1 = sortField === "updatedAt" ? createdAtOf(a).getTime() : updatedAtOf(a).getTime();
+  const bTie1 = sortField === "updatedAt" ? createdAtOf(b).getTime() : updatedAtOf(b).getTime();
+  cmp = (aTie1 - bTie1) * directionMul;
+  if (cmp !== 0) return cmp;
+
+  // Tiebreak 2: id ASC
+  const aId = (a as { id: string }).id;
+  const bId = (b as { id: string }).id;
+  return aId < bId ? -1 : aId > bId ? 1 : 0;
+}
+
 const cbtFiltersSchema = z.object({
   page: z.coerce.number().int().min(1).max(10000).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(10),
@@ -306,6 +397,26 @@ function buildQuestionWhere(filters: QuestionFilters): Prisma.CbtQuestionWhereIn
   };
 }
 
+// Broad variant: keeps scoping filters but drops the search OR-clause for fallback candidate fetch
+function buildBroadCbtWhere(filters: CbtFilters): Prisma.CbtWhereInput {
+  return {
+    ...notDeletedCbtWhere,
+    ...(filters.status === "all" ? {} : { status: filters.status }),
+  };
+}
+
+// Broad variant for questions: drops search OR, keeps scoping filters
+function buildBroadQuestionWhere(filters: QuestionFilters): Prisma.CbtQuestionWhereInput {
+  return {
+    ...notDeletedQuestionWhere,
+    ...(filters.onlyQuestionBank ? { isInQuestionBank: true } : {}),
+    ...(filters.subjectId ? { subjectId: filters.subjectId } : {}),
+    ...(filters.topicId ? { topicId: filters.topicId } : {}),
+    ...(filters.questionType === "all" ? {} : { type: filters.questionType }),
+    ...(filters.difficulty === "all" ? {} : { difficulty: filters.difficulty }),
+  };
+}
+
 export function parseCbtFilters(query: Record<string, string | string[] | undefined>) {
   return cbtFiltersSchema.parse({
     page: Array.isArray(query.page) ? query.page[0] : query.page,
@@ -341,31 +452,110 @@ export function parseQuestionInput(body: unknown) {
 }
 
 export async function listCbts(filters: CbtFilters) {
-  const where = buildCbtWhere(filters);
-  const [items, totalItems, subjects, topics] = await Promise.all([
-    prisma.cbt.findMany({
-      where,
-      orderBy: { [filters.sortBy]: filters.sortOrder },
-      skip: (filters.page - 1) * filters.pageSize,
-      take: filters.pageSize,
-      include: {
-        subject: { select: { id: true, name: true } },
-        topic: { select: { id: true, name: true } },
-        _count: { select: { questions: true, attempts: true } },
+  const strictWhere = buildCbtWhere(filters);
+  const broadWhere = buildBroadCbtWhere(filters);
+  const hasActiveSearch = filters.search.trim().length >= 2;
+
+  const subjectsPromise = prisma.subjectSummarySubject.findMany({
+    where: { deletedAt: null },
+    select: { id: true, name: true },
+    orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+  });
+  const topicsPromise = prisma.subjectSummaryTopic.findMany({
+    where: { deletedAt: null },
+    select: { id: true, name: true, subjectId: true },
+    orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+  });
+
+  if (!hasActiveSearch) {
+    const [items, totalItems, subjects, topics] = await Promise.all([
+      prisma.cbt.findMany({
+        where: strictWhere,
+        orderBy: { [filters.sortBy]: filters.sortOrder },
+        skip: (filters.page - 1) * filters.pageSize,
+        take: filters.pageSize,
+        include: {
+          subject: { select: { id: true, name: true } },
+          topic: { select: { id: true, name: true } },
+          _count: { select: { questions: true, attempts: true } },
+        },
+      }),
+      prisma.cbt.count({ where: strictWhere }),
+      subjectsPromise,
+      topicsPromise,
+    ]);
+
+    return {
+      cbts: items.map(mapCbt),
+      pagination: {
+        page: filters.page,
+        pageSize: filters.pageSize,
+        totalItems,
+        totalPages: Math.max(1, Math.ceil(totalItems / filters.pageSize)),
       },
-    }),
-    prisma.cbt.count({ where }),
-    prisma.subjectSummarySubject.findMany({
-      where: { deletedAt: null },
-      select: { id: true, name: true },
-      orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
-    }),
-    prisma.subjectSummaryTopic.findMany({
-      where: { deletedAt: null },
-      select: { id: true, name: true, subjectId: true },
-      orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
-    }),
+      subjects,
+      topics,
+    };
+  }
+
+  const candidateSelect: Prisma.CbtSelect = {
+    id: true,
+    title: true,
+    description: true,
+    instructions: true,
+    createdAt: true,
+    updatedAt: true,
+    subject: { select: { id: true, name: true } },
+    topic: { select: { id: true, name: true } },
+  };
+
+  const [strictRows, broadRows, subjects, topics] = await Promise.all([
+    prisma.cbt.findMany({ where: strictWhere, select: candidateSelect }),
+    prisma.cbt.findMany({ where: broadWhere, select: candidateSelect }),
+    subjectsPromise,
+    topicsPromise,
   ]);
+
+  const merged = new Map<string, typeof strictRows[number]>();
+  for (const row of strictRows) merged.set(row.id, row);
+  for (const row of broadRows) if (!merged.has(row.id)) merged.set(row.id, row);
+
+  const candidates = Array.from(merged.values());
+
+  const matched = candidates.filter((row) =>
+    matchesCbtSearch(filters.search, row.title, row.description, row.instructions)
+  );
+
+  matched.sort((a, b) =>
+    cbtCompareWithTiebreak(
+      a,
+      b,
+      filters.sortBy,
+      filters.sortOrder,
+      (r) => r.createdAt,
+      (r) => r.updatedAt,
+      (r, field) => (r as Record<string, unknown>)[field] as string | number | Date | null | undefined
+    )
+  );
+
+  const totalItems = matched.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / filters.pageSize));
+  const startIdx = (filters.page - 1) * filters.pageSize;
+  const pageIds = matched.slice(startIdx, startIdx + filters.pageSize).map((r) => r.id);
+
+  const hydrated = pageIds.length
+    ? await prisma.cbt.findMany({
+        where: { id: { in: pageIds } },
+        include: {
+          subject: { select: { id: true, name: true } },
+          topic: { select: { id: true, name: true } },
+          _count: { select: { questions: true, attempts: true } },
+        },
+      })
+    : [];
+
+  const byId = new Map(hydrated.map((h) => [h.id, h]));
+  const items = pageIds.map((id) => byId.get(id)!).filter(Boolean);
 
   return {
     cbts: items.map(mapCbt),
@@ -373,7 +563,7 @@ export async function listCbts(filters: CbtFilters) {
       page: filters.page,
       pageSize: filters.pageSize,
       totalItems,
-      totalPages: Math.max(1, Math.ceil(totalItems / filters.pageSize)),
+      totalPages,
     },
     subjects,
     topics,
@@ -483,31 +673,110 @@ export async function deleteCbt(cbtId: string) {
 }
 
 export async function listQuestions(filters: QuestionFilters) {
-  const where = buildQuestionWhere(filters);
-  const [items, totalItems, subjects, topics] = await Promise.all([
-    prisma.cbtQuestion.findMany({
-      where,
-      orderBy: { [filters.sortBy]: filters.sortOrder },
-      skip: (filters.page - 1) * filters.pageSize,
-      take: filters.pageSize,
-      include: {
-        subject: { select: { id: true, name: true } },
-        topic: { select: { id: true, name: true } },
-        options: { where: notDeletedQuestionOptionWhere, orderBy: { displayOrder: "asc" } },
+  const strictWhere = buildQuestionWhere(filters);
+  const broadWhere = buildBroadQuestionWhere(filters);
+  const hasActiveSearch = filters.search.trim().length >= 2;
+
+  const subjectsPromise = prisma.subjectSummarySubject.findMany({
+    where: { deletedAt: null },
+    select: { id: true, name: true },
+    orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+  });
+  const topicsPromise = prisma.subjectSummaryTopic.findMany({
+    where: { deletedAt: null },
+    select: { id: true, name: true, subjectId: true },
+    orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+  });
+
+  if (!hasActiveSearch) {
+    const [items, totalItems, subjects, topics] = await Promise.all([
+      prisma.cbtQuestion.findMany({
+        where: strictWhere,
+        orderBy: { [filters.sortBy]: filters.sortOrder },
+        skip: (filters.page - 1) * filters.pageSize,
+        take: filters.pageSize,
+        include: {
+          subject: { select: { id: true, name: true } },
+          topic: { select: { id: true, name: true } },
+          options: { where: notDeletedQuestionOptionWhere, orderBy: { displayOrder: "asc" } },
+        },
+      }),
+      prisma.cbtQuestion.count({ where: strictWhere }),
+      subjectsPromise,
+      topicsPromise,
+    ]);
+
+    return {
+      questions: items.map(mapQuestion),
+      pagination: {
+        page: filters.page,
+        pageSize: filters.pageSize,
+        totalItems,
+        totalPages: Math.max(1, Math.ceil(totalItems / filters.pageSize)),
       },
-    }),
-    prisma.cbtQuestion.count({ where }),
-    prisma.subjectSummarySubject.findMany({
-      where: { deletedAt: null },
-      select: { id: true, name: true },
-      orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
-    }),
-    prisma.subjectSummaryTopic.findMany({
-      where: { deletedAt: null },
-      select: { id: true, name: true, subjectId: true },
-      orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
-    }),
+      subjects,
+      topics,
+    };
+  }
+
+  const candidateSelect: Prisma.CbtQuestionSelect = {
+    id: true,
+    prompt: true,
+    explanation: true,
+    createdAt: true,
+    updatedAt: true,
+    displayOrder: true,
+    subject: { select: { id: true, name: true } },
+    topic: { select: { id: true, name: true } },
+  };
+
+  const [strictRows, broadRows, subjects, topics] = await Promise.all([
+    prisma.cbtQuestion.findMany({ where: strictWhere, select: candidateSelect }),
+    prisma.cbtQuestion.findMany({ where: broadWhere, select: candidateSelect }),
+    subjectsPromise,
+    topicsPromise,
   ]);
+
+  const merged = new Map<string, typeof strictRows[number]>();
+  for (const row of strictRows) merged.set(row.id, row);
+  for (const row of broadRows) if (!merged.has(row.id)) merged.set(row.id, row);
+
+  const candidates = Array.from(merged.values());
+
+  const matched = candidates.filter((row) =>
+    matchesCbtSearch(filters.search, row.prompt, row.explanation)
+  );
+
+  matched.sort((a, b) =>
+    cbtCompareWithTiebreak(
+      a,
+      b,
+      filters.sortBy,
+      filters.sortOrder,
+      (r) => r.createdAt,
+      (r) => r.updatedAt,
+      (r, field) => (r as Record<string, unknown>)[field] as string | number | Date | null | undefined
+    )
+  );
+
+  const totalItems = matched.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / filters.pageSize));
+  const startIdx = (filters.page - 1) * filters.pageSize;
+  const pageIds = matched.slice(startIdx, startIdx + filters.pageSize).map((r) => r.id);
+
+  const hydrated = pageIds.length
+    ? await prisma.cbtQuestion.findMany({
+        where: { id: { in: pageIds } },
+        include: {
+          subject: { select: { id: true, name: true } },
+          topic: { select: { id: true, name: true } },
+          options: { where: notDeletedQuestionOptionWhere, orderBy: { displayOrder: "asc" } },
+        },
+      })
+    : [];
+
+  const byId = new Map(hydrated.map((h) => [h.id, h]));
+  const items = pageIds.map((id) => byId.get(id)!).filter(Boolean);
 
   return {
     questions: items.map(mapQuestion),
@@ -515,7 +784,7 @@ export async function listQuestions(filters: QuestionFilters) {
       page: filters.page,
       pageSize: filters.pageSize,
       totalItems,
-      totalPages: Math.max(1, Math.ceil(totalItems / filters.pageSize)),
+      totalPages,
     },
     subjects,
     topics,

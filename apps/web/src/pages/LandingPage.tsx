@@ -5,6 +5,7 @@ import {
   Building2,
   Check,
   GraduationCap,
+  Globe,
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
@@ -42,6 +43,11 @@ const expertiseAreas = [
     body: "Access well-organized law reports for faster case research, precedent tracking, and practical legal argument preparation.",
     icon: BookOpenText,
     title: "Law Reports"
+  },
+  {
+    body: "Explore Helarpedia's concise legal encyclopedia entries for quick definitions, doctrines, and practical legal insights.",
+    icon: Globe,
+    title: "Helarpedia"
   },
   {
     body: "Review concise subject-based notes that simplify core legal principles for study, revision, and quick understanding.",
@@ -762,12 +768,13 @@ export function LandingPage() {
         </div>
 
         <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-          {expertiseAreas.map((item) => {
+          {expertiseAreas.map((item, index) => {
             const Icon = item.icon;
+            const isSoloLastCard = expertiseAreas.length % 3 === 1 && index === expertiseAreas.length - 1;
 
             return (
               <motion.article
-                className="futuristic-card-dark rounded-[1.6rem] p-7"
+                className={`futuristic-card-dark rounded-[1.6rem] p-7${isSoloLastCard ? " xl:col-span-3 xl:max-w-[30rem] xl:justify-self-center" : ""}`}
                 key={item.title}
                 transition={{ duration: 0.25 }}
                 whileHover={{ y: -8 }}

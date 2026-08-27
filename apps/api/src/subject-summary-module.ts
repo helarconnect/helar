@@ -13,6 +13,74 @@ import { containsText } from "./lib/text-search.js";
 import { getPremiumContentAccess, truncateWords, PREMIUM_PREVIEW_WORD_LIMIT, createPreviewHtml } from "./premium-access.js";
 import { runInTransaction } from "./lib/transactions.js";
 
+// --- Case-insensitive + punctuation-tolerant search helpers (same semantics as portal-search) ---
+
+function stripHtmlForSearch(value: string): string {
+  return value.replace(/<[^>]+>/g, " ");
+}
+
+function normalizeSsmSearchText(value: string): string {
+  const withoutHtml = stripHtmlForSearch(value);
+  const lower = withoutHtml.toLowerCase();
+  const normalized = lower.replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+  return normalized;
+}
+
+function tokenizeSsmSearchQuery(query: string): string[] {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+
+  const normalized = normalizeSsmSearchText(trimmed);
+  if (!normalized) return [];
+
+  const tokens = new Set<string>();
+  for (const term of normalized.split(" ")) {
+    if (term.length >= 2) tokens.add(term);
+  }
+
+  // Also add collapsed-punctuation variant for serial-style tokens
+  const collapsed = trimmed.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (collapsed.length >= 3) tokens.add(collapsed);
+
+  return Array.from(tokens);
+}
+
+function matchesSsmSearch(query: string, ...fields: Array<string | null | undefined>): boolean {
+  const terms = tokenizeSsmSearchQuery(query);
+  if (terms.length === 0) return true;
+
+  const rawHaystack = fields.filter((f): f is string => typeof f === "string" && f.length > 0).join(" ");
+  const haystack = normalizeSsmSearchText(rawHaystack);
+  const collapsedHaystack = rawHaystack.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  return terms.every((term) => haystack.includes(term) || collapsedHaystack.includes(term));
+}
+
+// Generic deterministic sort helper with tiebreaks
+function ssmCompareWithTiebreak<T>(
+  a: T,
+  b: T,
+  direction: "asc" | "desc",
+  createdAtOf: (row: T) => Date,
+  updatedAtOf?: (row: T) => Date
+): number {
+  const directionMul = direction === "asc" ? 1 : -1;
+  // Primary: updatedAt if available, else createdAt
+  const aPrimary = updatedAtOf ? updatedAtOf(a).getTime() : createdAtOf(a).getTime();
+  const bPrimary = updatedAtOf ? updatedAtOf(b).getTime() : createdAtOf(b).getTime();
+  let cmp = (aPrimary - bPrimary) * directionMul;
+  if (cmp !== 0) return cmp;
+  // Tiebreak 1: createdAt
+  const aC = createdAtOf(a).getTime();
+  const bC = createdAtOf(b).getTime();
+  cmp = (aC - bC) * directionMul;
+  if (cmp !== 0) return cmp;
+  // Tiebreak 2: id ASC
+  const aId = (a as { id: string }).id;
+  const bId = (b as { id: string }).id;
+  return aId < bId ? -1 : aId > bId ? 1 : 0;
+}
+
 function coerceSubjectSummaryModuleType(value: unknown) {
   if (typeof value !== "string") {
     return value;
@@ -506,19 +574,24 @@ export function parseStudentSubjectSummaryTopicsQuery(query: Record<string, stri
 }
 
 export async function listSubjectSummaryEntries(filters: EntryFilters) {
-  const where = buildEntryWhere(filters);
+  const strictWhere = buildEntryWhere(filters);
+  const broadWhere: Prisma.SubjectSummaryEntryWhereInput = {
+    ...notDeletedWhere,
+    subject: {
+      ...notDeletedSubjectWhere
+    },
+    moduleType: filters.moduleType,
+    ...(filters.subjectId ? { subjectId: filters.subjectId } : {}),
+    ...(filters.topic ? { topic: filters.topic } : {}),
+    ...(filters.status === "all" ? {} : { status: filters.status })
+  };
   const summaryWhere = buildEntrySummaryWhere(filters);
-  const [totalItems, subjects, summary] = await Promise.all([
-    prisma.subjectSummaryEntry.count({ where }),
+  const hasActiveSearch = filters.search.trim().length >= 2;
+
+  const [subjects, summary] = await Promise.all([
     prisma.subjectSummarySubject.findMany({
       where: {
         ...notDeletedSubjectWhere,
-        // If a subject only has NLS entries and the admin is viewing the FACULTY
-        // page (or vice-versa) showing it in the dropdown creates false "I selected
-        // a subject but can't see any uploaded content" confusion. Restrict the list
-        // to subjects that actually have at least one non-deleted entry in the
-        // currently-selected moduleType/status combo. Falls back gracefully to
-        // "deletedAt: null only" when filters.status = "all".
         entries: {
           some: {
             ...notDeletedWhere,
@@ -539,17 +612,102 @@ export async function listSubjectSummaryEntries(filters: EntryFilters) {
   const paginationStart = (filters.page - 1) * filters.pageSize;
   const paginationEnd = paginationStart + filters.pageSize;
 
-  // When sorting by serialNumber, DB-level lexical DESC is wrong for the new
-  // Helar-FAC-100 format because "Helar-FAC-99" sorts before "Helar-FAC-100"
-  // (string-wise 9 > 1). Pull the filtered candidates with only the fields
-  // needed for order+include then do an in-memory numeric-suffix sort so
-  // pagination boundaries are semantically correct (Helar-FAC-100 > Helar-FAC-99).
-  let items: Array<any>;
-  if (filters.sortBy === "serialNumber") {
-    const candidates = await prisma.subjectSummaryEntry.findMany({
-      where,
-      orderBy: [{ serialNumber: filters.sortOrder === "asc" ? "asc" : "desc" }, { createdAt: "desc" }, { question: "asc" }],
-      include: {
+  if (!hasActiveSearch) {
+    const where = strictWhere;
+    const [totalItems] = await Promise.all([
+      prisma.subjectSummaryEntry.count({ where })
+    ]);
+
+    let items: Array<any>;
+    if (filters.sortBy === "serialNumber") {
+      const candidates = await prisma.subjectSummaryEntry.findMany({
+        where,
+        orderBy: [{ serialNumber: filters.sortOrder === "asc" ? "asc" : "desc" }, { createdAt: "desc" }, { question: "asc" }],
+        include: {
+          subject: {
+            select: {
+              id: true,
+              name: true
+            }
+          },
+          caseLinks: {
+            include: {
+              case: {
+                include: {
+                  topic: {
+                    select: {
+                      id: true,
+                      name: true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      });
+      candidates.sort((left, right) =>
+        compareSubjectSummarySerialForSort(left, right, filters.sortOrder)
+      );
+      items = candidates.slice(paginationStart, paginationEnd);
+    } else {
+      items = await prisma.subjectSummaryEntry.findMany({
+        where,
+        orderBy: [{ [filters.sortBy]: filters.sortOrder }, { serialNumber: "desc" }, { question: "asc" }],
+        skip: paginationStart,
+        take: filters.pageSize,
+        include: {
+          subject: {
+            select: {
+              id: true,
+              name: true
+            }
+          },
+          caseLinks: {
+            include: {
+              case: {
+                include: {
+                  topic: {
+                    select: {
+                      id: true,
+                      name: true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      });
+    }
+
+    return {
+      items: items.map((item) => mapEntry(item)),
+      pagination: {
+        page: filters.page,
+        pageSize: filters.pageSize,
+        totalItems,
+        totalPages: Math.max(1, Math.ceil(totalItems / filters.pageSize))
+      },
+      subjects,
+      summary
+    };
+  }
+
+  const [strictCandidates, broadCandidates] = await Promise.all([
+    prisma.subjectSummaryEntry.findMany({
+      where: strictWhere,
+      select: {
+        id: true,
+        question: true,
+        answer: true,
+        topic: true,
+        keyPrinciple: true,
+        examTip: true,
+        serialNumber: true,
+        createdAt: true,
+        updatedAt: true,
+        displayOrder: true,
         subject: {
           select: {
             id: true,
@@ -559,29 +717,110 @@ export async function listSubjectSummaryEntries(filters: EntryFilters) {
         caseLinks: {
           include: {
             case: {
-              include: {
-                topic: {
-                  select: {
-                    id: true,
-                    name: true
-                  }
-                }
+              select: {
+                id: true,
+                title: true,
+                citation: true,
+                ratioDecidendi: true
               }
             }
           }
         }
       }
-    });
-    candidates.sort((left, right) =>
-      compareSubjectSummarySerialForSort(left, right, filters.sortOrder)
+    }),
+    prisma.subjectSummaryEntry.findMany({
+      where: broadWhere,
+      select: {
+        id: true,
+        question: true,
+        answer: true,
+        topic: true,
+        keyPrinciple: true,
+        examTip: true,
+        serialNumber: true,
+        createdAt: true,
+        updatedAt: true,
+        displayOrder: true,
+        subject: {
+          select: {
+            id: true,
+            name: true
+          }
+        },
+        caseLinks: {
+          include: {
+            case: {
+              select: {
+                id: true,
+                title: true,
+                citation: true,
+                ratioDecidendi: true
+              }
+            }
+          }
+        }
+      }
+    })
+  ]);
+
+  const mergedMap = new Map<string, any>();
+  for (const row of broadCandidates) {
+    mergedMap.set(row.id, row);
+  }
+  for (const row of strictCandidates) {
+    mergedMap.set(row.id, row);
+  }
+  const mergedCandidates = Array.from(mergedMap.values());
+
+  const matched = mergedCandidates.filter((row) => {
+    const caseFields: string[] = [];
+    for (const link of row.caseLinks ?? []) {
+      if (link.case?.title) caseFields.push(link.case.title);
+      if (link.case?.citation) caseFields.push(link.case.citation);
+      if (link.case?.ratioDecidendi) caseFields.push(link.case.ratioDecidendi);
+    }
+    return matchesSsmSearch(
+      filters.search,
+      row.question,
+      row.answer,
+      row.topic,
+      row.keyPrinciple,
+      row.examTip,
+      row.serialNumber,
+      row.subject?.name,
+      ...caseFields
     );
-    items = candidates.slice(paginationStart, paginationEnd);
-  } else {
-    items = await prisma.subjectSummaryEntry.findMany({
-      where,
-      orderBy: [{ [filters.sortBy]: filters.sortOrder }, { serialNumber: "desc" }, { question: "asc" }],
-      skip: paginationStart,
-      take: filters.pageSize,
+  });
+
+  const sortDir = filters.sortOrder;
+  matched.sort((a: any, b: any) => {
+    if (filters.sortBy === "serialNumber") {
+      const cmp = compareSubjectSummarySerialForSort(a, b, sortDir);
+      if (cmp !== 0) return cmp;
+    } else {
+      const aVal = a[filters.sortBy];
+      const bVal = b[filters.sortBy];
+      let cmp = 0;
+      if (typeof aVal === "string" && typeof bVal === "string") {
+        cmp = aVal.localeCompare(bVal);
+      } else if (typeof aVal === "number" && typeof bVal === "number") {
+        cmp = aVal - bVal;
+      } else if (aVal instanceof Date && bVal instanceof Date) {
+        cmp = aVal.getTime() - bVal.getTime();
+      }
+      if (sortDir === "desc") cmp = -cmp;
+      if (cmp !== 0) return cmp;
+    }
+    return ssmCompareWithTiebreak(a, b, "desc", (r: any) => r.createdAt, (r: any) => r.updatedAt);
+  });
+
+  const totalItems = matched.length;
+  const pageIds = matched.slice(paginationStart, paginationEnd).map((r: any) => r.id);
+
+  let items: any[] = [];
+  if (pageIds.length > 0) {
+    const hydrated = await prisma.subjectSummaryEntry.findMany({
+      where: { id: { in: pageIds } },
       include: {
         subject: {
           select: {
@@ -605,6 +844,8 @@ export async function listSubjectSummaryEntries(filters: EntryFilters) {
         }
       }
     });
+    const hydratedMap = new Map(hydrated.map((h: any) => [h.id, h]));
+    items = pageIds.map((id) => hydratedMap.get(id)).filter(Boolean);
   }
 
   return {
@@ -1116,40 +1357,103 @@ export async function deleteSubjectSummaryEntry(entryId: string, actorUserId: st
 }
 
 export async function listStudentSubjectSummarySubjects(userId: string, search: string, moduleType: SubjectSummaryModuleType) {
-  const subjects = await prisma.subjectSummarySubject.findMany({
-    where: {
-      ...notDeletedSubjectWhere,
-      entries: {
-        some: {
-          ...notDeletedWhere,
-          moduleType,
-          status: SubjectSummaryCaseStatus.PUBLISHED
-        }
-      },
-      ...(search
-        ? {
-            name: containsText(search)
-          }
-        : {})
-    },
-    orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
-    include: {
-      entries: {
-        where: {
-          ...notDeletedWhere,
-          moduleType,
-          status: SubjectSummaryCaseStatus.PUBLISHED
-        },
-        select: {
-          id: true,
-          estimatedReadingTime: true,
-          updatedAt: true
-        }
+  const scopingWhere: Prisma.SubjectSummarySubjectWhereInput = {
+    ...notDeletedSubjectWhere,
+    entries: {
+      some: {
+        ...notDeletedWhere,
+        moduleType,
+        status: SubjectSummaryCaseStatus.PUBLISHED
       }
     }
-  });
+  };
+  const strictWhere: Prisma.SubjectSummarySubjectWhereInput = {
+    ...scopingWhere,
+    ...(search
+      ? {
+          name: containsText(search)
+        }
+      : {})
+  };
+  const broadWhere: Prisma.SubjectSummarySubjectWhereInput = scopingWhere;
+  const hasActiveSearch = search.trim().length >= 2;
 
-  const allEntryIds = subjects.flatMap((subject) => subject.entries.map((entry) => entry.id));
+  const subjectInclude = {
+    entries: {
+      where: {
+        ...notDeletedWhere,
+        moduleType,
+        status: SubjectSummaryCaseStatus.PUBLISHED
+      },
+      select: {
+        id: true,
+        estimatedReadingTime: true,
+        updatedAt: true
+      }
+    }
+  } as const;
+
+  let subjects: any[];
+
+  if (!hasActiveSearch) {
+    subjects = await prisma.subjectSummarySubject.findMany({
+      where: strictWhere,
+      orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+      include: subjectInclude
+    });
+  } else {
+    const [strictSubjects, broadSubjects] = await Promise.all([
+      prisma.subjectSummarySubject.findMany({
+        where: strictWhere,
+        select: {
+          id: true,
+          name: true,
+          displayOrder: true
+        }
+      }),
+      prisma.subjectSummarySubject.findMany({
+        where: broadWhere,
+        select: {
+          id: true,
+          name: true,
+          displayOrder: true
+        }
+      })
+    ]);
+
+    const mergedMap = new Map<string, any>();
+    for (const row of broadSubjects) {
+      mergedMap.set(row.id, row);
+    }
+    for (const row of strictSubjects) {
+      mergedMap.set(row.id, row);
+    }
+    const mergedSubjects = Array.from(mergedMap.values());
+
+    const matchedSubjects = mergedSubjects.filter((row) =>
+      matchesSsmSearch(search, row.name)
+    );
+
+    matchedSubjects.sort((a, b) => {
+      const orderCmp = (a.displayOrder ?? 0) - (b.displayOrder ?? 0);
+      if (orderCmp !== 0) return orderCmp;
+      return a.name.localeCompare(b.name);
+    });
+
+    const matchedIds = matchedSubjects.map((s) => s.id);
+
+    subjects = matchedIds.length > 0
+      ? await prisma.subjectSummarySubject.findMany({
+          where: { id: { in: matchedIds } },
+          include: subjectInclude
+        })
+      : [];
+
+    const orderMap = new Map(matchedIds.map((id, idx) => [id, idx]));
+    subjects.sort((a, b) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0));
+  }
+
+  const allEntryIds = subjects.flatMap((subject) => subject.entries.map((entry: any) => entry.id));
   const progressItems = allEntryIds.length
     ? await prisma.studentStudyProgress.findMany({
         where: {
@@ -1171,25 +1475,25 @@ export async function listStudentSubjectSummarySubjects(userId: string, search: 
 
   return {
     items: subjects.map((subject) => {
-      const completedCount = subject.entries.reduce((sum, entry) => {
+      const completedCount = subject.entries.reduce((sum: number, entry: any) => {
         const progress = progressByKey.get(entryContentKey(entry.id));
         return sum + (progress?.completed ? 1 : 0);
       }, 0);
 
       const lastOpenedAt = subject.entries
-        .map((entry) => progressByKey.get(entryContentKey(entry.id))?.lastOpenedAt ?? null)
-        .filter((value): value is Date => Boolean(value))
-        .sort((left, right) => right.getTime() - left.getTime())[0] ?? null;
+        .map((entry: any) => progressByKey.get(entryContentKey(entry.id))?.lastOpenedAt ?? null)
+        .filter((value: any): value is Date => Boolean(value))
+        .sort((left: Date, right: Date) => right.getTime() - left.getTime())[0] ?? null;
 
       return {
         completionPct: subject.entries.length ? Math.round((completedCount / subject.entries.length) * 100) : 0,
         completedCount,
-        estimatedReadingTime: subject.entries.reduce((sum, entry) => sum + entry.estimatedReadingTime, 0),
+        estimatedReadingTime: subject.entries.reduce((sum: number, entry: any) => sum + entry.estimatedReadingTime, 0),
         id: subject.id,
         lastOpenedAt: lastOpenedAt?.toISOString() ?? null,
         lastUpdated: subject.entries
-          .map((entry) => entry.updatedAt)
-          .sort((left, right) => right.getTime() - left.getTime())[0]
+          .map((entry: any) => entry.updatedAt)
+          .sort((left: Date, right: Date) => right.getTime() - left.getTime())[0]
           .toISOString(),
         name: subject.name,
         questionCount: subject.entries.length

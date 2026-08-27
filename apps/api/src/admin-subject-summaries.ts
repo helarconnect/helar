@@ -198,6 +198,48 @@ function resolveCaseTypeValues(caseType: SubjectSummaryCaseTypeFilter) {
   return [];
 }
 
+// ---------- Case-insensitive + punctuation-tolerant search helpers ----------
+// These mirror the portal-search semantics: lowercased, punctuation collapsed
+// into whitespace, AND-semantic token matching. Used as a post-filter fallback
+// because Prisma's MongoDB `contains` with mode:insensitive can still be
+// collation-strict with certain BSON string encodings.
+function stripHtmlForSearch(value: string | null | undefined) {
+  if (!value) return "";
+  return value
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeSubjectSearchText(value: string | null | undefined) {
+  return stripHtmlForSearch(value).toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function tokenizeSubjectSearchQuery(query: string) {
+  const normalized = query.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+  const terms = normalized
+    .split(/\s+/)
+    .map((term) => term.trim())
+    .filter((term) => term.length >= 2);
+  const collapsed = query.toLowerCase().replace(/[^a-z0-9]+/g, "").trim();
+  if (collapsed.length >= 3 && !terms.includes(collapsed)) {
+    terms.push(collapsed);
+  }
+  return Array.from(new Set(terms));
+}
+
+function matchesSubjectSearch(query: string, ...values: Array<string | null | undefined>): boolean {
+  const terms = tokenizeSubjectSearchQuery(query);
+  if (!terms.length) return true;
+  const haystack = values.map((value) => normalizeSubjectSearchText(value)).filter(Boolean).join(" ");
+  const collapsedHaystack = haystack.replace(/[^a-z0-9]+/g, "");
+  if (!haystack) return false;
+  return terms.every((term) => haystack.includes(term) || collapsedHaystack.includes(term));
+}
+
 function buildCaseTypeWhere(caseType: SubjectSummaryCaseTypeFilter): Prisma.SubjectSummaryCaseWhereInput {
   const values = resolveCaseTypeValues(caseType);
 
@@ -574,6 +616,13 @@ function buildSubjectWhere(filters: SubjectSummarySubjectFilters): Prisma.Subjec
   };
 }
 
+function buildBroadSubjectWhere(filters: SubjectSummarySubjectFilters): Prisma.SubjectSummarySubjectWhereInput {
+  return {
+    deletedAt: null,
+    ...(filters.status === "all" ? {} : { status: filters.status })
+  };
+}
+
 function buildTopicWhere(filters: SubjectSummaryTopicFilters): Prisma.SubjectSummaryTopicWhereInput {
   return {
     deletedAt: null,
@@ -599,6 +648,17 @@ function buildTopicWhere(filters: SubjectSummaryTopicFilters): Prisma.SubjectSum
           ]
         }
       : {})
+  };
+}
+
+function buildBroadTopicWhere(filters: SubjectSummaryTopicFilters): Prisma.SubjectSummaryTopicWhereInput {
+  return {
+    deletedAt: null,
+    subject: {
+      deletedAt: null
+    },
+    ...(filters.subjectId ? { subjectId: filters.subjectId } : {}),
+    ...(filters.status === "all" ? {} : { status: filters.status })
   };
 }
 
@@ -646,6 +706,44 @@ function buildCaseWhere(filters: SubjectSummaryCaseFilters): Prisma.SubjectSumma
           ]
         }
       : {})
+  };
+}
+
+function buildBroadCaseWhere(filters: SubjectSummaryCaseFilters): Prisma.SubjectSummaryCaseWhereInput {
+  return {
+    deletedAt: null,
+    subject: {
+      deletedAt: null
+    },
+    topic: {
+      deletedAt: null
+    },
+    ...buildCaseTypeWhere(filters.caseType),
+    ...(filters.subjectId ? { subjectId: filters.subjectId } : {}),
+    ...(filters.topicId ? { topicId: filters.topicId } : {}),
+    ...(filters.status === "all" ? {} : { status: filters.status })
+  };
+}
+
+function buildBroadPublishedCaseWhere(filters: PublishedSubjectSummaryCaseFilters): Prisma.SubjectSummaryCaseWhereInput {
+  return {
+    deletedAt: null,
+    status: SubjectSummaryCaseStatus.PUBLISHED,
+    subject: {
+      deletedAt: null,
+      status: {
+        in: publishedVisibleStatuses
+      }
+    },
+    topic: {
+      deletedAt: null,
+      status: {
+        in: publishedVisibleStatuses
+      }
+    },
+    ...buildCaseTypeWhere(filters.caseType),
+    ...(filters.subjectId ? { subjectId: filters.subjectId } : {}),
+    ...(filters.topicId ? { topicId: filters.topicId } : {})
   };
 }
 
@@ -761,98 +859,221 @@ export function parseSubjectSummaryCaseBulkAction(body: unknown) {
   return caseBulkActionSchema.parse(body);
 }
 
+// Generic sort tiebreaker helper: compare two rows by a primary Date/number field,
+// then createdAt desc, then id asc. Produces deterministic page ordering even
+// when two rows share the same sort value.
+function compareWithTiebreak<T>(
+  a: T,
+  b: T,
+  primary: (row: T) => number | string,
+  directionMul: number,
+  createdAtOf: (row: T) => Date
+): number {
+  const aPrimary = primary(a);
+  const bPrimary = primary(b);
+  let cmp: number;
+  if (typeof aPrimary === "number" && typeof bPrimary === "number") {
+    cmp = (aPrimary - bPrimary) * directionMul;
+  } else {
+    cmp = String(aPrimary).localeCompare(String(bPrimary), "en", { sensitivity: "base" }) * directionMul;
+  }
+  if (cmp !== 0) return cmp;
+  const aC = createdAtOf(a).getTime();
+  const bC = createdAtOf(b).getTime();
+  cmp = (aC - bC) * directionMul;
+  if (cmp !== 0) return cmp;
+  const aId = (a as { id: string }).id;
+  const bId = (b as { id: string }).id;
+  return aId < bId ? -1 : aId > bId ? 1 : 0;
+}
+
 export async function listSubjectSummarySubjects(filters: SubjectSummarySubjectFilters) {
+  const hasActiveSearch = Boolean(filters.search && filters.search.trim().length >= 2);
+  const broadWhere = buildBroadSubjectWhere(filters);
   const where = buildSubjectWhere(filters);
-  const [items, totalItems, summary] = await Promise.all([
-    prisma.subjectSummarySubject.findMany({
-      where,
-      orderBy: {
-        [filters.sortBy]: filters.sortOrder
-      },
-      skip: (filters.page - 1) * filters.pageSize,
-      take: filters.pageSize,
-      include: {
-        _count: {
-          select: {
-            cases: {
-              where: {
-                deletedAt: null
-              }
-            },
-            topics: {
-              where: {
-                deletedAt: null
-              }
-            }
-          }
-        }
+
+  type SubjectCandidate = {
+    id: string;
+    name: string;
+    description: string | null;
+    displayOrder: number;
+    createdAt: Date;
+    updatedAt: Date;
+  };
+
+  let pageIds: string[] = [];
+  let totalItems = 0;
+
+  if (hasActiveSearch) {
+    // Memory pipeline: combine DB strict matches + broader candidates, then
+    // apply punctuation-tolerant / case-insensitive in-memory matching.
+    const [strictRows, broadRows] = await Promise.all([
+      prisma.subjectSummarySubject.findMany({
+        select: { id: true, name: true, description: true, displayOrder: true, createdAt: true, updatedAt: true },
+        where
+      }),
+      prisma.subjectSummarySubject.findMany({
+        select: { id: true, name: true, description: true, displayOrder: true, createdAt: true, updatedAt: true },
+        where: broadWhere
+      })
+    ]);
+    const merged = new Map<string, SubjectCandidate>();
+    for (const row of broadRows) merged.set(row.id, row);
+    for (const row of strictRows) merged.set(row.id, row);
+    const allCandidates = Array.from(merged.values());
+    const scoped = allCandidates.filter((row) => matchesSubjectSearch(filters.search, row.name, row.description));
+    const dirMul = filters.sortOrder === "desc" ? -1 : 1;
+    const sorted = [...scoped].sort((a, b) => {
+      if (filters.sortBy === "displayOrder") return compareWithTiebreak(a, b, (r) => r.displayOrder, dirMul, (r) => r.createdAt);
+      if (filters.sortBy === "name") return compareWithTiebreak(a, b, (r) => r.name, dirMul, (r) => r.createdAt);
+      if (filters.sortBy === "createdAt") return compareWithTiebreak(a, b, (r) => r.createdAt.getTime(), dirMul, (r) => r.createdAt);
+      if (filters.sortBy === "updatedAt") return compareWithTiebreak(a, b, (r) => r.updatedAt.getTime(), dirMul, (r) => r.createdAt);
+      return compareWithTiebreak(a, b, (r) => r.displayOrder, dirMul, (r) => r.createdAt);
+    });
+    const pageStart = Math.max(0, (filters.page - 1) * filters.pageSize);
+    pageIds = sorted.map((r) => r.id).slice(pageStart, pageStart + filters.pageSize);
+    totalItems = sorted.length;
+  }
+
+  const includeShape = {
+    _count: {
+      select: {
+        cases: { where: { deletedAt: null } },
+        topics: { where: { deletedAt: null } }
       }
-    }),
-    prisma.subjectSummarySubject.count({ where }),
+    }
+  } as const;
+
+  const [items, fallbackTotal, summary] = await Promise.all([
+    hasActiveSearch && pageIds.length > 0
+      ? prisma.subjectSummarySubject.findMany({
+          where: { id: { in: pageIds } },
+          include: includeShape
+        })
+      : hasActiveSearch
+        ? Promise.resolve([])
+        : prisma.subjectSummarySubject.findMany({
+            where,
+            orderBy: { [filters.sortBy]: filters.sortOrder },
+            skip: (filters.page - 1) * filters.pageSize,
+            take: filters.pageSize,
+            include: includeShape
+          }),
+    hasActiveSearch ? Promise.resolve(0) : prisma.subjectSummarySubject.count({ where }),
     countSubjectStatuses()
   ]);
 
+  const resolvedTotal = hasActiveSearch ? totalItems : fallbackTotal;
+  // Reorder hydrated page to match the in-memory sort order
+  const orderedItems = hasActiveSearch
+    ? pageIds
+        .map((id) => items.find((it) => it.id === id))
+        .filter((it): it is NonNullable<typeof it> => Boolean(it))
+    : items;
+
   return {
-    items: items.map((item) => mapSubject(item)),
+    items: orderedItems.map((item) => mapSubject(item)),
     pagination: {
       page: filters.page,
       pageSize: filters.pageSize,
-      totalItems,
-      totalPages: Math.max(1, Math.ceil(totalItems / filters.pageSize))
+      totalItems: resolvedTotal,
+      totalPages: Math.max(1, Math.ceil(resolvedTotal / filters.pageSize))
     },
     summary
   };
 }
 
 export async function listSubjectSummaryTopics(filters: SubjectSummaryTopicFilters) {
+  const hasActiveSearch = Boolean(filters.search && filters.search.trim().length >= 2);
   const where = buildTopicWhere(filters);
-  const [items, totalItems, subjects, summary] = await Promise.all([
-    prisma.subjectSummaryTopic.findMany({
-      where,
-      orderBy: {
-        [filters.sortBy]: filters.sortOrder
-      },
-      skip: (filters.page - 1) * filters.pageSize,
-      take: filters.pageSize,
-      include: {
-        subject: {
-          select: {
-            id: true,
-            name: true
-          }
-        },
-        _count: {
-          select: {
-            cases: {
-              where: {
-                deletedAt: null
-              }
-            }
-          }
-        }
-      }
-    }),
-    prisma.subjectSummaryTopic.count({ where }),
+  const broadWhere = buildBroadTopicWhere(filters);
+
+  type TopicCandidate = {
+    id: string;
+    name: string;
+    description: string;
+    displayOrder: number;
+    createdAt: Date;
+    updatedAt: Date;
+    subject: { id: string; name: string };
+  };
+
+  let pageIds: string[] = [];
+  let totalItems = 0;
+
+  if (hasActiveSearch) {
+    const select = {
+      id: true,
+      name: true,
+      description: true,
+      displayOrder: true,
+      createdAt: true,
+      updatedAt: true,
+      subject: { select: { id: true, name: true } }
+    } as const;
+    const [strictRows, broadRows] = await Promise.all([
+      prisma.subjectSummaryTopic.findMany({ select, where }),
+      prisma.subjectSummaryTopic.findMany({ select, where: broadWhere })
+    ]);
+    const merged = new Map<string, TopicCandidate>();
+    for (const row of broadRows) merged.set(row.id, row as unknown as TopicCandidate);
+    for (const row of strictRows) merged.set(row.id, row as unknown as TopicCandidate);
+    const scoped = Array.from(merged.values()).filter((row) =>
+      matchesSubjectSearch(filters.search, row.name, row.description, row.subject?.name)
+    );
+    const dirMul = filters.sortOrder === "desc" ? -1 : 1;
+    const sorted = [...scoped].sort((a, b) => {
+      if (filters.sortBy === "displayOrder") return compareWithTiebreak(a, b, (r) => r.displayOrder, dirMul, (r) => r.createdAt);
+      if (filters.sortBy === "name") return compareWithTiebreak(a, b, (r) => r.name, dirMul, (r) => r.createdAt);
+      if (filters.sortBy === "createdAt") return compareWithTiebreak(a, b, (r) => r.createdAt.getTime(), dirMul, (r) => r.createdAt);
+      if (filters.sortBy === "updatedAt") return compareWithTiebreak(a, b, (r) => r.updatedAt.getTime(), dirMul, (r) => r.createdAt);
+      return compareWithTiebreak(a, b, (r) => r.displayOrder, dirMul, (r) => r.createdAt);
+    });
+    const pageStart = Math.max(0, (filters.page - 1) * filters.pageSize);
+    pageIds = sorted.map((r) => r.id).slice(pageStart, pageStart + filters.pageSize);
+    totalItems = sorted.length;
+  }
+
+  const includeShape = {
+    subject: { select: { id: true, name: true } },
+    _count: { select: { cases: { where: { deletedAt: null } } } }
+  } as const;
+
+  const [items, fallbackTotal, subjects, summary] = await Promise.all([
+    hasActiveSearch && pageIds.length > 0
+      ? prisma.subjectSummaryTopic.findMany({ where: { id: { in: pageIds } }, include: includeShape })
+      : hasActiveSearch
+        ? Promise.resolve([])
+        : prisma.subjectSummaryTopic.findMany({
+            where,
+            orderBy: { [filters.sortBy]: filters.sortOrder },
+            skip: (filters.page - 1) * filters.pageSize,
+            take: filters.pageSize,
+            include: includeShape
+          }),
+    hasActiveSearch ? Promise.resolve(0) : prisma.subjectSummaryTopic.count({ where }),
     prisma.subjectSummarySubject.findMany({
-      where: {
-        deletedAt: null
-      },
+      where: { deletedAt: null },
       orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
-      select: {
-        id: true,
-        name: true
-      }
+      select: { id: true, name: true }
     }),
     countTopicStatuses()
   ]);
 
+  const resolvedTotal = hasActiveSearch ? totalItems : fallbackTotal;
+  const orderedItems = hasActiveSearch
+    ? pageIds
+        .map((id) => items.find((it) => it.id === id))
+        .filter((it): it is NonNullable<typeof it> => Boolean(it))
+    : items;
+
   return {
-    items: items.map((item) => mapTopic(item)),
+    items: orderedItems.map((item) => mapTopic(item)),
     pagination: {
       page: filters.page,
       pageSize: filters.pageSize,
-      totalItems,
-      totalPages: Math.max(1, Math.ceil(totalItems / filters.pageSize))
+      totalItems: resolvedTotal,
+      totalPages: Math.max(1, Math.ceil(resolvedTotal / filters.pageSize))
     },
     subjects,
     summary
@@ -860,63 +1081,118 @@ export async function listSubjectSummaryTopics(filters: SubjectSummaryTopicFilte
 }
 
 export async function listSubjectSummaryCases(filters: SubjectSummaryCaseFilters) {
+  const hasActiveSearch = Boolean(filters.search && filters.search.trim().length >= 2);
   const where = buildCaseWhere(filters);
-  const [items, totalItems, subjects, topics, summary] = await Promise.all([
-    prisma.subjectSummaryCase.findMany({
-      where,
-      orderBy: {
-        [filters.sortBy]: filters.sortOrder
-      },
-      skip: (filters.page - 1) * filters.pageSize,
-      take: filters.pageSize,
-      include: {
-        subject: {
-          select: {
-            id: true,
-            name: true
-          }
-        },
-        topic: {
-          select: {
-            id: true,
-            name: true
-          }
-        }
-      }
-    }),
-    prisma.subjectSummaryCase.count({ where }),
+  const broadWhere = buildBroadCaseWhere(filters);
+
+  type CaseCandidate = {
+    id: string;
+    title: string;
+    citation: string | null;
+    court: string | null;
+    jurisdiction: string | null;
+    caseSummary: string;
+    year: number | null;
+    createdAt: Date;
+    updatedAt: Date;
+    subject: { id: string; name: string };
+    topic: { id: string; name: string };
+  };
+
+  let pageIds: string[] = [];
+  let totalItems = 0;
+
+  if (hasActiveSearch) {
+    const select = {
+      id: true,
+      title: true,
+      citation: true,
+      court: true,
+      jurisdiction: true,
+      caseSummary: true,
+      year: true,
+      createdAt: true,
+      updatedAt: true,
+      subject: { select: { id: true, name: true } },
+      topic: { select: { id: true, name: true } }
+    } as const;
+    const [strictRows, broadRows] = await Promise.all([
+      prisma.subjectSummaryCase.findMany({ select, where }),
+      prisma.subjectSummaryCase.findMany({ select, where: broadWhere })
+    ]);
+    const merged = new Map<string, CaseCandidate>();
+    for (const row of broadRows) merged.set(row.id, row as unknown as CaseCandidate);
+    for (const row of strictRows) merged.set(row.id, row as unknown as CaseCandidate);
+    const scoped = Array.from(merged.values()).filter((row) =>
+      matchesSubjectSearch(
+        filters.search,
+        row.title,
+        row.citation,
+        row.court,
+        row.jurisdiction,
+        row.caseSummary,
+        row.topic?.name,
+        row.subject?.name
+      )
+    );
+    const dirMul = filters.sortOrder === "desc" ? -1 : 1;
+    const sorted = [...scoped].sort((a, b) => {
+      if (filters.sortBy === "title") return compareWithTiebreak(a, b, (r) => r.title, dirMul, (r) => r.createdAt);
+      if (filters.sortBy === "year") return compareWithTiebreak(a, b, (r) => r.year ?? 0, dirMul, (r) => r.createdAt);
+      if (filters.sortBy === "createdAt") return compareWithTiebreak(a, b, (r) => r.createdAt.getTime(), dirMul, (r) => r.createdAt);
+      if (filters.sortBy === "updatedAt") return compareWithTiebreak(a, b, (r) => r.updatedAt.getTime(), dirMul, (r) => r.createdAt);
+      return compareWithTiebreak(a, b, (r) => r.updatedAt.getTime(), dirMul, (r) => r.createdAt);
+    });
+    const pageStart = Math.max(0, (filters.page - 1) * filters.pageSize);
+    pageIds = sorted.map((r) => r.id).slice(pageStart, pageStart + filters.pageSize);
+    totalItems = sorted.length;
+  }
+
+  const includeShape = {
+    subject: { select: { id: true, name: true } },
+    topic: { select: { id: true, name: true } }
+  } as const;
+
+  const [items, fallbackTotal, subjects, topics, summary] = await Promise.all([
+    hasActiveSearch && pageIds.length > 0
+      ? prisma.subjectSummaryCase.findMany({ where: { id: { in: pageIds } }, include: includeShape })
+      : hasActiveSearch
+        ? Promise.resolve([])
+        : prisma.subjectSummaryCase.findMany({
+            where,
+            orderBy: { [filters.sortBy]: filters.sortOrder },
+            skip: (filters.page - 1) * filters.pageSize,
+            take: filters.pageSize,
+            include: includeShape
+          }),
+    hasActiveSearch ? Promise.resolve(0) : prisma.subjectSummaryCase.count({ where }),
     prisma.subjectSummarySubject.findMany({
-      where: {
-        deletedAt: null
-      },
+      where: { deletedAt: null },
       orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
-      select: {
-        id: true,
-        name: true
-      }
+      select: { id: true, name: true }
     }),
     prisma.subjectSummaryTopic.findMany({
-      where: {
-        deletedAt: null,
-        ...(filters.subjectId ? { subjectId: filters.subjectId } : {})
-      },
+      where: { deletedAt: null, ...(filters.subjectId ? { subjectId: filters.subjectId } : {}) },
       orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
-      select: {
-        id: true,
-        name: true,
-        subjectId: true
-      }
+      select: { id: true, name: true, subjectId: true }
     }),
     countCaseStatuses(filters.caseType)
   ]);
 
+  const resolvedTotal = hasActiveSearch ? totalItems : fallbackTotal;
+  const orderedItems = hasActiveSearch
+    ? pageIds
+        .map((id) => items.find((it) => it.id === id))
+        .filter((it): it is NonNullable<typeof it> => Boolean(it))
+    : items;
+
   return {
-    items: items.map((item) => mapCase(item)),
+    items: orderedItems.map((item) => mapCase(item)),
     pagination: {
       page: filters.page,
       pageSize: filters.pageSize,
-      totalItems,
-      totalPages: Math.max(1, Math.ceil(totalItems / filters.pageSize))
+      totalItems: resolvedTotal,
+      totalPages: Math.max(1, Math.ceil(resolvedTotal / filters.pageSize))
     },
     subjects,
     summary,
@@ -925,7 +1201,8 @@ export async function listSubjectSummaryCases(filters: SubjectSummaryCaseFilters
 }
 
 export async function listPublishedSubjectSummaryCases(filters: PublishedSubjectSummaryCaseFilters) {
-  const where: Prisma.SubjectSummaryCaseWhereInput = {
+  const hasActiveSearch = Boolean(filters.search && filters.search.trim().length >= 2);
+  const strictWhere: Prisma.SubjectSummaryCaseWhereInput = {
     deletedAt: null,
     ...buildCaseTypeWhere(filters.caseType),
     status: SubjectSummaryCaseStatus.PUBLISHED,
@@ -950,42 +1227,82 @@ export async function listPublishedSubjectSummaryCases(filters: PublishedSubject
         }
       : {})
   };
+  const broadWhere = buildBroadPublishedCaseWhere(filters);
 
-  const [items, totalItems, subjects, topics] = await Promise.all([
-    prisma.subjectSummaryCase.findMany({
-      where,
-      orderBy: {
-        [filters.sortBy]: filters.sortOrder
-      },
-      skip: (filters.page - 1) * filters.pageSize,
-      take: filters.pageSize,
-      include: {
-        subject: {
-          select: {
-            id: true,
-            name: true
-          }
-        },
-        topic: {
-          select: {
-            id: true,
-            name: true,
-            subjectId: true
-          }
-        }
-      }
-    }),
-    prisma.subjectSummaryCase.count({ where }),
+  type PubCaseCandidate = {
+    id: string;
+    title: string;
+    citation: string | null;
+    court: string | null;
+    caseSummary: string;
+    year: number | null;
+    createdAt: Date;
+    updatedAt: Date;
+    subject: { id: string; name: string };
+    topic: { id: string; name: string; subjectId: string };
+  };
+
+  let pageIds: string[] = [];
+  let totalItems = 0;
+
+  if (hasActiveSearch) {
+    const select = {
+      id: true,
+      title: true,
+      citation: true,
+      court: true,
+      caseSummary: true,
+      year: true,
+      createdAt: true,
+      updatedAt: true,
+      subject: { select: { id: true, name: true } },
+      topic: { select: { id: true, name: true, subjectId: true } }
+    } as const;
+    const [strictRows, broadRows] = await Promise.all([
+      prisma.subjectSummaryCase.findMany({ select, where: strictWhere }),
+      prisma.subjectSummaryCase.findMany({ select, where: broadWhere })
+    ]);
+    const merged = new Map<string, PubCaseCandidate>();
+    for (const row of broadRows) merged.set(row.id, row as unknown as PubCaseCandidate);
+    for (const row of strictRows) merged.set(row.id, row as unknown as PubCaseCandidate);
+    const scoped = Array.from(merged.values()).filter((row) =>
+      matchesSubjectSearch(filters.search, row.title, row.citation, row.court, row.caseSummary)
+    );
+    const dirMul = filters.sortOrder === "desc" ? -1 : 1;
+    const sorted = [...scoped].sort((a, b) => {
+      if (filters.sortBy === "title") return compareWithTiebreak(a, b, (r) => r.title, dirMul, (r) => r.createdAt);
+      if (filters.sortBy === "year") return compareWithTiebreak(a, b, (r) => r.year ?? 0, dirMul, (r) => r.createdAt);
+      if (filters.sortBy === "createdAt") return compareWithTiebreak(a, b, (r) => r.createdAt.getTime(), dirMul, (r) => r.createdAt);
+      if (filters.sortBy === "updatedAt") return compareWithTiebreak(a, b, (r) => r.updatedAt.getTime(), dirMul, (r) => r.createdAt);
+      return compareWithTiebreak(a, b, (r) => r.updatedAt.getTime(), dirMul, (r) => r.createdAt);
+    });
+    const pageStart = Math.max(0, (filters.page - 1) * filters.pageSize);
+    pageIds = sorted.map((r) => r.id).slice(pageStart, pageStart + filters.pageSize);
+    totalItems = sorted.length;
+  }
+
+  const includeShape = {
+    subject: { select: { id: true, name: true } },
+    topic: { select: { id: true, name: true, subjectId: true } }
+  } as const;
+
+  const [items, fallbackTotal, subjects, topics] = await Promise.all([
+    hasActiveSearch && pageIds.length > 0
+      ? prisma.subjectSummaryCase.findMany({ where: { id: { in: pageIds } }, include: includeShape })
+      : hasActiveSearch
+        ? Promise.resolve([])
+        : prisma.subjectSummaryCase.findMany({
+            where: strictWhere,
+            orderBy: { [filters.sortBy]: filters.sortOrder },
+            skip: (filters.page - 1) * filters.pageSize,
+            take: filters.pageSize,
+            include: includeShape
+          }),
+    hasActiveSearch ? Promise.resolve(0) : prisma.subjectSummaryCase.count({ where: strictWhere }),
     prisma.subjectSummarySubject.findMany({
-      where: {
-        deletedAt: null,
-        status: { in: publishedVisibleStatuses }
-      },
+      where: { deletedAt: null, status: { in: publishedVisibleStatuses } },
       orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
-      select: {
-        id: true,
-        name: true
-      }
+      select: { id: true, name: true }
     }),
     prisma.subjectSummaryTopic.findMany({
       where: {
@@ -994,34 +1311,34 @@ export async function listPublishedSubjectSummaryCases(filters: PublishedSubject
         ...(filters.subjectId ? { subjectId: filters.subjectId } : {})
       },
       orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
-      select: {
-        id: true,
-        name: true,
-        subjectId: true
-      }
+      select: { id: true, name: true, subjectId: true }
     })
   ]);
 
+  const resolvedTotal = hasActiveSearch ? totalItems : fallbackTotal;
+  const orderedItems = hasActiveSearch
+    ? pageIds
+        .map((id) => items.find((it) => it.id === id))
+        .filter((it): it is NonNullable<typeof it> => Boolean(it))
+    : items;
+
   return {
-    items: items.map((item) =>
+    items: orderedItems.map((item) =>
       mapCase({
         ...item,
-        topic: {
-          id: item.topic.id,
-          name: item.topic.name
-        }
+        topic: { id: item.topic.id, name: item.topic.name }
       })
     ),
     pagination: {
       page: filters.page,
       pageSize: filters.pageSize,
-      totalItems,
-      totalPages: Math.max(1, Math.ceil(totalItems / filters.pageSize))
+      totalItems: resolvedTotal,
+      totalPages: Math.max(1, Math.ceil(resolvedTotal / filters.pageSize))
     },
     subjects,
     topics,
     summary: {
-      totalCases: totalItems
+      totalCases: resolvedTotal
     }
   };
 }

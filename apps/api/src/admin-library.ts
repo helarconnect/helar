@@ -536,6 +536,34 @@ function createLibraryMaterialWhere(
   };
 }
 
+// Builds a BROADER where clause without the search OR clause, used to fetch
+// the fallback candidate set for in-memory matching. This is the "Mongo
+// fallback matching" pattern required because Prisma's MongoDB contains filter
+// can be overly strict with collation/tokenization.
+function createLibraryMaterialBroadWhere(
+  categoryId: string,
+  filters: AdminLibraryFilters,
+  audience: LibrarySearchAudience = "admin"
+): Prisma.StudyMaterialWhereInput {
+  return {
+    categoryId,
+    deletedAt: null,
+    ...(audience === "student" ? { publicationStatus: ContentPublicationStatus.PUBLISHED } : {}),
+    ...(filters.materialType === "all" ? {} : { materialType: filters.materialType })
+  };
+}
+
+// Library-list specific in-memory matcher. Matches the same 3 fields that the
+// DB-level where clause searches (title, storageUrl, reportNumber) but uses
+// tokenized AND semantics with punctuation/case normalization, just like the
+// portal search `matchesSearch` helper does.
+function matchesLibrarySearch(
+  query: string,
+  material: { title: string; reportNumber: string | null; storageUrl: string }
+): boolean {
+  return matchesSearch(query, material.title, material.reportNumber, material.storageUrl);
+}
+
 function mapLibraryMaterial(
   material: {
     _count: {
@@ -1160,33 +1188,17 @@ export async function listAdminLibraryMaterials(
   }
 
   const where = createLibraryMaterialWhere(category.id, filters, audience);
+  const broadWhere = createLibraryMaterialBroadWhere(category.id, filters, audience);
   const reportNumberedSection = isReportNumberedSection(section);
   const isAdminAudience = audience === "admin";
+  const hasActiveSearch = Boolean(filters.search && filters.search.trim().length >= 2);
 
-  // Sort modes — two hot paths:
-  //   A) `reportNumber` on a numbered section (Law Reports / Helarpedia): the
-  //      serial is a string like `Helar-2026-1204`. MongoDB string sort would
-  //      lex-compare characters and rank `Helar-2026-999` HIGHER than
-  //      `Helar-2026-1200` because character `'9' > '1'` at position 11, which
-  //      is exactly the opposite of what users expect when they say "display
-  //      the bracket number in DESC order". Correct fix is to:
-  //        1. fetch the 3 smallest scalar columns (`id`, `reportNumber`,
-  //           `createdAt`) for all matching rows (Atlas WiredTiger fully caches
-  //           this tiny projection for repeated loads — it is not a "fetch the
-  //           world" call even at 10k rows, and 10k law reports is decades of
-  //           uploads),
-  //        2. in memory, sort by `integer suffix of reportNumber` DESC
-  //           (null / malformed → -Infinity so they sink to the bottom, matching
-  //           the previous "nulls last" behaviour), then `createdAt DESC`,
-  //           then `id ASC` as a tiebreaker so pages never reorder,
-  //        3. slice the exact page of ids, hydrate it with the existing
-  //           audience-specific `select`/`include`, then reorder the hydrated
-  //           page rows to match the id slice (Prisma `where id in` does not
-  //           guarantee order).
-  //   B) Every other sort (title / createdAt / estimatedMins / updatedAt, OR
-  //      reportNumber on a non-numbered fallback): use native Prisma `orderBy`
-  //      + `count` + `skip/take` (single round trip, zero JS work).
-  const useNumericSerialSort = reportNumberedSection && filters.sortBy === "reportNumber";
+  // When an active search is present, we ALWAYS route through the
+  // "fetch candidate ids, post-filter in memory, sort, then paginate" path.
+  // This guarantees consistent case-insensitive / punctuation-tolerant
+  // matching regardless of Prisma's MongoDB contains behaviour. We also stay
+  // on this path for the existing numeric serial-sort hot path.
+  const useMemoryPipeline = hasActiveSearch || (reportNumberedSection && filters.sortBy === "reportNumber");
 
   // Shared helper: given a list of raw materials in arbitrary id-in hydration
   // order, reorder them so they match the exact page-id order computed by the
@@ -1197,20 +1209,78 @@ export async function listAdminLibraryMaterials(
     return orderedIds.map((id) => byId.get(id)).filter((row): row is T => Boolean(row));
   };
 
-  const [totalItems, materials] = useNumericSerialSort
+  const [totalItems, materials] = useMemoryPipeline
     ? await (async (): Promise<[number, Array<Record<string, unknown>>]> => {
-        // Step 1: tiny 3-column fetch for the complete match set, with the
-        // values we need to compute a deterministic numeric serial sort.
-        const serialRows = await prisma.studyMaterial.findMany({
-          select: { id: true, reportNumber: true, createdAt: true },
-          where
-        });
+        // Step 1: fetch all candidate rows with the fields we need for
+        // (a) search post-filtering (title/reportNumber/storageUrl), and
+        // (b) sort computation (reportNumber suffix OR title OR createdAt etc.)
+        // When an active search is present we combine the DB-level contains
+        // matches AND a broader "no-search" candidate set so we never miss a
+        // record that Prisma's strict contains/regex skipped.
+        type CandidateRow = {
+          id: string;
+          title: string;
+          reportNumber: string | null;
+          storageUrl: string;
+          createdAt: Date;
+          estimatedMins: number;
+          updatedAt: Date;
+        };
+
+        let candidates: CandidateRow[];
+        if (hasActiveSearch) {
+          const [dbStrictRows, dbBroadRows] = await Promise.all([
+            prisma.studyMaterial.findMany({
+              select: {
+                id: true,
+                title: true,
+                reportNumber: true,
+                storageUrl: true,
+                createdAt: true,
+                estimatedMins: true,
+                updatedAt: true
+              },
+              where
+            }),
+            prisma.studyMaterial.findMany({
+              select: {
+                id: true,
+                title: true,
+                reportNumber: true,
+                storageUrl: true,
+                createdAt: true,
+                estimatedMins: true,
+                updatedAt: true
+              },
+              where: broadWhere
+            })
+          ]);
+          // Deduplicate by id, preferring the strict-match side if present
+          const merged = new Map<string, CandidateRow>();
+          for (const row of dbBroadRows) merged.set(row.id, row);
+          for (const row of dbStrictRows) merged.set(row.id, row);
+          candidates = Array.from(merged.values());
+        } else {
+          candidates = await prisma.studyMaterial.findMany({
+            select: {
+              id: true,
+              title: true,
+              reportNumber: true,
+              storageUrl: true,
+              createdAt: true,
+              estimatedMins: true,
+              updatedAt: true
+            },
+            where
+          });
+        }
+
+        // Step 1b: Apply in-memory case-insensitive token search when needed.
+        const searchScopedRows: CandidateRow[] = hasActiveSearch
+          ? candidates.filter((row) => matchesLibrarySearch(filters.search, row))
+          : candidates;
+
         const directionMul = filters.sortOrder === "desc" ? -1 : 1;
-        // Parse the integer suffix `NNNN` out of `Helar-YYYY-NNNN`. Matches
-        // the last run of digits at the tail of the string, which works even
-        // if someone later tweaks the prefix to e.g. `Helar-2026/11-NNNN`.
-        // Returns -Infinity for null / missing / non-matching values so those
-        // rows always sort after any valid serial in DESC order.
         const parseSerialSuffix = (rn: string | null): number => {
           if (!rn) return Number.NEGATIVE_INFINITY;
           const match = rn.match(/(\d+)\s*$/);
@@ -1220,20 +1290,59 @@ export async function listAdminLibraryMaterials(
         };
         const createdAtMs = (row: { createdAt: Date | string }): number =>
           (row.createdAt instanceof Date ? row.createdAt : new Date(row.createdAt)).getTime();
-        const sortedSerialRows = [...serialRows].sort((left, right) => {
-          const sCmp = (parseSerialSuffix(left.reportNumber) - parseSerialSuffix(right.reportNumber)) * directionMul;
-          if (sCmp !== 0) return sCmp;
-          const cCmp = (createdAtMs(left) - createdAtMs(right)) * (filters.sortOrder === "desc" ? -1 : 1);
-          if (cCmp !== 0) return cCmp;
+        const updatedAtMs = (row: { updatedAt: Date | string }): number =>
+          (row.updatedAt instanceof Date ? row.updatedAt : new Date(row.updatedAt)).getTime();
+
+        // Step 2: sort the scoped match set deterministically.
+        const sortedRows = [...searchScopedRows].sort((left, right) => {
+          // Report-Number numeric sort on numbered sections (legacy hot path A)
+          if (reportNumberedSection && filters.sortBy === "reportNumber") {
+            const sCmp = (parseSerialSuffix(left.reportNumber) - parseSerialSuffix(right.reportNumber)) * directionMul;
+            if (sCmp !== 0) return sCmp;
+            const cCmp = (createdAtMs(left) - createdAtMs(right)) * (filters.sortOrder === "desc" ? -1 : 1);
+            if (cCmp !== 0) return cCmp;
+            return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+          }
+          // Generic sort builders (title / estimatedMins / createdAt / updatedAt /
+          // reportNumber lexicographic on non-numbered sections)
+          if (filters.sortBy === "title") {
+            const tCmp = left.title.localeCompare(right.title, "en", { sensitivity: "base" }) * directionMul;
+            if (tCmp !== 0) return tCmp;
+            const cCmp = (createdAtMs(left) - createdAtMs(right)) * (filters.sortOrder === "desc" ? -1 : 1);
+            if (cCmp !== 0) return cCmp;
+            return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+          }
+          if (filters.sortBy === "estimatedMins") {
+            const eCmp = (left.estimatedMins - right.estimatedMins) * directionMul;
+            if (eCmp !== 0) return eCmp;
+            const cCmp = (createdAtMs(left) - createdAtMs(right)) * (filters.sortOrder === "desc" ? -1 : 1);
+            if (cCmp !== 0) return cCmp;
+            return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+          }
+          if (filters.sortBy === "createdAt") {
+            const cCmp = (createdAtMs(left) - createdAtMs(right)) * directionMul;
+            if (cCmp !== 0) return cCmp;
+            return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+          }
+          if (filters.sortBy === "updatedAt") {
+            const uCmp = (updatedAtMs(left) - updatedAtMs(right)) * directionMul;
+            if (uCmp !== 0) return uCmp;
+            return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+          }
+          // reportNumber fallback (non-numbered section): lexicographic
+          if (filters.sortBy === "reportNumber") {
+            const rCmp = (left.reportNumber ?? "").localeCompare(right.reportNumber ?? "", "en", { sensitivity: "base" }) * directionMul;
+            if (rCmp !== 0) return rCmp;
+            const cCmp = (createdAtMs(left) - createdAtMs(right)) * (filters.sortOrder === "desc" ? -1 : 1);
+            if (cCmp !== 0) return cCmp;
+            return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+          }
           return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
         });
-        const orderedAllIds = sortedSerialRows.map((row) => row.id);
+        const orderedAllIds = sortedRows.map((row) => row.id);
         const pageStart = Math.max(0, (filters.page - 1) * filters.pageSize);
         const pageEnd = pageStart + filters.pageSize;
         const pageIds = orderedAllIds.slice(pageStart, pageEnd);
-        // Step 2: hydrate only the current page of ids using the exact same
-        // audience-shape logic as the fast-path branch (admin gets _count
-        // include, student gets the lean select). 100% shape parity.
         if (pageIds.length === 0) {
           return [orderedAllIds.length, []];
         }
@@ -1278,9 +1387,6 @@ export async function listAdminLibraryMaterials(
             };
           })() as never
         );
-        // Step 3: `where id in` does not guarantee order. Put rows back into
-        // the exact numeric-serial order we computed above so the page
-        // renders highest bracket number first (Helar-2026-1200 > 999).
         const orderedPage = reorderHydratedPageByIds(hydrated as Array<{ id: string } & Record<string, unknown>>, pageIds);
         return [orderedAllIds.length, orderedPage];
       })()
