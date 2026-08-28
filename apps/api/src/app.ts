@@ -7761,7 +7761,7 @@ export function createApp(options: AppOptions = {}) {
 
       try {
         const query = parseStudentBarFinalExamSubjectsQuery(request.query as Record<string, string | string[] | undefined>);
-        const data = await listStudentBarFinalExamSubjects(query);
+        const data = await listStudentBarFinalExamSubjects(request.auth?.userId ?? null, query);
 
         return response.json({
           success: true,
@@ -7807,7 +7807,7 @@ export function createApp(options: AppOptions = {}) {
 
       try {
         const query = parseStudentBarFinalExamQuestionsQuery(request.query as Record<string, string | string[] | undefined>);
-        const data = await listStudentBarFinalExamQuestions(query);
+        const data = await listStudentBarFinalExamQuestions(request.auth?.userId ?? null, query);
 
         return response.json({
           success: true,
@@ -7853,7 +7853,7 @@ export function createApp(options: AppOptions = {}) {
 
       try {
         const query = parseStudentBarFinalExamSubjectsQuery(request.query as Record<string, string | string[] | undefined>);
-        const data = await listStudentBarFinalExamMcqSubjects(query);
+        const data = await listStudentBarFinalExamMcqSubjects(request.auth?.userId ?? null, query);
 
         return response.json({
           success: true,
@@ -7899,7 +7899,7 @@ export function createApp(options: AppOptions = {}) {
 
       try {
         const query = parseStudentBarFinalExamMcqQuestionsQuery(request.query as Record<string, string | string[] | undefined>);
-        const data = await listStudentBarFinalExamMcqQuestions(query);
+        const data = await listStudentBarFinalExamMcqQuestions(request.auth?.userId ?? null, query);
 
         return response.json({
           success: true,

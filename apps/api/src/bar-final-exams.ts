@@ -4,6 +4,13 @@ import { z } from "zod";
 import { recordIdSchema } from "./lib/record-id.js";
 import { prisma } from "./lib/prisma.js";
 import { containsText } from "./lib/text-search.js";
+import {
+  type PremiumContentAccess,
+  PREMIUM_PREVIEW_WORD_LIMIT,
+  createPreviewHtml,
+  getPremiumContentAccess,
+  truncateWords
+} from "./premium-access.js";
 
 // --- Case-insensitive + punctuation-tolerant search helpers (same semantics as portal-search) ---
 
@@ -338,6 +345,50 @@ function mapMcqQuestion(item: {
   };
 }
 
+// --- Subscription gating / preview helpers ---
+
+type SerializedPremiumContentAccess = Omit<PremiumContentAccess, "activeSubscriptionEndsAt"> & {
+  activeSubscriptionEndsAt: string | null;
+};
+
+function serializeContentAccess(access: PremiumContentAccess): SerializedPremiumContentAccess {
+  return {
+    ...access,
+    activeSubscriptionEndsAt: access.activeSubscriptionEndsAt?.toISOString() ?? null
+  };
+}
+
+// Strips the full answer down to a 150-word preview paragraph
+function buildRestrictedQuestionPreview<T extends Record<string, unknown> & { answer: string }>(item: T): T {
+  const previewText = truncateWords(item.answer, PREMIUM_PREVIEW_WORD_LIMIT).text;
+  return {
+    ...item,
+    answer: createPreviewHtml(previewText, PREMIUM_PREVIEW_WORD_LIMIT) as unknown as T["answer"]
+  };
+}
+
+// For MCQ questions: keep question + options; NULLIFY correctOptionIndex
+function buildRestrictedMcqQuestionPreview<T extends Record<string, unknown>>(
+  item: T
+): T {
+  return { ...item, correctOptionIndex: null } as T;
+}
+
+// Simple types for actual student question items (question list items are returned directly from DB select)
+type StudentQuestionListItem = {
+  id: string;
+  question: string;
+  answer: string;
+  examDate: Date | null;
+};
+
+type StudentMcqQuestionListItem = {
+  id: string;
+  question: string;
+  options: string[];
+  examDate: Date | null;
+};
+
 export async function fetchBarFinalExamFormOptions() {
   const subjects = await prisma.subjectSummarySubject.findMany({
     where: {
@@ -556,8 +607,22 @@ export async function deleteAdminBarFinalExamQuestion(questionId: string) {
   return { id: questionId, success: true };
 }
 
-export async function listStudentBarFinalExamSubjects(query: StudentBarFinalExamSubjectsQuery) {
+export async function listStudentBarFinalExamSubjects(
+  userId: string | null,
+  query: StudentBarFinalExamSubjectsQuery
+) {
   const hasActiveSearch = query.search.trim().length >= 2;
+  const contentAccess = userId ? await getPremiumContentAccess(userId) : null;
+  const gatedAccess = contentAccess ?? {
+    activeSubscriptionEndsAt: null,
+    activeSubscriptionId: null,
+    hasFullAccess: false,
+    isPreview: true,
+    previewWordLimit: PREMIUM_PREVIEW_WORD_LIMIT,
+    requiresSubscription: true,
+    upgradeMessage:
+      "Subscribe to unlock every Bar Final subject and the complete model answers. Your preview access is limited until your subscription is active."
+  };
 
   const baseWhere: Prisma.BarFinalExamQuestionWhereInput = {
     deletedAt: null,
@@ -576,11 +641,9 @@ export async function listStudentBarFinalExamSubjects(query: StudentBarFinalExam
     include: { subject: { select: { id: true, name: true } } }
   });
 
-  // Start with strict DB matches
   const subjectMap = new Map<string, { id: string; name: string }>();
   for (const q of questions) subjectMap.set(q.subject.id, q.subject);
 
-  // For active search, also fetch broad candidates (no subject.name filter) for fallback matching
   if (hasActiveSearch) {
     const broadQuestions = await prisma.barFinalExamQuestion.findMany({
       where: baseWhere,
@@ -589,7 +652,6 @@ export async function listStudentBarFinalExamSubjects(query: StudentBarFinalExam
       include: { subject: { select: { id: true, name: true } } }
     });
     for (const q of broadQuestions) {
-      // Only add if in-memory matcher passes (case-insensitive, punctuation-tolerant)
       if (matchesBarSearch(query.search, q.subject.name)) {
         subjectMap.set(q.subject.id, q.subject);
       }
@@ -600,10 +662,28 @@ export async function listStudentBarFinalExamSubjects(query: StudentBarFinalExam
     left.name.localeCompare(right.name)
   );
 
-  return { subjects };
+  return {
+    subjects,
+    contentAccess: serializeContentAccess(gatedAccess)
+  };
 }
 
-export async function listStudentBarFinalExamQuestions(query: StudentBarFinalExamQuestionsQuery) {
+export async function listStudentBarFinalExamQuestions(
+  userId: string | null,
+  query: StudentBarFinalExamQuestionsQuery
+) {
+  const contentAccess = userId ? await getPremiumContentAccess(userId) : null;
+  const gatedAccess = contentAccess ?? {
+    activeSubscriptionEndsAt: null,
+    activeSubscriptionId: null,
+    hasFullAccess: false,
+    isPreview: true,
+    previewWordLimit: PREMIUM_PREVIEW_WORD_LIMIT,
+    requiresSubscription: true,
+    upgradeMessage:
+      "Subscribe to unlock the complete model answers for every Bar Final exam question. Preview shows only the first portion of each answer."
+  };
+
   const questions = await prisma.barFinalExamQuestion.findMany({
     where: {
       deletedAt: null,
@@ -622,7 +702,15 @@ export async function listStudentBarFinalExamQuestions(query: StudentBarFinalExa
     }
   });
 
-  return { items: questions };
+  const items = questions.map((item) => {
+    const serialized = { ...item, examDate: item.examDate?.toISOString() ?? null };
+    return gatedAccess.hasFullAccess ? serialized : buildRestrictedQuestionPreview(serialized);
+  });
+
+  return {
+    items,
+    contentAccess: serializeContentAccess(gatedAccess)
+  };
 }
 
 export async function listAdminBarFinalExamMcqQuestions(filters: AdminBarFinalExamMcqQuestionFilters) {
@@ -826,8 +914,22 @@ export async function deleteAdminBarFinalExamMcqQuestion(questionId: string) {
   return { id: questionId, success: true };
 }
 
-export async function listStudentBarFinalExamMcqSubjects(query: StudentBarFinalExamSubjectsQuery) {
+export async function listStudentBarFinalExamMcqSubjects(
+  userId: string | null,
+  query: StudentBarFinalExamSubjectsQuery
+) {
   const hasActiveSearch = query.search.trim().length >= 2;
+  const contentAccess = userId ? await getPremiumContentAccess(userId) : null;
+  const gatedAccess = contentAccess ?? {
+    activeSubscriptionEndsAt: null,
+    activeSubscriptionId: null,
+    hasFullAccess: false,
+    isPreview: true,
+    previewWordLimit: PREMIUM_PREVIEW_WORD_LIMIT,
+    requiresSubscription: true,
+    upgradeMessage:
+      "Subscribe to unlock every Bar Final MCQ subject and reveal the correct answers. Preview access hides the answer key until your subscription is active."
+  };
 
   const baseWhere: Prisma.BarFinalExamMcqQuestionWhereInput = {
     deletedAt: null,
@@ -867,10 +969,28 @@ export async function listStudentBarFinalExamMcqSubjects(query: StudentBarFinalE
     left.name.localeCompare(right.name)
   );
 
-  return { subjects };
+  return {
+    subjects,
+    contentAccess: serializeContentAccess(gatedAccess)
+  };
 }
 
-export async function listStudentBarFinalExamMcqQuestions(query: StudentBarFinalExamMcqQuestionsQuery) {
+export async function listStudentBarFinalExamMcqQuestions(
+  userId: string | null,
+  query: StudentBarFinalExamMcqQuestionsQuery
+) {
+  const contentAccess = userId ? await getPremiumContentAccess(userId) : null;
+  const gatedAccess = contentAccess ?? {
+    activeSubscriptionEndsAt: null,
+    activeSubscriptionId: null,
+    hasFullAccess: false,
+    isPreview: true,
+    previewWordLimit: PREMIUM_PREVIEW_WORD_LIMIT,
+    requiresSubscription: true,
+    upgradeMessage:
+      "Subscribe to unlock the answer key for every Bar Final MCQ question. Preview access hides the correct option index until your subscription is active."
+  };
+
   const questions = await prisma.barFinalExamMcqQuestion.findMany({
     where: {
       deletedAt: null,
@@ -882,6 +1002,7 @@ export async function listStudentBarFinalExamMcqQuestions(query: StudentBarFinal
     },
     orderBy: [{ createdAt: "asc" }],
     select: {
+      correctOptionIndex: true,
       examDate: true,
       id: true,
       options: true,
@@ -889,7 +1010,15 @@ export async function listStudentBarFinalExamMcqQuestions(query: StudentBarFinal
     }
   });
 
-  return { items: questions.map((item) => ({ ...item, examDate: item.examDate?.toISOString() ?? null })) };
+  const items = questions.map((item) => {
+    const serialized = { ...item, examDate: item.examDate?.toISOString() ?? null };
+    return gatedAccess.hasFullAccess ? serialized : buildRestrictedMcqQuestionPreview(serialized);
+  });
+
+  return {
+    items,
+    contentAccess: serializeContentAccess(gatedAccess)
+  };
 }
 
 export async function submitStudentBarFinalExamMcqAttempt(
@@ -897,21 +1026,24 @@ export async function submitStudentBarFinalExamMcqAttempt(
   questionId: string,
   input: StudentBarFinalExamMcqAttemptInput
 ) {
-  const question = await prisma.barFinalExamMcqQuestion.findFirst({
-    where: {
-      id: questionId,
-      deletedAt: null,
-      status: BarFinalExamQuestionStatus.PUBLISHED,
-      subject: {
-        deletedAt: null
+  const [question, contentAccess] = await Promise.all([
+    prisma.barFinalExamMcqQuestion.findFirst({
+      where: {
+        id: questionId,
+        deletedAt: null,
+        status: BarFinalExamQuestionStatus.PUBLISHED,
+        subject: {
+          deletedAt: null
+        }
+      },
+      select: {
+        correctOptionIndex: true,
+        options: true,
+        subjectId: true
       }
-    },
-    select: {
-      correctOptionIndex: true,
-      options: true,
-      subjectId: true
-    }
-  });
+    }),
+    getPremiumContentAccess(userId)
+  ]);
 
   if (!question) {
     return null;
@@ -945,9 +1077,10 @@ export async function submitStudentBarFinalExamMcqAttempt(
   });
 
   return {
-    correctOptionIndex: question.correctOptionIndex,
+    correctOptionIndex: contentAccess.hasFullAccess ? question.correctOptionIndex : null,
     id: savedAttempt.id,
-    isCorrect: savedAttempt.isCorrect,
-    selectedOptionIndex: savedAttempt.selectedOptionIndex
+    isCorrect: contentAccess.hasFullAccess ? savedAttempt.isCorrect : null,
+    selectedOptionIndex: savedAttempt.selectedOptionIndex,
+    contentAccess: serializeContentAccess(contentAccess)
   };
 }

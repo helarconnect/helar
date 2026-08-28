@@ -3,7 +3,7 @@ import { AxiosError } from "axios";
 import { CheckCircle2, ChevronRight, Eye, Pencil, Plus, Search, Trash2, X, XCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { RichTextEditor } from "@/components/ui/RichTextEditor";
 import { useTheme } from "@/hooks/useTheme";
@@ -602,6 +602,7 @@ export function StudentBarFinalExamsMlsMcqPage() {
 
   const subjects = subjectsQuery.data?.subjects ?? [];
   const questions = questionsQuery.data?.items ?? [];
+  const contentAccess = subjectsQuery.data?.contentAccess;
   const activeSubject = subjects.find((subject) => subject.id === selectedSubjectId) ?? null;
 
   useEffect(() => {
@@ -666,6 +667,24 @@ export function StudentBarFinalExamsMlsMcqPage() {
             Choose a subject to reveal all available questions, then open the answer when you are ready.
           </p>
         </div>
+
+        {contentAccess?.isPreview ? (
+          <section
+            className={cn(
+              "rounded-[28px] border px-6 py-5",
+              isDark ? "border-amber-500/30 bg-amber-500/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-800"
+            )}
+          >
+            <p className="text-xs uppercase tracking-[0.2em]">Preview only</p>
+            <h2 className="mt-3 text-lg font-semibold">Full Bar Final exam access is locked right now.</h2>
+            <p className="mt-2 text-sm leading-7">
+              {contentAccess.upgradeMessage} You can read up to {contentAccess.previewWordLimit} words of each published model answer until your subscription is active.
+            </p>
+            <Link className="mt-3 inline-flex rounded-full border px-4 py-2 text-sm font-medium" to="/app/subscription">
+              Subscribe to unlock
+            </Link>
+          </section>
+        ) : null}
 
         <div className={cn("rounded-[28px] border p-4", isDark ? "border-slate-800 bg-slate-950/40" : "border-slate-200 bg-white")}>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

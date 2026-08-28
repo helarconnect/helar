@@ -859,15 +859,18 @@ export type StudentBarFinalExamMcqSubjectsResponse = {
     id: string;
     name: string;
   }>;
+  contentAccess: PremiumContentAccess;
 };
 
 export type StudentBarFinalExamMcqQuestionsResponse = {
   items: Array<{
+    correctOptionIndex: number | null;
     examDate: string | null;
     id: string;
     options: string[];
     question: string;
   }>;
+  contentAccess: PremiumContentAccess;
 };
 
 export type StudentBarFinalExamMcqAttemptInput = {
@@ -875,10 +878,11 @@ export type StudentBarFinalExamMcqAttemptInput = {
 };
 
 export type StudentBarFinalExamMcqAttemptResponse = {
-  correctOptionIndex: number;
+  correctOptionIndex: number | null;
   id: string;
-  isCorrect: boolean;
+  isCorrect: boolean | null;
   selectedOptionIndex: number;
+  contentAccess?: PremiumContentAccess;
 };
 
 export type BarFinalExamFormOptions = {
@@ -893,6 +897,7 @@ export type StudentBarFinalExamSubjectsResponse = {
     id: string;
     name: string;
   }>;
+  contentAccess: PremiumContentAccess;
 };
 
 export type StudentBarFinalExamQuestionsResponse = {
@@ -902,6 +907,7 @@ export type StudentBarFinalExamQuestionsResponse = {
     id: string;
     question: string;
   }>;
+  contentAccess: PremiumContentAccess;
 };
 
 export type StudyContentType =

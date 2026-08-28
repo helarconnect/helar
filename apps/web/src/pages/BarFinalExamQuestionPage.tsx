@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight } from "lucide-react";
 import { useEffect } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { useTheme } from "@/hooks/useTheme";
 import { fetchStudentBarFinalExamQuestions, fetchStudentBarFinalExamSubjects } from "@/lib/admin-api";
@@ -36,6 +36,7 @@ export function StudentBarFinalExamQuestionPage() {
   const subjects = subjectsQuery.data?.subjects ?? [];
   const activeSubject = subjects.find((subject) => subject.id === subjectId) ?? null;
   const questions = questionsQuery.data?.items ?? [];
+  const contentAccess = questionsQuery.data?.contentAccess;
   const currentIndex = questions.findIndex((item) => item.id === questionId);
   const currentQuestion = currentIndex >= 0 ? questions[currentIndex] : null;
   const previousQuestionId = currentIndex > 0 ? questions[currentIndex - 1]?.id ?? "" : "";
@@ -94,6 +95,15 @@ export function StudentBarFinalExamQuestionPage() {
           </div>
         </div>
 
+        {contentAccess?.isPreview ? (
+          <section className={cn("rounded-[28px] border px-6 py-5 mb-6", isDark ? "border-amber-500/30 bg-amber-500/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-800")}>
+            <p className="text-xs uppercase tracking-[0.2em]">Preview only</p>
+            <h2 className="mt-3 text-lg font-semibold">Full Bar Final answer access is locked right now.</h2>
+            <p className="mt-2 text-sm leading-7">{contentAccess.upgradeMessage} You can read up to {contentAccess.previewWordLimit} words of each model answer until your subscription is active.</p>
+            <Link className="mt-3 inline-flex rounded-full border px-4 py-2 text-sm font-medium" to="/app/subscription">Subscribe to unlock</Link>
+          </section>
+        ) : null}
+
         <div className={cn("rounded-[28px] border p-5", isDark ? "border-slate-800 bg-slate-950/40" : "border-slate-200 bg-white")}>
           {questionsQuery.isLoading ? (
             <div className={cn("rounded-2xl border px-4 py-6 text-sm", isDark ? "border-slate-800 text-slate-400" : "border-slate-200 text-slate-600")}>
@@ -130,11 +140,14 @@ export function StudentBarFinalExamQuestionPage() {
                   <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-emerald-200/90" : "text-emerald-700")}>
                     Answer
                   </p>
+                  {contentAccess?.isPreview ? (
+                    <p className="text-xs font-medium text-amber-600/90 mb-3">Preview mode — only the first {contentAccess.previewWordLimit} words of the model answer are shown.</p>
+                  ) : null}
                   <div
                     // Rich-text answer rendering inherits the emerald-tinted
                     // card's background while using the shared rich-text
                     // typography system.
-                    className={cn("mt-3 text-sm leading-8 rich-text-content", isDark ? "text-slate-100" : "text-slate-800")}
+                    className={cn("text-sm leading-8 rich-text-content", isDark ? "text-slate-100" : "text-slate-800")}
                     dangerouslySetInnerHTML={{ __html: currentQuestion.answer }}
                   />
                 </div>

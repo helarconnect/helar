@@ -3,7 +3,7 @@ import { AxiosError } from "axios";
 import { CheckCircle2, ChevronRight, Circle, Eye, Lock, Pencil, Plus, Search, Trash2, X, XCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { RichTextEditor } from "@/components/ui/RichTextEditor";
 import { useTheme } from "@/hooks/useTheme";
@@ -926,6 +926,15 @@ export function StudentBarFinalExamsMcqPage() {
           <p className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-600")}>Pick a subject and attempt the multiple choice questions.</p>
         </div>
 
+        {subjectsQuery.data?.contentAccess?.isPreview && (
+          <section className={cn("rounded-[28px] border px-6 py-5", isDark ? "border-amber-500/30 bg-amber-500/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-800")}>
+            <p className="text-xs uppercase tracking-[0.2em]">Preview only</p>
+            <h2 className="mt-3 text-lg font-semibold">Full Bar Final MCQ access is locked right now.</h2>
+            <p className="mt-2 text-sm leading-7">{subjectsQuery.data?.contentAccess.upgradeMessage} The correct answer is hidden on every question until your subscription is active.</p>
+            <Link className="mt-3 inline-flex rounded-full border px-4 py-2 text-sm font-medium" to="/app/subscription">Subscribe to unlock</Link>
+          </section>
+        )}
+
         <div className="grid gap-3 lg:grid-cols-[340px_minmax(0,1fr)]">
           <div className={cn("rounded-[28px] border p-4", isDark ? "border-slate-800 bg-slate-950/40" : "border-slate-200 bg-white")}>
             <label className="space-y-2">
@@ -1318,6 +1327,15 @@ export function StudentBarFinalExamMcqQuestionPage() {
           </div>
         </div>
 
+        {questionsQuery.data?.contentAccess?.isPreview && (
+          <section className={cn("rounded-[28px] border px-6 py-5", isDark ? "border-amber-500/30 bg-amber-500/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-800")}>
+            <p className="text-xs uppercase tracking-[0.2em]">Preview only</p>
+            <h2 className="mt-3 text-lg font-semibold">Full Bar Final MCQ access is locked right now.</h2>
+            <p className="mt-2 text-sm leading-7">{questionsQuery.data?.contentAccess.upgradeMessage} The correct answer is hidden on every question until your subscription is active.</p>
+            <Link className="mt-3 inline-flex rounded-full border px-4 py-2 text-sm font-medium" to="/app/subscription">Subscribe to unlock</Link>
+          </section>
+        )}
+
         <div className={cn("rounded-[28px] border p-5", isDark ? "border-slate-800 bg-slate-950/40" : "border-slate-200 bg-white")}>
           {questionsQuery.isLoading ? (
             <div className={cn("rounded-2xl border px-4 py-6 text-sm", isDark ? "border-slate-800 text-slate-400" : "border-slate-200 text-slate-600")}>
@@ -1347,12 +1365,13 @@ export function StudentBarFinalExamMcqQuestionPage() {
                 <div className="space-y-2">
                   {currentQuestion.options.map((option, index) => {
                     const isSelected = selectedOptionIndex === index;
+                    const isPreview = questionsQuery.data?.contentAccess?.isPreview === true;
                     // Only apply correct/incorrect styling if the student has
                     // viewed ALL questions in the subject (reached the last
-                    // one). Otherwise we show the user's selection but NO
-                    // answer coloring.
-                    const isCorrect = canRevealAnswers && result?.correctOptionIndex === index;
-                    const isWrongSelection = canRevealAnswers && result && result.selectedOptionIndex === index && !result.isCorrect;
+                    // one) AND we are not in subscription preview mode.
+                    // Otherwise we show the user's selection but NO answer coloring.
+                    const isCorrect = !isPreview && canRevealAnswers && result?.correctOptionIndex === index;
+                    const isWrongSelection = !isPreview && canRevealAnswers && result && result.selectedOptionIndex === index && !result.isCorrect;
 
                     return (
                       <button
@@ -1386,7 +1405,9 @@ export function StudentBarFinalExamMcqQuestionPage() {
                   })}
                 </div>
 
-                {canRevealAnswers && result ? (
+                {questionsQuery.data?.contentAccess?.isPreview === true && result ? (
+                  <p className="text-xs font-medium text-amber-600/90 mt-3">Preview mode — subscribe to reveal the correct answer and whether your selection was correct.</p>
+                ) : canRevealAnswers && result ? (
                   // Full answer reveal card — visible once the student has
                   // viewed every question in the subject.
                   <div
@@ -1504,7 +1525,7 @@ export function StudentBarFinalExamMcqQuestionPage() {
                   >
                     {attemptMutation.isPending ? (
                       <span>Submitting...</span>
-                    ) : canRevealAnswers && result ? (
+                    ) : questionsQuery.data?.contentAccess?.isPreview !== true && canRevealAnswers && result ? (
                       <>
                         {result.isCorrect ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
                         <span>Submit answer</span>
