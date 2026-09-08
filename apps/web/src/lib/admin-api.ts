@@ -819,6 +819,7 @@ export type BarFinalExamMcqQuestion = {
   correctOptionIndex: number;
   createdAt: string;
   examDate: string | null;
+  explanation: string | null;
   id: string;
   options: string[];
   question: string;
@@ -834,6 +835,7 @@ export type BarFinalExamMcqQuestion = {
 export type BarFinalExamMcqQuestionInput = {
   correctOptionIndex: number;
   examDate: string;
+  explanation: string;
   options: string[];
   question: string;
   status: BarFinalExamQuestionStatus;
@@ -866,6 +868,7 @@ export type StudentBarFinalExamMcqQuestionsResponse = {
   items: Array<{
     correctOptionIndex: number | null;
     examDate: string | null;
+    explanation: string | null;
     id: string;
     options: string[];
     question: string;
@@ -879,6 +882,7 @@ export type StudentBarFinalExamMcqAttemptInput = {
 
 export type StudentBarFinalExamMcqAttemptResponse = {
   correctOptionIndex: number | null;
+  explanation?: string | null;
   id: string;
   isCorrect: boolean | null;
   selectedOptionIndex: number;

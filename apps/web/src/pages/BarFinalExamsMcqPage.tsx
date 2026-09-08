@@ -125,6 +125,43 @@ function writeAttemptedQuestionId(subjectId: string, questionId: string) {
   }
 }
 
+// ---- ATTEMPT OUTCOME tracking (correct/incorrect per question) -----------
+const MCQ_OUTCOME_STORAGE_PREFIX = "bar-final-mcq:outcomes:";
+
+type AttemptOutcome = { isCorrect: boolean; selectedOptionIndex: number };
+
+function buildOutcomeStorageKey(subjectId: string) {
+  return `${MCQ_OUTCOME_STORAGE_PREFIX}${subjectId}`;
+}
+
+function readAttemptOutcomes(subjectId: string): Record<string, AttemptOutcome> {
+  if (typeof window === "undefined" || !subjectId) return {};
+  try {
+    const raw = window.localStorage.getItem(buildOutcomeStorageKey(subjectId));
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") return parsed as Record<string, AttemptOutcome>;
+    return {};
+  } catch {
+    return {};
+  }
+}
+
+function writeAttemptOutcome(
+  subjectId: string,
+  questionId: string,
+  outcome: AttemptOutcome
+) {
+  if (typeof window === "undefined" || !subjectId || !questionId) return;
+  const current = readAttemptOutcomes(subjectId);
+  current[questionId] = outcome;
+  try {
+    window.localStorage.setItem(buildOutcomeStorageKey(subjectId), JSON.stringify(current));
+  } catch {
+    // Ignore quota / disabled localStorage errors.
+  }
+}
+
 // ---- Unified Gating Hook ----
 // `allQuestionIds` is the ordered list of question IDs for the selected subject
 // (index order = list order). `allViewed` is true when the last question has
@@ -132,10 +169,12 @@ function writeAttemptedQuestionId(subjectId: string, questionId: string) {
 function useMcqAnswerGating(subjectId: string, allQuestionIds: string[]) {
   const [viewedSet, setViewedSet] = useState<Set<string>>(() => readViewedQuestionIds(subjectId));
   const [attemptedSet, setAttemptedSet] = useState<Set<string>>(() => readAttemptedQuestionIds(subjectId));
+  const [attemptOutcomes, setAttemptOutcomes] = useState<Record<string, AttemptOutcome>>(() => readAttemptOutcomes(subjectId));
 
   useEffect(() => {
     setViewedSet(readViewedQuestionIds(subjectId));
     setAttemptedSet(readAttemptedQuestionIds(subjectId));
+    setAttemptOutcomes(readAttemptOutcomes(subjectId));
   }, [subjectId]);
 
   const totalQuestions = allQuestionIds.length;
@@ -175,6 +214,16 @@ function useMcqAnswerGating(subjectId: string, allQuestionIds: string[]) {
     });
   }
 
+  function registerAttemptOutcome(questionId: string, outcome: AttemptOutcome) {
+    writeAttemptOutcome(subjectId, questionId, outcome);
+    setAttemptOutcomes((current) => ({
+      ...current,
+      [questionId]: outcome
+    }));
+    // Also register the attempt itself for consistency.
+    registerAttempt(questionId);
+  }
+
   return {
     // Primary unlock flag (consumed by option coloring + result card).
     canRevealAnswers,
@@ -189,7 +238,11 @@ function useMcqAnswerGating(subjectId: string, allQuestionIds: string[]) {
     allAttempted,
     attemptedCount,
     attemptedSet,
-    registerAttempt
+    registerAttempt,
+    // Outcome tracking — correct/incorrect per question (drives the unified
+    // Answers & Explanations section at the end of the subject list).
+    attemptOutcomes,
+    registerAttemptOutcome
   };
 }
 
@@ -260,6 +313,7 @@ function buildDefaultDraft(subjectId: string): BarFinalExamMcqQuestionInput {
   return {
     correctOptionIndex: 0,
     examDate: "",
+    explanation: "",
     options: ["", "", "", ""],
     question: "",
     status: "PUBLISHED",
@@ -400,6 +454,7 @@ export function AdminBarFinalExamsMcqPage() {
     setDraft({
       correctOptionIndex: question.correctOptionIndex,
       examDate: question.examDate ? question.examDate.slice(0, 10) : "",
+      explanation: question.explanation ?? "",
       options: question.options.length ? question.options : ["", "", "", ""],
       question: question.question,
       status: question.status,
@@ -763,6 +818,18 @@ export function AdminBarFinalExamsMcqPage() {
                     ))}
                   </div>
                 </div>
+
+                <div className="grid gap-2">
+                  <RichTextEditor
+                    isDark={isDark}
+                    label="Explanation (shown to students after they finish all questions in the Answers section)"
+                    maxHeight={260}
+                    minHeight={140}
+                    onChange={(value) => setDraft((current) => ({ ...current, explanation: value }))}
+                    placeholder="e.g. Option B is correct because in Carlill v Carbolic Smoke Ball Co the court held that a unilateral offer can be accepted by performance..."
+                    value={draft.explanation}
+                  />
+                </div>
               </div>
             </div>
 
@@ -811,6 +878,7 @@ export function AdminBarFinalExamsMcqPage() {
                   const payload: BarFinalExamMcqQuestionInput = {
                     ...draft,
                     correctOptionIndex: remappedCorrectIndex,
+                    explanation: draft.explanation,
                     options: cleanOptions
                   };
                   if (modalMode.kind === "create") {
@@ -999,50 +1067,46 @@ export function StudentBarFinalExamsMcqPage() {
               </div>
             ) : (
               <div className="space-y-4">
-                {/* Subject-level answer-unlock progress summary.
-                    Per spec: answers unlock once the student has VIEWED every
-                    question in order (signalled by reaching the LAST question),
-                    regardless of whether they submitted attempts. */}
                 <div className={cn("rounded-2xl border px-4 py-3", isDark ? "border-slate-800 bg-slate-950/30" : "border-slate-200 bg-slate-50")}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <span className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Progress</span>
                       <span className={cn("text-xs font-semibold", isDark ? "text-white" : "text-slate-950")}>
-                        {gating.viewedCount}/{gating.totalQuestions} viewed
+                        {gating.attemptedCount}/{gating.totalQuestions} attempted
                       </span>
                       <span className={cn("text-[11px]", isDark ? "text-slate-500" : "text-slate-500")}>
-                        · {gating.attemptedCount} attempted
+                        · {gating.viewedCount} viewed
                       </span>
                     </div>
                     <span
                       className={cn(
                         "inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]",
-                        gating.allViewed
+                        gating.allAttempted
                           ? isDark
                             ? "bg-emerald-500/15 text-emerald-200"
                             : "bg-emerald-50 text-emerald-700"
                           : isDark
-                            ? "bg-amber-500/15 text-amber-200"
-                            : "bg-amber-50 text-amber-700"
+                            ? "bg-sky-500/15 text-sky-200"
+                            : "bg-sky-50 text-sky-700"
                       )}
                     >
-                      {gating.allViewed ? "Answers unlocked" : "View all to unlock"}
+                      {gating.allAttempted ? "All attempted" : `${gating.totalQuestions - gating.attemptedCount} remaining`}
                     </span>
                   </div>
                   <div className={cn("mt-2.5 h-2 w-full overflow-hidden rounded-full", isDark ? "bg-slate-800" : "bg-slate-200")}>
                     <div
                       className={cn(
                         "h-full rounded-full transition-all duration-500",
-                        gating.allViewed
+                        gating.allAttempted
                           ? isDark
                             ? "bg-emerald-500"
                             : "bg-emerald-600"
                           : isDark
-                            ? "bg-amber-500"
-                            : "bg-amber-500"
+                            ? "bg-sky-500"
+                            : "bg-sky-600"
                       )}
                       style={{
-                        width: `${gating.totalQuestions > 0 ? Math.max(0, Math.min(100, (gating.viewedCount / gating.totalQuestions) * 100)) : 0}%`
+                        width: `${gating.totalQuestions > 0 ? Math.max(0, Math.min(100, (gating.attemptedCount / gating.totalQuestions) * 100)) : 0}%`
                       }}
                     />
                   </div>
@@ -1163,6 +1227,189 @@ export function StudentBarFinalExamsMcqPage() {
           </div>
         </div>
 
+        {selectedSubjectId && questions.length > 0 && questionsQuery.data?.contentAccess ? (
+          <section
+            className={cn(
+              "rounded-[28px] border p-5",
+              isDark ? "border-slate-800 bg-slate-950/40" : "border-slate-200 bg-white"
+            )}
+          >
+            <div className="mb-4 flex flex-col gap-1">
+              <div className={cn("h-px w-full", isDark ? "bg-slate-800" : "bg-slate-200")} />
+              <h2 className={cn("mt-4 text-2xl font-bold tracking-tight", isDark ? "text-white" : "text-slate-950")}>
+                Answers &amp; Explanations
+              </h2>
+              <p className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-600")}>
+                {activeSubject?.name ?? "Selected subject"} — review every question, its correct answer, and explanation.
+              </p>
+            </div>
+
+            {(() => {
+              const isSubscriber = questionsQuery.data.contentAccess.isPreview !== true;
+              const allAttempted = gating.allAttempted;
+              const gatePassed = isSubscriber && allAttempted;
+
+              if (!gatePassed) {
+                return (
+                  <div
+                    className={cn(
+                      "rounded-3xl border p-5",
+                      isDark
+                        ? "border-sky-500/25 bg-sky-500/10 text-sky-100"
+                        : "border-sky-200 bg-sky-50 text-sky-800"
+                    )}
+                  >
+                    <div className="flex items-start gap-3">
+                      <Lock className="mt-0.5 h-5 w-5 shrink-0" />
+                      <div className="space-y-2">
+                        <p className="text-xs uppercase tracking-[0.2em] font-semibold">Locked</p>
+                        <p className="text-sm leading-7">
+                          Answers &amp; Explanations unlock (1) when you have an active subscription and (2) after you submit an answer for every question in this subject.
+                        </p>
+                        <ul className={cn("mt-1 space-y-1 text-xs leading-6", isDark ? "text-sky-200/90" : "text-sky-700/90")}>
+                          <li>
+                            · Subscription:{" "}
+                            {isSubscriber ? (
+                              <span className="font-semibold">Active ✅</span>
+                            ) : (
+                              <>
+                                <span className="font-semibold">Preview mode</span> —{" "}
+                                <Link className="underline underline-offset-2 hover:opacity-80" to="/app/subscription">Subscribe to unlock</Link>
+                              </>
+                            )}
+                          </li>
+                          <li>
+                            · Questions attempted:{" "}
+                            {allAttempted ? (
+                              <span className="font-semibold">All done ✅</span>
+                            ) : (
+                              <>
+                                <span className="font-semibold">{gating.attemptedCount} / {gating.totalQuestions}</span>{" "}
+                                — submit answers for the remaining {gating.totalQuestions - gating.attemptedCount} question{gating.totalQuestions - gating.attemptedCount === 1 ? "" : "s"} above.
+                              </>
+                            )}
+                          </li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+
+              function optionLetter(index: number) {
+                return String.fromCharCode(65 + index);
+              }
+
+              return (
+                <ol className="space-y-5">
+                  {questions.map((item, index) => {
+                    const explanation = (item as any).explanation as string | null | undefined;
+                    const hasExplanation = Boolean(explanation && stripHtml(explanation).length > 0);
+                    const outcome = gating.attemptOutcomes[item.id];
+                    const correctIdx = item.correctOptionIndex;
+                    const correctText = item.options[correctIdx] ?? "";
+
+                    let yourAnswerBadge: React.ReactNode;
+                    if (!outcome) {
+                      yourAnswerBadge = (
+                        <span className={cn(
+                          "inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]",
+                          isDark ? "bg-slate-700/60 text-slate-300" : "bg-slate-100 text-slate-600"
+                        )}>
+                          Not attempted
+                        </span>
+                      );
+                    } else if (outcome.isCorrect) {
+                      yourAnswerBadge = (
+                        <span className={cn(
+                          "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]",
+                          isDark ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-50 text-emerald-700"
+                        )}>
+                          Your answer: Correct ✅
+                        </span>
+                      );
+                    } else {
+                      yourAnswerBadge = (
+                        <span className={cn(
+                          "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]",
+                          isDark ? "bg-rose-500/15 text-rose-200" : "bg-rose-50 text-rose-700"
+                        )}>
+                          Your answer: Incorrect ❌
+                        </span>
+                      );
+                    }
+
+                    return (
+                      <li
+                        key={item.id}
+                        className={cn(
+                          "rounded-3xl border p-5",
+                          isDark ? "border-slate-800 bg-slate-950/30" : "border-slate-200 bg-slate-50"
+                        )}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>
+                            Question {index + 1}
+                          </p>
+                          {yourAnswerBadge}
+                        </div>
+
+                        {stripHtml(item.question) ? (
+                          <div
+                            className={cn("mt-3 text-sm leading-7 rich-text-content rich-text-preview", isDark ? "text-slate-200" : "text-slate-900")}
+                            style={{
+                              display: "-webkit-box",
+                              WebkitLineClamp: 4,
+                              WebkitBoxOrient: "vertical",
+                              overflow: "hidden"
+                            }}
+                            dangerouslySetInnerHTML={{ __html: item.question }}
+                          />
+                        ) : (
+                          <p className={cn("mt-3 text-sm leading-7 italic", isDark ? "text-slate-500" : "text-slate-500")}>
+                            No question content.
+                          </p>
+                        )}
+
+                        <div className={cn(
+                          "mt-4 rounded-2xl border px-4 py-3",
+                          isDark
+                            ? "border-emerald-500/25 bg-emerald-500/10"
+                            : "border-emerald-200 bg-emerald-50"
+                        )}>
+                          <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-emerald-300/90" : "text-emerald-700")}>
+                            Correct answer
+                          </p>
+                          <p className={cn("mt-1.5 text-sm leading-7 font-semibold", isDark ? "text-emerald-100" : "text-emerald-900")}>
+                            {optionLetter(correctIdx)}.{" "}
+                            {stripHtml(correctText) ? (
+                              <span dangerouslySetInnerHTML={{ __html: correctText }} />
+                            ) : (
+                              <span className="italic opacity-80">Empty option</span>
+                            )}
+                          </p>
+                        </div>
+
+                        {hasExplanation ? (
+                          <div className="mt-4 space-y-2">
+                            <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>
+                              Explanation
+                            </p>
+                            <div
+                              className={cn("text-sm leading-7 rich-text-content", isDark ? "text-slate-300" : "text-slate-800")}
+                              dangerouslySetInnerHTML={{ __html: explanation! }}
+                            />
+                          </div>
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                </ol>
+              );
+            })()}
+          </section>
+        ) : null}
+
         {typeof document !== "undefined" && selectedSubjectId && questions.length > 0
           ? createPortal(
               <div className="pointer-events-none fixed right-6 top-1/2 z-[140] flex -translate-y-1/2 flex-col gap-2">
@@ -1211,7 +1458,7 @@ export function StudentBarFinalExamMcqQuestionPage() {
   const { isDark } = useTheme();
   const navigate = useNavigate();
   const [selectedOptionIndex, setSelectedOptionIndex] = useState<number | null>(null);
-  const [result, setResult] = useState<{ correctOptionIndex: number; isCorrect: boolean; selectedOptionIndex: number } | null>(null);
+  const [submitted, setSubmitted] = useState<boolean>(false);
   const routeParams = useParams();
   const subjectId = routeParams.subjectId ?? "";
   const questionId = routeParams.questionId ?? "";
@@ -1229,18 +1476,14 @@ export function StudentBarFinalExamMcqQuestionPage() {
 
   useEffect(() => {
     setSelectedOptionIndex(null);
-    setResult(null);
+    setSubmitted(false);
   }, [questionId]);
 
   const subjects = subjectsQuery.data?.subjects ?? [];
   const questions = questionsQuery.data?.items ?? [];
   const allQuestionIds = useMemo(() => questions.map((item) => item.id), [questions]);
 
-  // Answer gating: answers are revealed once the student has VIEWED every
-  // question in the subject (specifically: once the LAST question has been
-  // opened). Attempting (submitting) answers is optional.
   const gating = useMcqAnswerGating(subjectId, allQuestionIds);
-  const canRevealAnswers = gating.canRevealAnswers;
 
   const activeSubject = subjects.find((subject) => subject.id === subjectId) ?? null;
   const currentIndex = questions.findIndex((item) => item.id === questionId);
@@ -1248,15 +1491,9 @@ export function StudentBarFinalExamMcqQuestionPage() {
   const previousQuestionId = currentIndex > 0 ? questions[currentIndex - 1]?.id ?? "" : "";
   const nextQuestionId = currentIndex >= 0 && currentIndex < questions.length - 1 ? questions[currentIndex + 1]?.id ?? "" : "";
 
-  // Register this question as "VIEWED" the moment the reader mounts (or the
-  // URL moves to a different question). Visiting the final question unlocks
-  // answers globally (per spec).
   useEffect(() => {
     if (!subjectId || !questionId) return;
     gating.registerView(questionId);
-    // NOTE: gating.registerView identity is stable per subjectId/questionId.
-    // We intentionally re-run only when subject/question change (not on every
-    // gating object update).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subjectId, questionId]);
 
@@ -1264,18 +1501,15 @@ export function StudentBarFinalExamMcqQuestionPage() {
     mutationFn: (payload: { questionId: string; selectedOptionIndex: number }) =>
       submitStudentBarFinalExamMcqAttempt(payload.questionId, { selectedOptionIndex: payload.selectedOptionIndex }),
     onSuccess: (data) => {
-      setResult({
-        correctOptionIndex: data.correctOptionIndex,
+      gating.registerAttemptOutcome(questionId, {
         isCorrect: data.isCorrect,
         selectedOptionIndex: data.selectedOptionIndex
       });
-      // Persist attempt so per-question "Attempted" badges stay in sync.
-      // (Answers are unlocked by views, not by attempts.)
-      gating.registerAttempt(questionId);
+      setSubmitted(true);
     }
   });
 
-  const canSubmit = selectedOptionIndex !== null && !attemptMutation.isPending;
+  const canSubmit = selectedOptionIndex !== null && !attemptMutation.isPending && !submitted;
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-8">
@@ -1365,24 +1599,15 @@ export function StudentBarFinalExamMcqQuestionPage() {
                 <div className="space-y-2">
                   {currentQuestion.options.map((option, index) => {
                     const isSelected = selectedOptionIndex === index;
-                    const isPreview = questionsQuery.data?.contentAccess?.isPreview === true;
-                    // Only apply correct/incorrect styling if the student has
-                    // viewed ALL questions in the subject (reached the last
-                    // one) AND we are not in subscription preview mode.
-                    // Otherwise we show the user's selection but NO answer coloring.
-                    const isCorrect = !isPreview && canRevealAnswers && result?.correctOptionIndex === index;
-                    const isWrongSelection = !isPreview && canRevealAnswers && result && result.selectedOptionIndex === index && !result.isCorrect;
 
                     return (
                       <button
                         className={cn(
                           "flex w-full items-start gap-3 rounded-3xl border px-4 py-4 text-left text-sm transition",
                           isDark ? "border-slate-800 bg-slate-950/30 text-slate-200" : "border-slate-200 bg-white text-slate-900",
-                          isSelected ? (isDark ? "border-white/15 bg-white/10" : "border-slate-950 bg-slate-950 text-white") : null,
-                          canRevealAnswers && isCorrect ? (isDark ? "border-emerald-500/40" : "border-emerald-200") : null,
-                          canRevealAnswers && isWrongSelection ? (isDark ? "border-rose-500/40" : "border-rose-200") : null
+                          isSelected ? (isDark ? "border-white/15 bg-white/10" : "border-slate-950 bg-slate-950 text-white") : null
                         )}
-                        disabled={attemptMutation.isPending}
+                        disabled={attemptMutation.isPending || submitted}
                         key={index}
                         onClick={() => setSelectedOptionIndex(index)}
                         type="button"
@@ -1391,8 +1616,6 @@ export function StudentBarFinalExamMcqQuestionPage() {
                           {index + 1}
                         </span>
                         {stripHtml(option) ? (
-                          // Rich-text option rendering so admins can format
-                          // options with bold/italic for legal terminology.
                           <div
                             className={cn("min-w-0 flex-1 leading-7 rich-text-content rich-text-preview", isSelected ? "text-inherit" : "")}
                             dangerouslySetInnerHTML={{ __html: option }}
@@ -1405,37 +1628,7 @@ export function StudentBarFinalExamMcqQuestionPage() {
                   })}
                 </div>
 
-                {questionsQuery.data?.contentAccess?.isPreview === true && result ? (
-                  <p className="text-xs font-medium text-amber-600/90 mt-3">Preview mode — subscribe to reveal the correct answer and whether your selection was correct.</p>
-                ) : canRevealAnswers && result ? (
-                  // Full answer reveal card — visible once the student has
-                  // viewed every question in the subject.
-                  <div
-                    className={cn(
-                      "rounded-3xl border p-4",
-                      result.isCorrect
-                        ? isDark
-                          ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-100"
-                          : "border-emerald-200 bg-emerald-50 text-emerald-800"
-                        : isDark
-                          ? "border-rose-500/25 bg-rose-500/10 text-rose-100"
-                          : "border-rose-200 bg-rose-50 text-rose-800"
-                    )}
-                  >
-                    <p className="text-xs uppercase tracking-[0.18em]">{result.isCorrect ? "Correct" : "Incorrect"}</p>
-                    <p className="mt-2 text-sm">
-                      Correct option: <span className="font-semibold">{result.correctOptionIndex + 1}</span>
-                    </p>
-                    {result.isCorrect ? null : (
-                      <p className="mt-1 text-xs opacity-90">
-                        You selected option {result.selectedOptionIndex + 1}.
-                      </p>
-                    )}
-                  </div>
-                ) : !canRevealAnswers && result ? (
-                  // Attempt recorded but answer gating is still active because
-                  // the student hasn't viewed every question in the subject
-                  // yet (specifically: hasn't opened the last question).
+                {submitted ? (
                   <div
                     className={cn(
                       "rounded-3xl border p-4",
@@ -1444,18 +1637,10 @@ export function StudentBarFinalExamMcqQuestionPage() {
                         : "border-sky-200 bg-sky-50 text-sky-800"
                     )}
                   >
-                    <div className="flex items-start gap-2">
-                      <Lock className="mt-0.5 h-4 w-4 shrink-0" />
-                      <div>
-                        <p className="text-xs uppercase tracking-[0.18em]">Answer locked</p>
-                        <p className="mt-2 text-sm">
-                          Your attempt was saved. To reveal correct answers for ALL questions in this subject, view the remaining{" "}
-                          <span className="font-semibold">{gating.totalQuestions - gating.viewedCount}</span> question
-                          {gating.totalQuestions - gating.viewedCount === 1 ? "" : "s"}
-                          {gating.totalQuestions - gating.viewedCount === 1 ? " (including the final question)." : " (finishing by opening the final question unlocks all answers)."}
-                        </p>
-                      </div>
-                    </div>
+                    <p className="text-xs uppercase tracking-[0.18em]">Answer saved</p>
+                    <p className="mt-2 text-sm leading-7">
+                      Your answer has been saved. When you've attempted every question in this subject, return to view the full Answers and explanations section.
+                    </p>
                   </div>
                 ) : null}
               </div>
@@ -1475,29 +1660,19 @@ export function StudentBarFinalExamMcqQuestionPage() {
                       {gating.attemptedCount} / {gating.totalQuestions}
                     </span>
                   </div>
-                  {/* Compact progress bar — emerald when fully viewed (answers
-                      unlocked), amber until then. */}
                   <div className={cn("mt-3 h-2 w-full overflow-hidden rounded-full", isDark ? "bg-slate-800" : "bg-slate-200")}>
                     <div
                       className={cn(
                         "h-full rounded-full transition-all duration-500",
-                        canRevealAnswers
-                          ? isDark
-                            ? "bg-emerald-500"
-                            : "bg-emerald-600"
-                          : isDark
-                            ? "bg-amber-500"
-                            : "bg-amber-500"
+                        isDark ? "bg-sky-500" : "bg-sky-600"
                       )}
                       style={{
-                        width: `${gating.totalQuestions > 0 ? Math.max(0, Math.min(100, (gating.viewedCount / gating.totalQuestions) * 100)) : 0}%`
+                        width: `${gating.totalQuestions > 0 ? Math.max(0, Math.min(100, (gating.attemptedCount / gating.totalQuestions) * 100)) : 0}%`
                       }}
                     />
                   </div>
                   <p className={cn("mt-2 text-xs", isDark ? "text-slate-400" : "text-slate-600")}>
-                    {canRevealAnswers
-                      ? "All questions viewed — answers are unlocked."
-                      : "View every question in this subject (including the final one) to reveal correct answers."}
+                    Submit an answer for every question in this subject to unlock Answers &amp; Explanations.
                   </p>
                 </div>
 
@@ -1525,14 +1700,14 @@ export function StudentBarFinalExamMcqQuestionPage() {
                   >
                     {attemptMutation.isPending ? (
                       <span>Submitting...</span>
-                    ) : questionsQuery.data?.contentAccess?.isPreview !== true && canRevealAnswers && result ? (
+                    ) : submitted ? (
                       <>
-                        {result.isCorrect ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
-                        <span>Submit answer</span>
+                        <CheckCircle2 className="h-4 w-4" />
+                        <span>Submitted</span>
                       </>
                     ) : (
                       <>
-                        <Eye className="h-4 w-4" />
+                        <Pencil className="h-4 w-4" />
                         <span>Submit answer</span>
                       </>
                     )}
@@ -1542,6 +1717,38 @@ export function StudentBarFinalExamMcqQuestionPage() {
             </div>
           )}
         </div>
+
+        {subjectId ? (
+          <div
+            className={cn(
+              "rounded-[28px] border px-5 py-4",
+              isDark ? "border-slate-800 bg-slate-950/40" : "border-slate-200 bg-white"
+            )}
+          >
+            <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+              <div>
+                <p className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>
+                  Subject overview
+                </p>
+                <p className={cn("mt-1 text-sm leading-6", isDark ? "text-slate-400" : "text-slate-600")}>
+                  After you submit answers for <span className={cn("font-semibold", isDark ? "text-white" : "text-slate-950")}>all {gating.totalQuestions} question{gating.totalQuestions === 1 ? "" : "s"}</span> in this subject, return here to read the full Answers &amp; Explanations section.
+                </p>
+              </div>
+              <Link
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-2xl border px-4 py-2.5 text-sm font-medium transition",
+                  isDark
+                    ? "border-white/15 bg-white/10 text-white hover:bg-white/15"
+                    : "border-slate-950 bg-slate-950 text-white hover:bg-slate-900"
+                )}
+                to={`/app/bar-final-exams-mcq/${subjectId}`}
+              >
+                <ChevronRight className="h-4 w-4 rotate-180" />
+                Back to subject
+              </Link>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

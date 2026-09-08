@@ -135,6 +135,8 @@ import {
   parseHelarConnectAnswerInput,
   parseHelarConnectCommentInput,
   parseHelarConnectQuestionInput,
+  parseHelarConnectQuestionInputSafe,
+  buildHelarConnectQuestionValidationMessage,
   parseHelarConnectQuestionListQuery,
   parseHelarConnectUserListQuery,
   recordHelarConnectQuestionView,
@@ -2855,28 +2857,22 @@ export function createApp(options: AppOptions = {}) {
   });
 
   app.post("/api/v1/connect/questions", authenticateRequest, async (request: AuthenticatedRequest, response: Response) => {
-    const parsed = z
-      .object({
-        body: z.string(),
-        tags: z.array(z.string()).optional(),
-        title: z.string()
-      })
-      .safeParse(request.body);
+    // Single-stage validation using the REAL schema with min/max length rules
+    const parsed = parseHelarConnectQuestionInputSafe(request.body);
 
     if (!parsed.success) {
       return response.status(400).json({
         success: false,
         error: {
           code: "VALIDATION_ERROR",
-          message: "The question payload is invalid.",
+          message: buildHelarConnectQuestionValidationMessage(parsed.error),
           details: parsed.error.flatten()
         }
       });
     }
 
     try {
-      const input = parseHelarConnectQuestionInput(parsed.data);
-      const question = await createHelarConnectQuestion(request.auth!.userId, input);
+      const question = await createHelarConnectQuestion(request.auth!.userId, parsed.data);
       return response.status(201).json({
         success: true,
         data: question

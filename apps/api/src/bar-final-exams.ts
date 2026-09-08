@@ -117,6 +117,7 @@ const adminMcqQuestionFiltersSchema = z.object({
 const mcqQuestionInputSchema = z
   .object({
     correctOptionIndex: z.coerce.number().int().min(0).max(10),
+    explanation: z.string().trim().max(5000).optional().or(z.literal("")),
     examDate: z.string().trim().optional().or(z.literal("")),
     options: z
       .array(z.string().trim().min(1))
@@ -130,7 +131,11 @@ const mcqQuestionInputSchema = z
   .strict()
   .refine((value) => value.correctOptionIndex >= 0 && value.correctOptionIndex < value.options.length, {
     message: "Correct option must be within the options list."
-  });
+  })
+  .transform((value) => ({
+    ...value,
+    explanation: value.explanation === "" ? null : value.explanation
+  }));
 
 const studentMcqQuestionsQuerySchema = z.object({
   subjectId: recordIdSchema
@@ -322,6 +327,7 @@ function mapMcqQuestion(item: {
   question: string;
   options: string[];
   correctOptionIndex: number;
+  explanation: string | null;
   examDate: Date | null;
   status: BarFinalExamQuestionStatus;
   createdAt: Date;
@@ -335,6 +341,7 @@ function mapMcqQuestion(item: {
     correctOptionIndex: item.correctOptionIndex,
     createdAt: item.createdAt.toISOString(),
     examDate: item.examDate?.toISOString() ?? null,
+    explanation: item.explanation ?? null,
     id: item.id,
     options: item.options,
     question: item.question,
@@ -386,6 +393,7 @@ type StudentMcqQuestionListItem = {
   id: string;
   question: string;
   options: string[];
+  explanation: string | null;
   examDate: Date | null;
 };
 
@@ -733,7 +741,19 @@ export async function listAdminBarFinalExamMcqQuestions(filters: AdminBarFinalEx
         orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
         skip,
         take: filters.pageSize,
-        include: { subject: { select: { id: true, name: true } } }
+        select: {
+          correctOptionIndex: true,
+          createdAt: true,
+          examDate: true,
+          explanation: true,
+          id: true,
+          options: true,
+          question: true,
+          status: true,
+          subject: { select: { id: true, name: true } },
+          subjectId: true,
+          updatedAt: true
+        }
       }),
       prisma.barFinalExamMcqQuestion.count({ where }),
       subjectsPromise
@@ -757,6 +777,7 @@ export async function listAdminBarFinalExamMcqQuestions(filters: AdminBarFinalEx
   const mcqCandidateSelect = {
     id: true,
     question: true,
+    explanation: true,
     createdAt: true,
     updatedAt: true,
     subject: { select: { id: true, name: true } }
@@ -787,7 +808,19 @@ export async function listAdminBarFinalExamMcqQuestions(filters: AdminBarFinalEx
 
   const hydrated = await prisma.barFinalExamMcqQuestion.findMany({
     where: { id: { in: pageIds } },
-    include: { subject: { select: { id: true, name: true } } }
+    select: {
+      correctOptionIndex: true,
+      createdAt: true,
+      examDate: true,
+      explanation: true,
+      id: true,
+      options: true,
+      question: true,
+      status: true,
+      subject: { select: { id: true, name: true } },
+      subjectId: true,
+      updatedAt: true
+    }
   });
 
   const hydratedById = new Map(hydrated.map((item) => [item.id, item]));
@@ -813,19 +846,25 @@ export async function createAdminBarFinalExamMcqQuestion(
       correctOptionIndex: input.correctOptionIndex,
       deletedAt: null,
       examDate: resolvedExamDate,
+      explanation: input.explanation ? input.explanation : null,
       options: input.options,
       question: input.question,
       reviewFeedback: null,
       status: resolvedStatus,
       subjectId: input.subjectId
     },
-    include: {
-      subject: {
-        select: {
-          id: true,
-          name: true
-        }
-      }
+    select: {
+      correctOptionIndex: true,
+      createdAt: true,
+      examDate: true,
+      explanation: true,
+      id: true,
+      options: true,
+      question: true,
+      status: true,
+      subject: { select: { id: true, name: true } },
+      subjectId: true,
+      updatedAt: true
     }
   });
 
@@ -843,13 +882,18 @@ export async function getAdminBarFinalExamMcqQuestion(questionId: string) {
       deletedAt: null,
       id: questionId
     },
-    include: {
-      subject: {
-        select: {
-          id: true,
-          name: true
-        }
-      }
+    select: {
+      correctOptionIndex: true,
+      createdAt: true,
+      examDate: true,
+      explanation: true,
+      id: true,
+      options: true,
+      question: true,
+      status: true,
+      subject: { select: { id: true, name: true } },
+      subjectId: true,
+      updatedAt: true
     }
   });
 
@@ -877,19 +921,25 @@ export async function updateAdminBarFinalExamMcqQuestion(
       correctOptionIndex: input.correctOptionIndex,
       deletedAt: null,
       examDate: resolvedExamDate,
+      explanation: input.explanation ? input.explanation : null,
       options: input.options,
       question: input.question,
       reviewFeedback: null,
       status: resolvedStatus,
       subjectId: input.subjectId
     },
-    include: {
-      subject: {
-        select: {
-          id: true,
-          name: true
-        }
-      }
+    select: {
+      correctOptionIndex: true,
+      createdAt: true,
+      examDate: true,
+      explanation: true,
+      id: true,
+      options: true,
+      question: true,
+      status: true,
+      subject: { select: { id: true, name: true } },
+      subjectId: true,
+      updatedAt: true
     }
   });
 
@@ -1004,6 +1054,7 @@ export async function listStudentBarFinalExamMcqQuestions(
     select: {
       correctOptionIndex: true,
       examDate: true,
+      explanation: true,
       id: true,
       options: true,
       question: true
@@ -1011,7 +1062,11 @@ export async function listStudentBarFinalExamMcqQuestions(
   });
 
   const items = questions.map((item) => {
-    const serialized = { ...item, examDate: item.examDate?.toISOString() ?? null };
+    const serialized = {
+      ...item,
+      examDate: item.examDate?.toISOString() ?? null,
+      explanation: item.explanation ?? null
+    };
     return gatedAccess.hasFullAccess ? serialized : buildRestrictedMcqQuestionPreview(serialized);
   });
 
@@ -1038,6 +1093,7 @@ export async function submitStudentBarFinalExamMcqAttempt(
       },
       select: {
         correctOptionIndex: true,
+        explanation: true,
         options: true,
         subjectId: true
       }
@@ -1078,6 +1134,7 @@ export async function submitStudentBarFinalExamMcqAttempt(
 
   return {
     correctOptionIndex: contentAccess.hasFullAccess ? question.correctOptionIndex : null,
+    explanation: contentAccess.hasFullAccess ? question.explanation ?? null : null,
     id: savedAttempt.id,
     isCorrect: contentAccess.hasFullAccess ? savedAttempt.isCorrect : null,
     selectedOptionIndex: savedAttempt.selectedOptionIndex,

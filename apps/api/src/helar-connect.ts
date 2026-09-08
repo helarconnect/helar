@@ -106,6 +106,32 @@ export function parseHelarConnectQuestionInput(input: unknown) {
   return connectQuestionInputSchema.parse(input);
 }
 
+// Safe variant: returns a SafeParseResult (success:boolean with typed data or ZodError)
+// so route handlers can return proper 400 validation errors instead of 500 catch-alls.
+export function parseHelarConnectQuestionInputSafe(input: unknown) {
+  return connectQuestionInputSchema.safeParse(input);
+}
+
+// Builds a single, human-readable validation message from a failed safeParse result
+// (pulls the earliest field error so users see one clear fix per submission).
+export function buildHelarConnectQuestionValidationMessage(error: z.ZodError): string {
+  const first = error.issues[0];
+  if (!first) return "The question payload is invalid.";
+  const path = first.path.join(".");
+  const field = path === "body" ? "Question details" : path === "title" ? "Title" : path === "tags" ? "Tags" : path;
+  if (first.code === "too_small") {
+    return `${field} must be at least ${first.minimum} ${first.type === "array" ? "items" : "characters"}.`;
+  }
+  if (first.code === "too_big") {
+    if (first.type === "array") return `${field} cannot exceed ${first.maximum} items.`;
+    return `${field} cannot exceed ${first.maximum} characters.`;
+  }
+  if (first.code === "invalid_type") {
+    return `${field} ${first.received === "undefined" ? "is required." : "has an invalid type."}`;
+  }
+  return first.message;
+}
+
 export function parseHelarConnectCommentInput(input: unknown) {
   return connectCommentInputSchema.parse(input);
 }

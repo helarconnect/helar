@@ -1193,6 +1193,7 @@ model BarFinalExamMcqQuestion {
   question           String
   options            String[]
   correctOptionIndex Int
+  explanation        String?
   examDate           DateTime?
   status             BarFinalExamQuestionStatus @default(DRAFT)
   reviewFeedback     String?

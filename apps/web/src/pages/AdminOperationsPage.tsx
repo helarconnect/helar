@@ -1142,6 +1142,7 @@ export function AdminContentReviewDetailPage() {
       return updateAdminBarFinalExamMcqQuestion(targetItem.resourceId, {
         correctOptionIndex: Number(draftSnapshot.correctOptionIndex ?? original.correctOptionIndex ?? 0),
         examDate: original.examDate ?? new Date().toISOString().slice(0, 10),
+        explanation: (draftSnapshot.explanation as string | undefined) ?? original.explanation ?? '',
         options: draftSnapshot.options ?? original.options ?? [],
         question: draftSnapshot.question ?? original.question ?? '',
         status: (original.status ?? 'DRAFT') as any,

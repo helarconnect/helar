@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
+  AlertCircle,
   Bell,
   Bookmark,
   CircleHelp,
@@ -140,6 +141,17 @@ export function HelarConnectPage() {
     tags: "",
     title: ""
   });
+  const [questionFormErrors, setQuestionFormErrors] = useState<{
+    body: string | null;
+    submit: string | null;
+    tags: string | null;
+    title: string | null;
+  }>({
+    body: null,
+    submit: null,
+    tags: null,
+    title: null
+  });
   const viewedQuestionIdsRef = useRef(new Set<string>());
   const deferredSearchQuery = useDeferredValue(searchQuery.trim());
 
@@ -163,8 +175,29 @@ export function HelarConnectPage() {
     mutationFn: createHelarConnectQuestion,
     onSuccess: async () => {
       setQuestionDraft({ body: "", tags: "", title: "" });
+      setQuestionFormErrors({ body: null, submit: null, tags: null, title: null });
       setIsAskModalOpen(false);
       await invalidateConnectData();
+    },
+    onError: (rawError: unknown) => {
+      let message = "Could not publish the question. Please try again.";
+      const bodyErrors: Record<string, string[]> | null =
+        (rawError as { response?: { data?: { error?: { details?: { fieldErrors?: Record<string, string[]> } } } } }).response
+          ?.data?.error?.details?.fieldErrors ?? null;
+      const messageFromServer =
+        (rawError as { response?: { data?: { error?: { message?: string } } } }).response?.data?.error?.message ??
+        null;
+      if (messageFromServer) message = messageFromServer;
+
+      setQuestionFormErrors((prev) => {
+        const next = { ...prev, submit: message, body: null, tags: null, title: null };
+        if (bodyErrors) {
+          if (bodyErrors.title?.[0]) next.title = bodyErrors.title[0];
+          if (bodyErrors.body?.[0]) next.body = bodyErrors.body[0];
+          if (bodyErrors.tags?.[0]) next.tags = bodyErrors.tags[0];
+        }
+        return next;
+      });
     }
   });
 
@@ -297,18 +330,48 @@ export function HelarConnectPage() {
 
     const title = questionDraft.title.trim();
     const body = questionDraft.body.trim();
+    const tagList = questionDraft.tags
+      .split(",")
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean)
+      .slice(0, 8);
 
-    if (!title || !body) {
+    // Client-side validation that mirrors the backend schema exactly
+    // (prevents an avoidable round-trip and shows inline error messages)
+    const nextErrors = { body: null as string | null, submit: null as string | null, tags: null as string | null, title: null as string | null };
+    if (!title) nextErrors.title = "Title is required.";
+    else if (title.length < 8) nextErrors.title = "Title must be at least 8 characters.";
+    else if (title.length > 220) nextErrors.title = "Title cannot exceed 220 characters.";
+
+    if (!body) nextErrors.body = "Details are required.";
+    else if (body.length < 20) nextErrors.body = "Details must be at least 20 characters.";
+    else if (body.length > 10_000) nextErrors.body = "Details cannot exceed 10,000 characters.";
+
+    if (tagList.length > 8) nextErrors.tags = "You can attach up to 8 tags.";
+    else {
+      for (const tag of tagList) {
+        if (tag.length < 1) {
+          nextErrors.tags = "Tags cannot be empty.";
+          break;
+        }
+        if (tag.length > 32) {
+          nextErrors.tags = "Each tag cannot exceed 32 characters.";
+          break;
+        }
+      }
+    }
+
+    if (nextErrors.title || nextErrors.body || nextErrors.tags) {
+      setQuestionFormErrors(nextErrors);
       return;
     }
 
+    // Clear any previous field errors before submitting
+    setQuestionFormErrors({ body: null, submit: null, tags: null, title: null });
+
     await createQuestionMutation.mutateAsync({
       body,
-      tags: questionDraft.tags
-        .split(",")
-        .map((item) => item.trim().toLowerCase())
-        .filter(Boolean)
-        .slice(0, 8),
+      tags: tagList,
       title
     });
   }
@@ -847,32 +910,72 @@ export function HelarConnectPage() {
               <label>
                 Question title
                 <input
-                  onChange={(event) => setQuestionDraft((current) => ({ ...current, title: event.target.value }))}
+                  onChange={(event) => {
+                    setQuestionDraft((current) => ({ ...current, title: event.target.value }));
+                    if (questionFormErrors.title) {
+                      setQuestionFormErrors((prev) => ({ ...prev, title: null, submit: null }));
+                    }
+                  }}
                   placeholder="e.g. How do I approach conflicting authorities in one memo?"
                   type="text"
                   value={questionDraft.title}
                 />
+                {questionFormErrors.title ? (
+                  <p className="mt-2 flex items-center gap-2 text-xs text-rose-600">
+                    <AlertCircle className="h-3.5 w-3.5" />
+                    {questionFormErrors.title}
+                  </p>
+                ) : null}
               </label>
 
               <label>
                 Details
                 <textarea
-                  onChange={(event) => setQuestionDraft((current) => ({ ...current, body: event.target.value }))}
+                  onChange={(event) => {
+                    setQuestionDraft((current) => ({ ...current, body: event.target.value }));
+                    if (questionFormErrors.body) {
+                      setQuestionFormErrors((prev) => ({ ...prev, body: null, submit: null }));
+                    }
+                  }}
                   placeholder="Share enough context so other members can give a useful answer."
                   rows={5}
                   value={questionDraft.body}
                 />
+                {questionFormErrors.body ? (
+                  <p className="mt-2 flex items-center gap-2 text-xs text-rose-600">
+                    <AlertCircle className="h-3.5 w-3.5" />
+                    {questionFormErrors.body}
+                  </p>
+                ) : null}
               </label>
 
               <label>
                 Tags
                 <input
-                  onChange={(event) => setQuestionDraft((current) => ({ ...current, tags: event.target.value }))}
+                  onChange={(event) => {
+                    setQuestionDraft((current) => ({ ...current, tags: event.target.value }));
+                    if (questionFormErrors.tags) {
+                      setQuestionFormErrors((prev) => ({ ...prev, tags: null, submit: null }));
+                    }
+                  }}
                   placeholder="legal-analysis, notes, workflow"
                   type="text"
                   value={questionDraft.tags}
                 />
+                {questionFormErrors.tags ? (
+                  <p className="mt-2 flex items-center gap-2 text-xs text-rose-600">
+                    <AlertCircle className="h-3.5 w-3.5" />
+                    {questionFormErrors.tags}
+                  </p>
+                ) : null}
               </label>
+
+              {questionFormErrors.submit ? (
+                <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <p>{questionFormErrors.submit}</p>
+                </div>
+              ) : null}
 
               <div className="connect-modal-actions">
                 <button className="connect-top-link-button" onClick={() => setIsAskModalOpen(false)} type="button">
