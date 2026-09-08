@@ -129,72 +129,45 @@ async function runApprovalMutation<T>({
   notificationActions: string[];
   updatePendingItem: (tx: Prisma.TransactionClient, item: T) => Promise<void>;
 }) {
-  const traceId = `trace_${Date.now()}_${Math.floor(Math.random() * 1e9)}`;
-  // #region debug-point A-E:runApprovalMutation-entry
-  // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-  (() => {
-    const fs = require("fs"); const p = "/Users/it/Documents/trae_projects/helar/.dbg/mcq-law-report-approve-500.env";
-    let u = "http://127.0.0.1:7777/event", s = "mcq-law-report-approve-500";
-    try { const e = fs.readFileSync(p, "utf8"); u = e.match(/DEBUG_SERVER_URL=(.+)/)?.[1] || u; s = e.match(/DEBUG_SESSION_ID=(.+)/)?.[1] || s; } catch {}
-    void fetch(u, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId: s, runId: "pre", hypothesisId: "A", location: "admin-notifications.ts:runApprovalMutation:entry", msg: "[DEBUG] runApprovalMutation: entry", data: { traceId, notificationActions }, ts: Date.now() }) }).catch(() => {});
-  })();
-  // #endregion
-  const debugReport = (hypothesisId: string, location: string, msg: string, data: Record<string, unknown> = {}) => {
-    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-    (() => {
-      const fs = require("fs"); const p = "/Users/it/Documents/trae_projects/helar/.dbg/mcq-law-report-approve-500.env";
-      let u = "http://127.0.0.1:7777/event", s = "mcq-law-report-approve-500";
-      try { const e = fs.readFileSync(p, "utf8"); u = e.match(/DEBUG_SERVER_URL=(.+)/)?.[1] || u; s = e.match(/DEBUG_SESSION_ID=(.+)/)?.[1] || s; } catch {}
-      void fetch(u, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId: s, runId: "pre", hypothesisId, location, msg: `[DEBUG] ${msg}`, data: { traceId, ...data }, ts: Date.now() }) }).catch(() => {});
-    })();
-    console.error(`[APPROVE_DEBUG] trace=${traceId} hyp=${hypothesisId} loc=${location} msg=${msg} payload=${JSON.stringify(data).slice(0, 800)}`);
-  };
-  try {
-    return runInTransaction(async (tx) => {
-      const loadedItem = await loadPendingItem(tx);
-      debugReport("B", "admin-notifications.ts:runApprovalMutation:after-load", "loadPendingItem result", { itemType: loadedItem ? typeof loadedItem : "null", hasItem: Boolean(loadedItem), itemId: loadedItem && (loadedItem as unknown as { id: string }).id });
-      if (!loadedItem) {
-        return null;
-      }
-      // #region debug-point A:updatePendingItem-start
+  return runInTransaction(async (tx) => {
+    const item = await loadPendingItem(tx);
+
+    if (!item) {
+      return null;
+    }
+
+    // The item exists and is pending. The core of the approval is the status
+    // update (updatePendingItem). After that, two secondary steps remain:
+    // (1) finding the last content-admin submitter so we can notify them, and
+    // (2) actually writing the notification. Both of these are *informational*
+    // and must never cause the already-completed status transition to roll
+    // back. So we wrap each in try/catch and simply log + continue if they
+    // fail. This is also the defense against the MongoDB soft-delete
+    // "unset vs null" query under-matching that silently returned 0 rows for
+    // AuditLog / UserRole relations when those rows were never written with
+    // an explicit deletedAt: null at insert time.
+    await updatePendingItem(tx, item);
+
+    const resultId = createResult(item).id;
+    let recipientUserId: string | null = null;
+    try {
+      recipientUserId = await findLatestContentAdminActor(resultId, notificationActions);
+    } catch (actorErr) {
+      console.warn("Approval succeeded but content-admin actor lookup failed (non-fatal).", actorErr);
+      recipientUserId = null;
+    }
+
+    if (recipientUserId) {
       try {
-        await updatePendingItem(tx, loadedItem);
-        debugReport("A", "admin-notifications.ts:runApprovalMutation:after-update", "updatePendingItem success", {});
-      } catch (err: unknown) {
-        debugReport("A", "admin-notifications.ts:runApprovalMutation:update-error", "updatePendingItem threw", { errName: (err as Error).name, errMessage: (err as Error).message, errStack: String((err as Error).stack ?? "").slice(0, 1200) });
-        throw err;
+        const notification = buildNotification(item);
+        await createNotification(recipientUserId, notification.title, notification.body, tx);
+      } catch (notifyErr) {
+        console.warn("Approval succeeded but notification write failed (non-fatal).", notifyErr);
       }
-      // #endregion
-      // #region debug-point D:findLatestContentAdminActor-start
-      let recipientUserId: string | null = null;
-      try {
-        recipientUserId = await findLatestContentAdminActor(createResult(loadedItem).id, notificationActions);
-        debugReport("D", "admin-notifications.ts:runApprovalMutation:after-find-actor", "findLatestContentAdminActor result", { recipientUserId, found: Boolean(recipientUserId) });
-      } catch (err: unknown) {
-        debugReport("D", "admin-notifications.ts:runApprovalMutation:find-actor-error", "findLatestContentAdminActor threw", { errName: (err as Error).name, errMessage: (err as Error).message, errStack: String((err as Error).stack ?? "").slice(0, 1200) });
-        throw err;
-      }
-      // #endregion
-      if (recipientUserId) {
-        // #region debug-point E:notification-start
-        try {
-          const notification = buildNotification(loadedItem);
-          await createNotification(recipientUserId, notification.title, notification.body, tx);
-          debugReport("E", "admin-notifications.ts:runApprovalMutation:after-notification", "notification created", { titleLen: notification.title.length, bodyLen: notification.body.length });
-        } catch (err: unknown) {
-          debugReport("E", "admin-notifications.ts:runApprovalMutation:notification-error", "notification create threw", { errName: (err as Error).name, errMessage: (err as Error).message, errStack: String((err as Error).stack ?? "").slice(0, 1200) });
-          throw err;
-        }
-        // #endregion
-      }
-      const finalResult = createResult(loadedItem);
-      debugReport("C", "admin-notifications.ts:runApprovalMutation:success", "runApprovalMutation completed successfully", { finalResult });
-      return finalResult;
-    });
-  } catch (outerErr: unknown) {
-    debugReport("C", "admin-notifications.ts:runApprovalMutation:outer-catch", "runApprovalMutation outer (non-tx) catch", { errName: (outerErr as Error).name, errMessage: (outerErr as Error).message, errStack: String((outerErr as Error).stack ?? "").slice(0, 2000) });
-    throw outerErr;
-  }
+    }
+
+    return createResult(item);
+  });
 }
 
 async function findLatestContentAdminActor(resourceId: string, actions: string[]) {
@@ -203,16 +176,16 @@ async function findLatestContentAdminActor(resourceId: string, actions: string[]
       action: {
         in: actions
       },
-      deletedAt: null,
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
       resource: resourceId,
       user: {
-        deletedAt: null,
+        OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
         roles: {
           some: {
-            deletedAt: null,
+            OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
             role: {
               code: "content_admin",
-              deletedAt: null
+              OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }]
             }
           }
         }
@@ -235,16 +208,16 @@ async function findLatestContentAdminActorDetails(resourceId: string, actions: s
       action: {
         in: actions
       },
-      deletedAt: null,
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
       resource: resourceId,
       user: {
-        deletedAt: null,
+        OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
         roles: {
           some: {
-            deletedAt: null,
+            OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
             role: {
               code: "content_admin",
-              deletedAt: null
+              OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }]
             }
           }
         }
@@ -517,17 +490,17 @@ export async function getSuperAdminApprovalQueue(): Promise<AdminApprovalQueueSn
   const auditMatches: AuditLookupRow[] = auditResourceIds.length
     ? await prisma.auditLog.findMany({
         where: {
-          deletedAt: null,
+          OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
           action: { in: auditActions },
           resource: { in: auditResourceIds },
           user: {
-            deletedAt: null,
+            OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
             roles: {
               some: {
-                deletedAt: null,
+                OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
                 role: {
                   code: "content_admin",
-                  deletedAt: null
+                  OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }]
                 }
               }
             }
@@ -565,7 +538,7 @@ export async function getSuperAdminApprovalQueue(): Promise<AdminApprovalQueueSn
   const userNamesById = new Map<string, string>();
   if (allDistinctUserIds.length > 0) {
     const users = await prisma.user.findMany({
-      where: { deletedAt: null, id: { in: allDistinctUserIds } },
+      where: { OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }], id: { in: allDistinctUserIds } },
       select: { id: true, fullName: true }
     });
     for (const user of users) {
@@ -723,7 +696,7 @@ export async function getSuperAdminApprovalQueue(): Promise<AdminApprovalQueueSn
 async function listUserNotifications(userId: string) {
   const notifications = await prisma.notification.findMany({
     where: {
-      deletedAt: null,
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
       userId
     },
     orderBy: {
@@ -756,7 +729,7 @@ export async function getAdminNotificationCenter(userId: string, roleCodes: stri
     listUserNotifications(userId),
     prisma.notification.count({
       where: {
-        deletedAt: null,
+        OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
         readAt: null,
         userId
       }
@@ -776,7 +749,7 @@ export async function getAdminNotificationCenter(userId: string, roleCodes: stri
 export async function markAdminNotificationsRead(userId: string) {
   await prisma.notification.updateMany({
     where: {
-      deletedAt: null,
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
       readAt: null,
       userId
     },
@@ -1188,13 +1161,13 @@ async function loadBulkApprovalNotificationRecipients(): Promise<{
   subjectSummaryEntries: string | null;
 }> {
   const contentAdminUserWhere: Prisma.UserWhereInput = {
-    deletedAt: null,
+    OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
     roles: {
       some: {
-        deletedAt: null,
+        OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
         role: {
           code: "content_admin",
-          deletedAt: null
+          OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }]
         }
       }
     }
@@ -1239,7 +1212,7 @@ async function loadBulkApprovalNotificationRecipients(): Promise<{
       const latest = await prisma.auditLog.findFirst({
         where: {
           action: { in: bucket.actions },
-          deletedAt: null,
+          OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
           user: contentAdminUserWhere
         },
         orderBy: { createdAt: "desc" },
