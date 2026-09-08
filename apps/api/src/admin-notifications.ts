@@ -151,7 +151,11 @@ async function runApprovalMutation<T>({
     const resultId = createResult(item).id;
     let recipientUserId: string | null = null;
     try {
-      recipientUserId = await findLatestContentAdminActor(resultId, notificationActions);
+      // Use the transaction client for the actor lookup so every DB call in
+      // this approval shares the same Mongo transaction session. If AuditLog
+      // actor lookup fails (relation empty / AuditLog never written / etc.)
+      // we degrade gracefully — approval still commits, notification skipped.
+      recipientUserId = await findLatestContentAdminActor(resultId, notificationActions, tx);
     } catch (actorErr) {
       console.warn("Approval succeeded but content-admin actor lookup failed (non-fatal).", actorErr);
       recipientUserId = null;
@@ -170,8 +174,16 @@ async function runApprovalMutation<T>({
   });
 }
 
-async function findLatestContentAdminActor(resourceId: string, actions: string[]) {
-  const log = await prisma.auditLog.findFirst({
+async function findLatestContentAdminActor(
+  resourceId: string,
+  actions: string[],
+  // Accept an optional transaction client so callers inside a transaction can
+  // use the tx client instead of the global prisma. Using the same client
+  // inside $transaction avoids subtle MongoDB session/write-conflict edge
+  // cases when mixing global + transactional queries in one tx boundary.
+  db: Prisma.TransactionClient | typeof prisma = prisma
+) {
+  const log = await db.auditLog.findFirst({
     where: {
       action: {
         in: actions
