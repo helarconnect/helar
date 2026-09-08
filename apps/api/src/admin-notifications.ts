@@ -129,24 +129,72 @@ async function runApprovalMutation<T>({
   notificationActions: string[];
   updatePendingItem: (tx: Prisma.TransactionClient, item: T) => Promise<void>;
 }) {
-  return runInTransaction(async (tx) => {
-    const item = await loadPendingItem(tx);
-
-    if (!item) {
-      return null;
-    }
-
-    await updatePendingItem(tx, item);
-
-    const recipientUserId = await findLatestContentAdminActor(createResult(item).id, notificationActions);
-
-    if (recipientUserId) {
-      const notification = buildNotification(item);
-      await createNotification(recipientUserId, notification.title, notification.body, tx);
-    }
-
-    return createResult(item);
-  });
+  const traceId = `trace_${Date.now()}_${Math.floor(Math.random() * 1e9)}`;
+  // #region debug-point A-E:runApprovalMutation-entry
+  // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+  (() => {
+    const fs = require("fs"); const p = "/Users/it/Documents/trae_projects/helar/.dbg/mcq-law-report-approve-500.env";
+    let u = "http://127.0.0.1:7777/event", s = "mcq-law-report-approve-500";
+    try { const e = fs.readFileSync(p, "utf8"); u = e.match(/DEBUG_SERVER_URL=(.+)/)?.[1] || u; s = e.match(/DEBUG_SESSION_ID=(.+)/)?.[1] || s; } catch {}
+    void fetch(u, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId: s, runId: "pre", hypothesisId: "A", location: "admin-notifications.ts:runApprovalMutation:entry", msg: "[DEBUG] runApprovalMutation: entry", data: { traceId, notificationActions }, ts: Date.now() }) }).catch(() => {});
+  })();
+  // #endregion
+  const debugReport = (hypothesisId: string, location: string, msg: string, data: Record<string, unknown> = {}) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+    (() => {
+      const fs = require("fs"); const p = "/Users/it/Documents/trae_projects/helar/.dbg/mcq-law-report-approve-500.env";
+      let u = "http://127.0.0.1:7777/event", s = "mcq-law-report-approve-500";
+      try { const e = fs.readFileSync(p, "utf8"); u = e.match(/DEBUG_SERVER_URL=(.+)/)?.[1] || u; s = e.match(/DEBUG_SESSION_ID=(.+)/)?.[1] || s; } catch {}
+      void fetch(u, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId: s, runId: "pre", hypothesisId, location, msg: `[DEBUG] ${msg}`, data: { traceId, ...data }, ts: Date.now() }) }).catch(() => {});
+    })();
+    console.error(`[APPROVE_DEBUG] trace=${traceId} hyp=${hypothesisId} loc=${location} msg=${msg} payload=${JSON.stringify(data).slice(0, 800)}`);
+  };
+  try {
+    return runInTransaction(async (tx) => {
+      const loadedItem = await loadPendingItem(tx);
+      debugReport("B", "admin-notifications.ts:runApprovalMutation:after-load", "loadPendingItem result", { itemType: loadedItem ? typeof loadedItem : "null", hasItem: Boolean(loadedItem), itemId: loadedItem && (loadedItem as unknown as { id: string }).id });
+      if (!loadedItem) {
+        return null;
+      }
+      // #region debug-point A:updatePendingItem-start
+      try {
+        await updatePendingItem(tx, loadedItem);
+        debugReport("A", "admin-notifications.ts:runApprovalMutation:after-update", "updatePendingItem success", {});
+      } catch (err: unknown) {
+        debugReport("A", "admin-notifications.ts:runApprovalMutation:update-error", "updatePendingItem threw", { errName: (err as Error).name, errMessage: (err as Error).message, errStack: String((err as Error).stack ?? "").slice(0, 1200) });
+        throw err;
+      }
+      // #endregion
+      // #region debug-point D:findLatestContentAdminActor-start
+      let recipientUserId: string | null = null;
+      try {
+        recipientUserId = await findLatestContentAdminActor(createResult(loadedItem).id, notificationActions);
+        debugReport("D", "admin-notifications.ts:runApprovalMutation:after-find-actor", "findLatestContentAdminActor result", { recipientUserId, found: Boolean(recipientUserId) });
+      } catch (err: unknown) {
+        debugReport("D", "admin-notifications.ts:runApprovalMutation:find-actor-error", "findLatestContentAdminActor threw", { errName: (err as Error).name, errMessage: (err as Error).message, errStack: String((err as Error).stack ?? "").slice(0, 1200) });
+        throw err;
+      }
+      // #endregion
+      if (recipientUserId) {
+        // #region debug-point E:notification-start
+        try {
+          const notification = buildNotification(loadedItem);
+          await createNotification(recipientUserId, notification.title, notification.body, tx);
+          debugReport("E", "admin-notifications.ts:runApprovalMutation:after-notification", "notification created", { titleLen: notification.title.length, bodyLen: notification.body.length });
+        } catch (err: unknown) {
+          debugReport("E", "admin-notifications.ts:runApprovalMutation:notification-error", "notification create threw", { errName: (err as Error).name, errMessage: (err as Error).message, errStack: String((err as Error).stack ?? "").slice(0, 1200) });
+          throw err;
+        }
+        // #endregion
+      }
+      const finalResult = createResult(loadedItem);
+      debugReport("C", "admin-notifications.ts:runApprovalMutation:success", "runApprovalMutation completed successfully", { finalResult });
+      return finalResult;
+    });
+  } catch (outerErr: unknown) {
+    debugReport("C", "admin-notifications.ts:runApprovalMutation:outer-catch", "runApprovalMutation outer (non-tx) catch", { errName: (outerErr as Error).name, errMessage: (outerErr as Error).message, errStack: String((outerErr as Error).stack ?? "").slice(0, 2000) });
+    throw outerErr;
+  }
 }
 
 async function findLatestContentAdminActor(resourceId: string, actions: string[]) {
