@@ -2363,7 +2363,6 @@ export async function updateSubjectSummarySubject(subjectId: string, input: Subj
     return null;
   }
 
-  const softDeletedWhere = { OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }] } as const;
   const subject = await prisma.subjectSummarySubject.update({
     where: {
       id: subjectId
@@ -2379,10 +2378,10 @@ export async function updateSubjectSummarySubject(subjectId: string, input: Subj
       _count: {
         select: {
           cases: {
-            where: softDeletedWhere
+            where: { OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }] }
           },
           topics: {
-            where: softDeletedWhere
+            where: { OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }] }
           }
         }
       }
@@ -2536,7 +2535,6 @@ export async function updateSubjectSummaryTopic(topicId: string, input: SubjectS
     ]);
   }
 
-  const softDeletedWhere = { OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }] } as const;
   const topic = await prisma.subjectSummaryTopic.update({
     where: {
       id: topicId
@@ -2559,7 +2557,7 @@ export async function updateSubjectSummaryTopic(topicId: string, input: SubjectS
       _count: {
         select: {
           cases: {
-            where: softDeletedWhere
+            where: { OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }] }
           }
         }
       }
