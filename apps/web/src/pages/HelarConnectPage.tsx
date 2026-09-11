@@ -330,34 +330,25 @@ export function HelarConnectPage() {
 
     const title = questionDraft.title.trim();
     const body = questionDraft.body.trim();
+    // Allow any number of tags and any tag length per user requirement
     const tagList = questionDraft.tags
       .split(",")
       .map((item) => item.trim().toLowerCase())
-      .filter(Boolean)
-      .slice(0, 8);
+      .filter(Boolean);
 
-    // Client-side validation that mirrors the backend schema exactly
-    // (prevents an avoidable round-trip and shows inline error messages)
+    // Client-side validation that mirrors the backend schema minimums;
+    // max-length / max-count caps are removed so users can type freely.
     const nextErrors = { body: null as string | null, submit: null as string | null, tags: null as string | null, title: null as string | null };
     if (!title) nextErrors.title = "Title is required.";
     else if (title.length < 8) nextErrors.title = "Title must be at least 8 characters.";
-    else if (title.length > 220) nextErrors.title = "Title cannot exceed 220 characters.";
 
     if (!body) nextErrors.body = "Details are required.";
     else if (body.length < 20) nextErrors.body = "Details must be at least 20 characters.";
-    else if (body.length > 10_000) nextErrors.body = "Details cannot exceed 10,000 characters.";
 
-    if (tagList.length > 8) nextErrors.tags = "You can attach up to 8 tags.";
-    else {
-      for (const tag of tagList) {
-        if (tag.length < 1) {
-          nextErrors.tags = "Tags cannot be empty.";
-          break;
-        }
-        if (tag.length > 32) {
-          nextErrors.tags = "Each tag cannot exceed 32 characters.";
-          break;
-        }
+    for (const tag of tagList) {
+      if (tag.length < 1) {
+        nextErrors.tags = "Tags cannot be empty.";
+        break;
       }
     }
 

@@ -78,7 +78,7 @@ export type AdminLibraryFilters = {
   page?: number;
   pageSize?: number;
   search?: string;
-  sortBy?: "createdAt" | "estimatedMins" | "reportNumber" | "title" | "updatedAt";
+  sortBy?: "createdAt" | "estimatedMins" | "reportDate" | "reportNumber" | "title" | "updatedAt";
   sortOrder?: "asc" | "desc";
 };
 
@@ -2358,11 +2358,18 @@ export async function fetchStudentBarFinalExamSubjects(search = "") {
   return response.data.data;
 }
 
-export async function fetchStudentBarFinalExamQuestions(subjectId: string) {
+export async function fetchStudentBarFinalExamQuestions(
+  subjectId: string,
+  opts: { sortBy?: "createdAt" | "examDate"; sortOrder?: "asc" | "desc" } = {}
+) {
   const response = await authenticatedHttp.get<{ success: true; data: StudentBarFinalExamQuestionsResponse }>(
     "/api/v1/library/bar-final-exams-nls-mcq/questions",
     {
-      params: { subjectId }
+      params: {
+        subjectId,
+        ...(opts.sortBy ? { sortBy: opts.sortBy } : {}),
+        ...(opts.sortOrder ? { sortOrder: opts.sortOrder } : {})
+      }
     }
   );
 
@@ -2380,11 +2387,18 @@ export async function fetchStudentBarFinalExamMcqSubjects(search = "") {
   return response.data.data;
 }
 
-export async function fetchStudentBarFinalExamMcqQuestions(subjectId: string) {
+export async function fetchStudentBarFinalExamMcqQuestions(
+  subjectId: string,
+  opts: { sortBy?: "createdAt" | "examDate"; sortOrder?: "asc" | "desc" } = {}
+) {
   const response = await authenticatedHttp.get<{ success: true; data: StudentBarFinalExamMcqQuestionsResponse }>(
     "/api/v1/library/bar-final-exams-mcq/questions",
     {
-      params: { subjectId }
+      params: {
+        subjectId,
+        ...(opts.sortBy ? { sortBy: opts.sortBy } : {}),
+        ...(opts.sortOrder ? { sortOrder: opts.sortOrder } : {})
+      }
     }
   );
 

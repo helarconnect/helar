@@ -599,7 +599,7 @@ async function createSubjectSummaryAuditLog(
 
 function buildSubjectWhere(filters: SubjectSummarySubjectFilters): Prisma.SubjectSummarySubjectWhereInput {
   return {
-    deletedAt: null,
+    OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
     ...(filters.status === "all" ? {} : { status: filters.status }),
     ...(filters.search
       ? {
@@ -618,16 +618,16 @@ function buildSubjectWhere(filters: SubjectSummarySubjectFilters): Prisma.Subjec
 
 function buildBroadSubjectWhere(filters: SubjectSummarySubjectFilters): Prisma.SubjectSummarySubjectWhereInput {
   return {
-    deletedAt: null,
+    OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
     ...(filters.status === "all" ? {} : { status: filters.status })
   };
 }
 
 function buildTopicWhere(filters: SubjectSummaryTopicFilters): Prisma.SubjectSummaryTopicWhereInput {
   return {
-    deletedAt: null,
+    OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
     subject: {
-      deletedAt: null
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }]
     },
     ...(filters.subjectId ? { subjectId: filters.subjectId } : {}),
     ...(filters.status === "all" ? {} : { status: filters.status }),
@@ -653,9 +653,9 @@ function buildTopicWhere(filters: SubjectSummaryTopicFilters): Prisma.SubjectSum
 
 function buildBroadTopicWhere(filters: SubjectSummaryTopicFilters): Prisma.SubjectSummaryTopicWhereInput {
   return {
-    deletedAt: null,
+    OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
     subject: {
-      deletedAt: null
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }]
     },
     ...(filters.subjectId ? { subjectId: filters.subjectId } : {}),
     ...(filters.status === "all" ? {} : { status: filters.status })
@@ -664,12 +664,12 @@ function buildBroadTopicWhere(filters: SubjectSummaryTopicFilters): Prisma.Subje
 
 function buildCaseWhere(filters: SubjectSummaryCaseFilters): Prisma.SubjectSummaryCaseWhereInput {
   return {
-    deletedAt: null,
+    OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
     subject: {
-      deletedAt: null
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }]
     },
     topic: {
-      deletedAt: null
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }]
     },
     ...buildCaseTypeWhere(filters.caseType),
     ...(filters.subjectId ? { subjectId: filters.subjectId } : {}),
@@ -711,12 +711,12 @@ function buildCaseWhere(filters: SubjectSummaryCaseFilters): Prisma.SubjectSumma
 
 function buildBroadCaseWhere(filters: SubjectSummaryCaseFilters): Prisma.SubjectSummaryCaseWhereInput {
   return {
-    deletedAt: null,
+    OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
     subject: {
-      deletedAt: null
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }]
     },
     topic: {
-      deletedAt: null
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }]
     },
     ...buildCaseTypeWhere(filters.caseType),
     ...(filters.subjectId ? { subjectId: filters.subjectId } : {}),
@@ -727,16 +727,16 @@ function buildBroadCaseWhere(filters: SubjectSummaryCaseFilters): Prisma.Subject
 
 function buildBroadPublishedCaseWhere(filters: PublishedSubjectSummaryCaseFilters): Prisma.SubjectSummaryCaseWhereInput {
   return {
-    deletedAt: null,
+    OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
     status: SubjectSummaryCaseStatus.PUBLISHED,
     subject: {
-      deletedAt: null,
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
       status: {
         in: publishedVisibleStatuses
       }
     },
     topic: {
-      deletedAt: null,
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
       status: {
         in: publishedVisibleStatuses
       }
@@ -750,7 +750,7 @@ function buildBroadPublishedCaseWhere(filters: PublishedSubjectSummaryCaseFilter
 async function assertTopicBelongsToSubject(subjectId: string, topicId: string) {
   const topic = await prisma.subjectSummaryTopic.findFirst({
     where: {
-      deletedAt: null,
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
       id: topicId,
       subjectId
     },
@@ -2354,7 +2354,7 @@ export async function createSubjectSummarySubject(input: SubjectSummarySubjectIn
 export async function updateSubjectSummarySubject(subjectId: string, input: SubjectSummarySubjectInput, actorUserId: string) {
   const existing = await prisma.subjectSummarySubject.findFirst({
     where: {
-      deletedAt: null,
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
       id: subjectId
     }
   });
@@ -2363,6 +2363,7 @@ export async function updateSubjectSummarySubject(subjectId: string, input: Subj
     return null;
   }
 
+  const softDeletedWhere = { OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }] } as const;
   const subject = await prisma.subjectSummarySubject.update({
     where: {
       id: subjectId
@@ -2378,14 +2379,10 @@ export async function updateSubjectSummarySubject(subjectId: string, input: Subj
       _count: {
         select: {
           cases: {
-            where: {
-              deletedAt: null
-            }
+            where: softDeletedWhere
           },
           topics: {
-            where: {
-              deletedAt: null
-            }
+            where: softDeletedWhere
           }
         }
       }
@@ -2510,7 +2507,7 @@ export async function createSubjectSummaryTopic(input: SubjectSummaryTopicInput,
 export async function updateSubjectSummaryTopic(topicId: string, input: SubjectSummaryTopicInput, actorUserId: string) {
   const existing = await prisma.subjectSummaryTopic.findFirst({
     where: {
-      deletedAt: null,
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
       id: topicId
     }
   });
@@ -2521,7 +2518,7 @@ export async function updateSubjectSummaryTopic(topicId: string, input: SubjectS
 
   const subject = await prisma.subjectSummarySubject.findFirst({
     where: {
-      deletedAt: null,
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
       id: input.subjectId
     },
     select: {
@@ -2539,6 +2536,7 @@ export async function updateSubjectSummaryTopic(topicId: string, input: SubjectS
     ]);
   }
 
+  const softDeletedWhere = { OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }] } as const;
   const topic = await prisma.subjectSummaryTopic.update({
     where: {
       id: topicId
@@ -2561,9 +2559,7 @@ export async function updateSubjectSummaryTopic(topicId: string, input: SubjectS
       _count: {
         select: {
           cases: {
-            where: {
-              deletedAt: null
-            }
+            where: softDeletedWhere
           }
         }
       }
@@ -2691,7 +2687,7 @@ export async function updateSubjectSummaryCase(
 ) {
   const existing = await prisma.subjectSummaryCase.findFirst({
     where: {
-      deletedAt: null,
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
       id: caseId
     }
   });

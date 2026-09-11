@@ -913,6 +913,8 @@ export function StudentBarFinalExamsMcqPage() {
   const [search, setSearch] = useState("");
   const [selectedSubjectId, setSelectedSubjectId] = useState("");
   const [activeQuestionId, setActiveQuestionId] = useState("");
+  const [sortBy, setSortBy] = useState<"createdAt" | "examDate">("createdAt");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const questionRefs = useRef(new Map<string, HTMLDivElement>());
 
   const subjectsQuery = useQuery({
@@ -922,8 +924,8 @@ export function StudentBarFinalExamsMcqPage() {
 
   const questionsQuery = useQuery({
     enabled: Boolean(selectedSubjectId),
-    queryKey: queryKeys.studentBarFinalExamMcqQuestions(selectedSubjectId),
-    queryFn: () => fetchStudentBarFinalExamMcqQuestions(selectedSubjectId)
+    queryKey: queryKeys.studentBarFinalExamMcqQuestions({ subjectId: selectedSubjectId, sortBy, sortOrder }),
+    queryFn: () => fetchStudentBarFinalExamMcqQuestions(selectedSubjectId, { sortBy, sortOrder })
   });
 
   useEffect(() => {
@@ -1112,6 +1114,46 @@ export function StudentBarFinalExamsMcqPage() {
                   </div>
                 </div>
 
+                <div className={cn("rounded-2xl border px-4 py-3", isDark ? "border-slate-800 bg-slate-950/30" : "border-slate-200 bg-slate-50")}>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Sort</span>
+                    <select
+                      aria-label="Sort MCQ questions"
+                      className={cn("rounded-xl border px-3 py-2 text-xs font-medium outline-none", isDark ? "border-slate-700 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-950")}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        if (value === "examDateDesc") {
+                          setSortBy("examDate");
+                          setSortOrder("desc");
+                          return;
+                        }
+                        if (value === "examDateAsc") {
+                          setSortBy("examDate");
+                          setSortOrder("asc");
+                          return;
+                        }
+                        if (value === "createdAtDesc") {
+                          setSortBy("createdAt");
+                          setSortOrder("desc");
+                          return;
+                        }
+                        setSortBy("createdAt");
+                        setSortOrder("asc");
+                      }}
+                      value={(() => {
+                        if (sortBy === "examDate") return sortOrder === "desc" ? "examDateDesc" : "examDateAsc";
+                        if (sortBy === "createdAt" && sortOrder === "desc") return "createdAtDesc";
+                        return "createdAtAsc";
+                      })()}
+                    >
+                      <option value="createdAtAsc">Oldest first</option>
+                      <option value="createdAtDesc">Most recent</option>
+                      <option value="examDateDesc">Exam year (newest)</option>
+                      <option value="examDateAsc">Exam year (oldest)</option>
+                    </select>
+                  </div>
+                </div>
+
                 <div className="space-y-3">
                 {questions.map((item, index) => {
                   const isActive = item.id === activeQuestionId;
@@ -1142,7 +1184,7 @@ export function StudentBarFinalExamsMcqPage() {
                           <div className="space-y-1">
                             <div className="flex flex-wrap items-center gap-2">
                               <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>
-                                {activeSubject?.name ?? "Subject"} • Question {index + 1}
+                                {activeSubject?.name ?? "Subject"}
                               </p>
                               {/* Per-question status badges:
                                     1. Viewed — drives answer unlock gating
@@ -1349,7 +1391,7 @@ export function StudentBarFinalExamsMcqPage() {
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>
-                            Question {index + 1}
+                            Answer
                           </p>
                           {yourAnswerBadge}
                         </div>
@@ -1470,7 +1512,7 @@ export function StudentBarFinalExamMcqQuestionPage() {
 
   const questionsQuery = useQuery({
     enabled: Boolean(subjectId),
-    queryKey: queryKeys.studentBarFinalExamMcqQuestions(subjectId),
+    queryKey: queryKeys.studentBarFinalExamMcqQuestions({ subjectId }),
     queryFn: () => fetchStudentBarFinalExamMcqQuestions(subjectId)
   });
 
@@ -1529,7 +1571,7 @@ export function StudentBarFinalExamMcqQuestionPage() {
             </button>
             <h1 className={cn("text-xl font-semibold tracking-tight", isDark ? "text-white" : "text-slate-950")}>Bar Final Exam • MCQ</h1>
             <p className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-600")}>
-              {activeSubject?.name ?? "Subject"} • {currentIndex >= 0 ? `Question ${currentIndex + 1} of ${questions.length}` : "Question"}
+              {activeSubject?.name ?? "Subject"} • {questions.length} total question{questions.length === 1 ? "" : "s"}
             </p>
           </div>
 

@@ -103,6 +103,8 @@ const studentSubjectsQuerySchema = z.object({
 });
 
 const studentQuestionsQuerySchema = z.object({
+  sortBy: z.enum(["createdAt", "examDate"]).default("createdAt"),
+  sortOrder: z.enum(["asc", "desc"]).default("asc"),
   subjectId: recordIdSchema
 });
 
@@ -138,6 +140,8 @@ const mcqQuestionInputSchema = z
   }));
 
 const studentMcqQuestionsQuerySchema = z.object({
+  sortBy: z.enum(["createdAt", "examDate"]).default("createdAt"),
+  sortOrder: z.enum(["asc", "desc"]).default("asc"),
   subjectId: recordIdSchema
 });
 
@@ -692,16 +696,23 @@ export async function listStudentBarFinalExamQuestions(
       "Subscribe to unlock the complete model answers for every Bar Final exam question. Preview shows only the first portion of each answer."
   };
 
+  const orderBy: Prisma.BarFinalExamQuestionOrderByWithRelationInput[] = [
+    query.sortBy === "examDate"
+      ? { examDate: query.sortOrder }
+      : { createdAt: query.sortOrder },
+    { id: "asc" as const }
+  ];
+
   const questions = await prisma.barFinalExamQuestion.findMany({
     where: {
-      deletedAt: null,
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
       status: BarFinalExamQuestionStatus.PUBLISHED,
       subjectId: query.subjectId,
       subject: {
-        deletedAt: null
+        OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }]
       }
     },
-    orderBy: [{ createdAt: "asc" }],
+    orderBy,
     select: {
       answer: true,
       examDate: true,
@@ -1041,16 +1052,23 @@ export async function listStudentBarFinalExamMcqQuestions(
       "Subscribe to unlock the answer key for every Bar Final MCQ question. Preview access hides the correct option index until your subscription is active."
   };
 
+  const orderBy: Prisma.BarFinalExamMcqQuestionOrderByWithRelationInput[] = [
+    query.sortBy === "examDate"
+      ? { examDate: query.sortOrder }
+      : { createdAt: query.sortOrder },
+    { id: "asc" as const }
+  ];
+
   const questions = await prisma.barFinalExamMcqQuestion.findMany({
     where: {
-      deletedAt: null,
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
       status: BarFinalExamQuestionStatus.PUBLISHED,
       subjectId: query.subjectId,
       subject: {
-        deletedAt: null
+        OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }]
       }
     },
-    orderBy: [{ createdAt: "asc" }],
+    orderBy,
     select: {
       correctOptionIndex: true,
       examDate: true,

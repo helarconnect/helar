@@ -15,7 +15,7 @@ const adminLibraryFiltersSchema = z.object({
   page: z.coerce.number().int().min(1).max(10_000).default(1),
   pageSize: z.coerce.number().int().min(1).max(500).default(12),
   search: z.string().trim().max(120).optional().default(""),
-  sortBy: z.enum(["createdAt", "estimatedMins", "reportNumber", "title", "updatedAt"]).default("reportNumber"),
+  sortBy: z.enum(["createdAt", "estimatedMins", "reportDate", "reportNumber", "title", "updatedAt"]).default("reportNumber"),
   sortOrder: z.enum(["asc", "desc"]).default("desc")
 });
 
@@ -1221,6 +1221,7 @@ export async function listAdminLibraryMaterials(
           id: string;
           title: string;
           reportNumber: string | null;
+          reportDate: Date | null;
           storageUrl: string;
           createdAt: Date;
           estimatedMins: number;
@@ -1235,6 +1236,7 @@ export async function listAdminLibraryMaterials(
                 id: true,
                 title: true,
                 reportNumber: true,
+                reportDate: true,
                 storageUrl: true,
                 createdAt: true,
                 estimatedMins: true,
@@ -1247,6 +1249,7 @@ export async function listAdminLibraryMaterials(
                 id: true,
                 title: true,
                 reportNumber: true,
+                reportDate: true,
                 storageUrl: true,
                 createdAt: true,
                 estimatedMins: true,
@@ -1266,6 +1269,7 @@ export async function listAdminLibraryMaterials(
               id: true,
               title: true,
               reportNumber: true,
+              reportDate: true,
               storageUrl: true,
               createdAt: true,
               estimatedMins: true,
@@ -1292,6 +1296,12 @@ export async function listAdminLibraryMaterials(
           (row.createdAt instanceof Date ? row.createdAt : new Date(row.createdAt)).getTime();
         const updatedAtMs = (row: { updatedAt: Date | string }): number =>
           (row.updatedAt instanceof Date ? row.updatedAt : new Date(row.updatedAt)).getTime();
+        const reportDateMs = (row: { reportDate: Date | string | null | undefined }): number => {
+          if (!row.reportDate) return Number.NEGATIVE_INFINITY;
+          const d = row.reportDate instanceof Date ? row.reportDate : new Date(row.reportDate);
+          const t = d.getTime();
+          return Number.isFinite(t) ? t : Number.NEGATIVE_INFINITY;
+        };
 
         // Step 2: sort the scoped match set deterministically.
         const sortedRows = [...searchScopedRows].sort((left, right) => {
@@ -1327,6 +1337,13 @@ export async function listAdminLibraryMaterials(
           if (filters.sortBy === "updatedAt") {
             const uCmp = (updatedAtMs(left) - updatedAtMs(right)) * directionMul;
             if (uCmp !== 0) return uCmp;
+            return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+          }
+          if (filters.sortBy === "reportDate") {
+            const rCmp = (reportDateMs(left) - reportDateMs(right)) * directionMul;
+            if (rCmp !== 0) return rCmp;
+            const cCmp = (createdAtMs(left) - createdAtMs(right)) * (filters.sortOrder === "desc" ? -1 : 1);
+            if (cCmp !== 0) return cCmp;
             return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
           }
           // reportNumber fallback (non-numbered section): lexicographic
@@ -1411,6 +1428,13 @@ export async function listAdminLibraryMaterials(
           if (filters.sortBy === "reportNumber") {
             return [
               { reportNumber: direction },
+              { createdAt: "desc" as const },
+              { id: "asc" as const }
+            ] as Array<Prisma.StudyMaterialOrderByWithRelationInput>;
+          }
+          if (filters.sortBy === "reportDate") {
+            return [
+              { reportDate: direction },
               { createdAt: "desc" as const },
               { id: "asc" as const }
             ] as Array<Prisma.StudyMaterialOrderByWithRelationInput>;

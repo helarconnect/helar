@@ -5,6 +5,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { useTheme } from "@/hooks/useTheme";
 import { fetchStudentBarFinalExamQuestions, fetchStudentBarFinalExamSubjects } from "@/lib/admin-api";
+import { formatDateDMY } from "@/lib/date";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 
@@ -22,7 +23,7 @@ export function StudentBarFinalExamQuestionPage() {
 
   const questionsQuery = useQuery({
     enabled: Boolean(subjectId),
-    queryKey: queryKeys.studentBarFinalExamQuestions(subjectId),
+    queryKey: queryKeys.studentBarFinalExamQuestions({ subjectId }),
     queryFn: () => fetchStudentBarFinalExamQuestions(subjectId)
   });
 
@@ -158,6 +159,12 @@ export function StudentBarFinalExamQuestionPage() {
                   <p className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Subject</p>
                   <p className={cn("mt-2 text-sm font-semibold", isDark ? "text-white" : "text-slate-950")}>
                     {activeSubject?.name ?? "Not available"}
+                  </p>
+                </div>
+                <div className={cn("rounded-3xl border px-4 py-4", isDark ? "border-slate-800 bg-slate-950/30" : "border-slate-200 bg-slate-50")}>
+                  <p className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Exam date</p>
+                  <p className={cn("mt-2 text-sm font-semibold", isDark ? "text-white" : "text-slate-950")}>
+                    {currentQuestion?.examDate ? formatDateDMY(currentQuestion.examDate) : "Not available"}
                   </p>
                 </div>
                 <div className={cn("rounded-3xl border px-4 py-4", isDark ? "border-slate-800 bg-slate-950/30" : "border-slate-200 bg-slate-50")}>

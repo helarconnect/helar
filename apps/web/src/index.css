@@ -395,12 +395,23 @@ body {
     font-family: "Libre Baskerville", Georgia, serif;
   }
 
+  /* Theme-aware secondary button: solid high-contrast defaults that remain
+     legible on both light portal surfaces and dark hero/landing backgrounds.
+     The transparent-white-on-dark legacy styling only made sense on top of
+     full-bleed dark image overlays; inside the portal it rendered invisible
+     whenever the user switched to light page mode. */
   .button-secondary {
     @apply inline-flex items-center gap-2 border px-6 py-4 text-sm transition hover:-translate-y-0.5;
-    border-color: #ffffff;
-    color: #ffffff;
-    background: transparent;
+    border-color: rgba(21, 28, 50, 0.18);
+    background: #ffffff;
+    color: #151c32;
     font-family: "Libre Baskerville", Georgia, serif;
+  }
+
+  .dark .button-secondary {
+    border-color: rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.04);
+    color: #ffffff;
   }
 
   .input-field {

@@ -438,9 +438,9 @@ export function LandingPage() {
               <div className="flex flex-col gap-4 sm:flex-row md:flex-col lg:flex-row">
                 <Link
                   className="inline-flex items-center justify-center gap-2 bg-[color:var(--color-accent-strong)] px-8 py-4 font-heading text-base text-white transition hover:brightness-105 sm:justify-start"
-                  to="/auth/sign-up"
+                  to="/auth/sign-in"
                 >
-                  Get Started
+                  Login
                 </Link>
                 <Link
                   className="inline-flex items-center justify-center gap-2 border border-white/18 bg-white/6 px-8 py-4 font-heading text-base text-white backdrop-blur-sm transition hover:bg-white/10 sm:justify-start"
@@ -735,9 +735,9 @@ export function LandingPage() {
             <div className="mt-7 flex flex-col gap-3 sm:flex-row">
               <Link
                 className="inline-flex items-center justify-center gap-2 rounded-full bg-[color:var(--color-accent-strong)] px-6 py-3 text-sm font-semibold text-white transition hover:brightness-105"
-                to="/auth/sign-up"
+                to="/auth/sign-in"
               >
-                Get Started
+                Login
               </Link>
               <Link
                 className="inline-flex items-center justify-center gap-2 rounded-full border border-white/16 bg-white/6 px-6 py-3 text-sm font-semibold text-white backdrop-blur-sm transition hover:bg-white/10"

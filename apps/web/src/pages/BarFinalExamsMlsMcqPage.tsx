@@ -7,6 +7,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { RichTextEditor } from "@/components/ui/RichTextEditor";
 import { useTheme } from "@/hooks/useTheme";
+import { formatDateDMY } from "@/lib/date";
 import {
   type BarFinalExamQuestion,
   type BarFinalExamQuestionInput,
@@ -587,6 +588,8 @@ export function StudentBarFinalExamsMlsMcqPage() {
   const [search, setSearch] = useState("");
   const [selectedSubjectId, setSelectedSubjectId] = useState("");
   const [activeQuestionId, setActiveQuestionId] = useState("");
+  const [sortBy, setSortBy] = useState<"createdAt" | "examDate">("createdAt");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const questionRefs = useRef(new Map<string, HTMLDivElement>());
 
   const subjectsQuery = useQuery({
@@ -596,8 +599,8 @@ export function StudentBarFinalExamsMlsMcqPage() {
 
   const questionsQuery = useQuery({
     enabled: Boolean(selectedSubjectId),
-    queryKey: queryKeys.studentBarFinalExamQuestions(selectedSubjectId),
-    queryFn: () => fetchStudentBarFinalExamQuestions(selectedSubjectId)
+    queryKey: queryKeys.studentBarFinalExamQuestions({ subjectId: selectedSubjectId, sortBy, sortOrder }),
+    queryFn: () => fetchStudentBarFinalExamQuestions(selectedSubjectId, { sortBy, sortOrder })
   });
 
   const subjects = subjectsQuery.data?.subjects ?? [];
@@ -758,11 +761,51 @@ export function StudentBarFinalExamsMlsMcqPage() {
             </div>
           ) : (
             <div className="space-y-4">
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className={cn("text-sm font-medium", isDark ? "text-white" : "text-slate-950")}>
                   {activeSubject?.name ?? "Subject"} questions
                 </p>
                 <p className={cn("text-xs", isDark ? "text-slate-500" : "text-slate-500")}>{questions.length} questions</p>
+              </div>
+
+              <div className={cn("rounded-2xl border px-4 py-3", isDark ? "border-slate-800 bg-slate-950/30" : "border-slate-200 bg-slate-50")}>
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Sort</span>
+                  <select
+                    aria-label="Sort NLS theory questions"
+                    className={cn("rounded-xl border px-3 py-2 text-xs font-medium outline-none", isDark ? "border-slate-700 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-950")}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      if (value === "examDateDesc") {
+                        setSortBy("examDate");
+                        setSortOrder("desc");
+                        return;
+                      }
+                      if (value === "examDateAsc") {
+                        setSortBy("examDate");
+                        setSortOrder("asc");
+                        return;
+                      }
+                      if (value === "createdAtDesc") {
+                        setSortBy("createdAt");
+                        setSortOrder("desc");
+                        return;
+                      }
+                      setSortBy("createdAt");
+                      setSortOrder("asc");
+                    }}
+                    value={(() => {
+                      if (sortBy === "examDate") return sortOrder === "desc" ? "examDateDesc" : "examDateAsc";
+                      if (sortBy === "createdAt" && sortOrder === "desc") return "createdAtDesc";
+                      return "createdAtAsc";
+                    })()}
+                  >
+                    <option value="createdAtAsc">Oldest first</option>
+                    <option value="createdAtDesc">Most recent</option>
+                    <option value="examDateDesc">Exam year (newest)</option>
+                    <option value="examDateAsc">Exam year (oldest)</option>
+                  </select>
+                </div>
               </div>
 
               {questions.map((item, index) => {
@@ -788,9 +831,6 @@ export function StudentBarFinalExamsMlsMcqPage() {
                     <div className="flex flex-col gap-3">
                       <div className="space-y-3">
                         <div className="space-y-1">
-                          <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>
-                            Question {index + 1}
-                          </p>
                           {hasContent ? (
                             // Render rich text preview with controlled height
                             // to maintain professional card layout.
@@ -813,6 +853,11 @@ export function StudentBarFinalExamsMlsMcqPage() {
                               No question content.
                             </p>
                           )}
+                          {item.examDate ? (
+                            <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>
+                              Exam date: {formatDateDMY(item.examDate)}
+                            </p>
+                          ) : null}
                         </div>
 
                         <div className="flex flex-wrap items-center justify-end gap-2">

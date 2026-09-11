@@ -81,8 +81,10 @@ const connectUserListQuerySchema = z.object({
 });
 
 const connectQuestionInputSchema = z.object({
-  body: z.string().trim().min(20).max(10_000),
-  tags: z.array(z.string().trim().min(1).max(32)).max(8).default([]),
+  // Removed upper character/array length limits so users can write questions
+  // and tag lists of any size.
+  body: z.string().trim().min(20),
+  tags: z.array(z.string().trim().min(1)).default([]),
   title: z.string().trim().min(8).max(220)
 });
 

@@ -1,7 +1,7 @@
 import { AxiosError } from "axios";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
-import { AlertCircle, ArrowRight, CheckCircle2, X } from "lucide-react";
+import { AlertCircle, ArrowRight, CheckCircle2, Eye, EyeOff, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useForm } from "react-hook-form";
@@ -120,6 +120,9 @@ export function AuthPlaceholderPage({ mode }: AuthPlaceholderPageProps) {
   const setSession = useAuthStore((state) => state.setSession);
   const [toasts, setToasts] = useState<Array<{ id: number; message: string; tone: ToastTone }>>([]);
   const toastCounterRef = useRef(0);
+  // Password visibility toggles so the user can show/hide the typed value
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   function showToast(message: string, tone: ToastTone) {
     toastCounterRef.current += 1;
@@ -304,14 +307,44 @@ export function AuthPlaceholderPage({ mode }: AuthPlaceholderPageProps) {
                   <span className="text-xs text-slate-400">Use at least 8 characters</span>
                 )}
               </div>
-              <input className="auth-input" id="password" type="password" {...form.register("password")} />
+              <div className="relative">
+                <input
+                  className="auth-input pr-11"
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  {...form.register("password")}
+                />
+                <button
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  className="absolute inset-y-0 right-3 inline-flex h-full w-8 items-center justify-center text-slate-400 transition hover:text-white"
+                  onClick={() => setShowPassword((current) => !current)}
+                  type="button"
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
               <p className="auth-error">{form.formState.errors.password?.message}</p>
             </div>
 
             {!isSignIn ? (
               <div className="auth-field">
                 <label htmlFor="confirmPassword">Confirm password</label>
-                <input className="auth-input" id="confirmPassword" type="password" {...form.register("confirmPassword")} />
+                <div className="relative">
+                  <input
+                    className="auth-input pr-11"
+                    id="confirmPassword"
+                    type={showConfirmPassword ? "text" : "password"}
+                    {...form.register("confirmPassword")}
+                  />
+                  <button
+                    aria-label={showConfirmPassword ? "Hide confirm password" : "Show confirm password"}
+                    className="absolute inset-y-0 right-3 inline-flex h-full w-8 items-center justify-center text-slate-400 transition hover:text-white"
+                    onClick={() => setShowConfirmPassword((current) => !current)}
+                    type="button"
+                  >
+                    {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
                 <p className="auth-error">{form.formState.errors.confirmPassword?.message}</p>
               </div>
             ) : null}

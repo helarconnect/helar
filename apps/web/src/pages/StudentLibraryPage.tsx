@@ -323,14 +323,61 @@ export function StudentLawReportsPage() {
             <p className={cn("mt-3 max-w-2xl text-sm leading-7", isDark ? "text-slate-300" : "text-slate-600")}>{summaryText}</p>
           </div>
 
-          <div className={cn("flex items-center gap-3 rounded-[24px] border px-4 py-3", isDark ? "border-slate-700 bg-slate-900" : "border-slate-200 bg-slate-50")}>
-            <Search className={cn("h-4 w-4", isDark ? "text-slate-500" : "text-slate-400")} />
-            <input
-              className={cn("w-72 bg-transparent text-sm outline-none", isDark ? "text-white placeholder:text-slate-500" : "text-slate-950 placeholder:text-slate-400")}
-              onChange={(event) => setFilters((current) => ({ ...current, page: 1, search: event.target.value }))}
-              placeholder="Search law reports"
-              value={filters.search}
-            />
+          <div className={cn("flex flex-wrap items-center gap-3 rounded-[24px] border px-4 py-3", isDark ? "border-slate-700 bg-slate-900" : "border-slate-200 bg-slate-50")}>
+            <div className="flex items-center gap-2">
+              <CalendarDays className={cn("h-4 w-4", isDark ? "text-slate-500" : "text-slate-400")} />
+              <select
+                aria-label="Sort law reports"
+                className={cn("bg-transparent text-sm outline-none", isDark ? "text-white" : "text-slate-950")}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (value === "yearDesc") {
+                    setFilters((current) => ({ ...current, page: 1, sortBy: "reportDate", sortOrder: "desc" }));
+                    return;
+                  }
+                  if (value === "yearAsc") {
+                    setFilters((current) => ({ ...current, page: 1, sortBy: "reportDate", sortOrder: "asc" }));
+                    return;
+                  }
+                  if (value === "createdDesc") {
+                    setFilters((current) => ({ ...current, page: 1, sortBy: "createdAt", sortOrder: "desc" }));
+                    return;
+                  }
+                  if (value === "createdAsc") {
+                    setFilters((current) => ({ ...current, page: 1, sortBy: "createdAt", sortOrder: "asc" }));
+                    return;
+                  }
+                  if (value === "titleAsc") {
+                    setFilters((current) => ({ ...current, page: 1, sortBy: "title", sortOrder: "asc" }));
+                    return;
+                  }
+                  setFilters((current) => ({ ...current, page: 1, sortBy: "reportNumber", sortOrder: "desc" }));
+                }}
+                value={(() => {
+                  if (filters.sortBy === "reportDate") return filters.sortOrder === "asc" ? "yearAsc" : "yearDesc";
+                  if (filters.sortBy === "createdAt") return filters.sortOrder === "asc" ? "createdAsc" : "createdDesc";
+                  if (filters.sortBy === "title") return "titleAsc";
+                  return "reportNumber";
+                })()}
+              >
+                <option value="reportNumber">Sort: Report number</option>
+                <option value="yearDesc">Sort: Year (newest first)</option>
+                <option value="yearAsc">Sort: Year (oldest first)</option>
+                <option value="createdDesc">Sort: Most recent</option>
+                <option value="createdAsc">Sort: Oldest</option>
+                <option value="titleAsc">Sort: Title (A-Z)</option>
+              </select>
+            </div>
+            <div className={cn("h-6 w-px shrink-0", isDark ? "bg-slate-700" : "bg-slate-200")} />
+            <div className="flex items-center gap-2 flex-1">
+              <Search className={cn("h-4 w-4", isDark ? "text-slate-500" : "text-slate-400")} />
+              <input
+                className={cn("w-full bg-transparent text-sm outline-none", isDark ? "text-white placeholder:text-slate-500" : "text-slate-950 placeholder:text-slate-400")}
+                onChange={(event) => setFilters((current) => ({ ...current, page: 1, search: event.target.value }))}
+                placeholder="Search law reports"
+                value={filters.search}
+              />
+            </div>
           </div>
         </div>
       </section>
@@ -833,6 +880,8 @@ export function StudentSubjectSummariesPage() {
     page: 1,
     pageSize: 10,
     search: "",
+    sortBy: "updatedAt" as "createdAt" | "title" | "updatedAt" | "year",
+    sortOrder: "desc" as "asc" | "desc",
     subjectId: "",
     topicId: ""
   }));
@@ -853,8 +902,8 @@ export function StudentSubjectSummariesPage() {
         page: caseFilters.page,
         pageSize: caseFilters.pageSize,
         search: caseFilters.search,
-        sortBy: "updatedAt",
-        sortOrder: "desc",
+        sortBy: caseFilters.sortBy,
+        sortOrder: caseFilters.sortOrder,
         subjectId: caseFilters.subjectId || undefined,
         topicId: caseFilters.topicId || undefined
       }),
@@ -863,8 +912,8 @@ export function StudentSubjectSummariesPage() {
       page: caseFilters.page,
       pageSize: caseFilters.pageSize,
       search: caseFilters.search,
-      sortBy: "updatedAt",
-      sortOrder: "desc",
+      sortBy: caseFilters.sortBy,
+      sortOrder: caseFilters.sortOrder,
       subjectId: caseFilters.subjectId,
       topicId: caseFilters.topicId
     })
@@ -933,9 +982,9 @@ export function StudentSubjectSummariesPage() {
           </div>
         </div>
 
-        <div className="mt-6 grid gap-4 md:grid-cols-4">
+        <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-5">
           <input
-            className={cn("rounded-2xl border px-4 py-3 text-sm outline-none md:col-span-2", isDark ? "border-slate-700 bg-slate-950 text-white" : "border-slate-200 bg-slate-50 text-slate-950")}
+            className={cn("rounded-2xl border px-4 py-3 text-sm outline-none lg:col-span-2", isDark ? "border-slate-700 bg-slate-950 text-white" : "border-slate-200 bg-slate-50 text-slate-950")}
             onChange={(event) => setCaseFilters((current) => ({ ...current, page: 1, search: event.target.value }))}
             placeholder="Search cases"
             value={caseFilters.search}
@@ -978,6 +1027,42 @@ export function StudentSubjectSummariesPage() {
                 {topic.name}
               </option>
             ))}
+          </select>
+          <select
+            aria-label="Sort cases"
+            className={cn("rounded-2xl border px-4 py-3 text-sm outline-none lg:col-span-2", isDark ? "border-slate-700 bg-slate-950 text-white" : "border-slate-200 bg-slate-50 text-slate-950")}
+            onChange={(event) => {
+              const value = event.target.value;
+              if (value === "yearDesc") {
+                setCaseFilters((current) => ({ ...current, page: 1, sortBy: "year", sortOrder: "desc" }));
+                return;
+              }
+              if (value === "yearAsc") {
+                setCaseFilters((current) => ({ ...current, page: 1, sortBy: "year", sortOrder: "asc" }));
+                return;
+              }
+              if (value === "titleAsc") {
+                setCaseFilters((current) => ({ ...current, page: 1, sortBy: "title", sortOrder: "asc" }));
+                return;
+              }
+              if (value === "createdDesc") {
+                setCaseFilters((current) => ({ ...current, page: 1, sortBy: "createdAt", sortOrder: "desc" }));
+                return;
+              }
+              setCaseFilters((current) => ({ ...current, page: 1, sortBy: "updatedAt", sortOrder: "desc" }));
+            }}
+            value={(() => {
+              if (caseFilters.sortBy === "year") return caseFilters.sortOrder === "asc" ? "yearAsc" : "yearDesc";
+              if (caseFilters.sortBy === "title") return "titleAsc";
+              if (caseFilters.sortBy === "createdAt") return "createdDesc";
+              return "updatedDesc";
+            })()}
+          >
+            <option value="updatedDesc">Sort: Recently updated</option>
+            <option value="createdDesc">Sort: Most recent</option>
+            <option value="yearDesc">Sort: Year (newest first)</option>
+            <option value="yearAsc">Sort: Year (oldest first)</option>
+            <option value="titleAsc">Sort: Title (A-Z)</option>
           </select>
         </div>
 
