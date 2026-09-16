@@ -57,7 +57,10 @@ export function RichTextEditor({
     // the last value we programmatically wrote. This prevents a sync loop:
     // user types → onChange → parent updates value → useEffect matches lastAppliedValueRef → no-op.
     const normalizedIncoming = value ?? ''
-    if (node.innerHTML === normalizedIncoming || lastAppliedValueRef.current === normalizedIncoming) {
+    // Track the applied value regardless of whether we write this frame, so modal re-mounts
+    // with an unchanged draft don't falsely consider the ref stale on subsequent edits.
+    lastAppliedValueRef.current = normalizedIncoming
+    if (node.innerHTML === normalizedIncoming) {
       return
     }
 
@@ -77,7 +80,6 @@ export function RichTextEditor({
     }
 
     node.innerHTML = normalizedIncoming
-    lastAppliedValueRef.current = normalizedIncoming
 
     if (wasFocused) {
       focusEditor()
@@ -90,20 +92,32 @@ export function RichTextEditor({
   function focusEditor() {
     const node = editorRef.current
     if (!node) return
-    node.focus({ preventScroll: true })
     // If empty, ensure the caret sits inside a paragraph so typed text inherits prose styles.
-    if (!node.textContent && node.innerHTML.replace(/<br\s*\/?>/gi, '').trim() === '') {
+    // NOTE: Build DOM FIRST, then focus + set range — otherwise caret anchor computed on stale
+    // nodes can disappear after the innerHTML rewrite on some browsers.
+    const isEmptyish = !node.textContent && node.innerHTML.replace(/<br\s*\/?>/gi, '').trim() === ''
+    if (isEmptyish) {
       node.innerHTML = ''
       const p = document.createElement('p')
       const br = document.createElement('br')
       p.appendChild(br)
       node.appendChild(p)
-      const range = document.createRange()
-      range.selectNodeContents(p)
-      range.collapse(true)
-      const sel = window.getSelection()
-      sel?.removeAllRanges()
-      sel?.addRange(range)
+    }
+    node.focus({ preventScroll: true })
+    if (isEmptyish) {
+      // Defer range selection one animation frame so layout settles and caret paint is reliable.
+      requestAnimationFrame(() => {
+        const freshNode = editorRef.current
+        if (!freshNode) return
+        const p = freshNode.querySelector('p')
+        if (!p) return
+        const range = document.createRange()
+        range.selectNodeContents(p)
+        range.collapse(true)
+        const sel = window.getSelection()
+        sel?.removeAllRanges()
+        sel?.addRange(range)
+      })
     }
   }
 
@@ -314,11 +328,13 @@ export function RichTextEditor({
 
         <div
           className={cn('relative overflow-y-auto', maxHeight ? 'max-h-[var(--editor-max-height)]' : undefined, readOnly ? 'cursor-default' : 'cursor-text')}
-          onClick={readOnly ? undefined : focusEditor}
           onMouseDown={(event) => {
             // Clicking inside the editor scroll container but outside the contentEditable (e.g.
             // dead space next to prose box) should still focus into contentEditable. Prevent the
             // wrapper div from swallowing the native selection placement.
+            // NOTE: Direct clicks on the contentEditable itself or its children rely on native
+            // mousedown selection placement — we intentionally do NOT call focusEditor() for those
+            // paths so the caret paint isn't invalidated by a synchronous empty-state DOM rewrite.
             if (readOnly) return
             if (event.target === event.currentTarget || !editorRef.current?.contains(event.target as Node)) {
               event.preventDefault()
@@ -360,8 +376,6 @@ export function RichTextEditor({
                     onChange(nextHtml)
                   }
             }
-            onKeyUp={readOnly ? undefined : saveSelection}
-            onMouseUp={readOnly ? undefined : saveSelection}
             ref={editorRef}
             spellCheck
             suppressContentEditableWarning
