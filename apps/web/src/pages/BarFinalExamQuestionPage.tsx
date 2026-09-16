@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight } from "lucide-react";
-import { useEffect } from "react";
+import { ChevronRight, Eye } from "lucide-react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { useTheme } from "@/hooks/useTheme";
@@ -15,6 +15,16 @@ export function StudentBarFinalExamQuestionPage() {
   const params = useParams();
   const subjectId = params.subjectId ?? "";
   const questionId = params.questionId ?? "";
+  // Gates the model answer behind an explicit "View answer" button click.
+  // Question content is always visible; answer only appears once the user
+  // intentionally opts in to reveal it.
+  const [isAnswerVisible, setIsAnswerVisible] = useState(false);
+
+  // Reset answer visibility whenever the user navigates to a different
+  // question so every new question starts with the answer hidden.
+  useEffect(() => {
+    setIsAnswerVisible(false);
+  }, [questionId]);
 
   const subjectsQuery = useQuery({
     queryKey: queryKeys.studentBarFinalExamSubjects(""),
@@ -138,19 +148,57 @@ export function StudentBarFinalExamQuestionPage() {
                       : "border-emerald-200 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.12),transparent_45%),linear-gradient(180deg,#ffffff_0%,#f0fdf4_100%)] text-slate-800"
                   )}
                 >
-                  <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-emerald-200/90" : "text-emerald-700")}>
-                    Answer
-                  </p>
-                  {contentAccess?.isPreview ? (
-                    <p className="text-xs font-medium text-amber-600/90 mb-3">Preview mode — only the first {contentAccess.previewWordLimit} words of the model answer are shown.</p>
-                  ) : null}
-                  <div
-                    // Rich-text answer rendering inherits the emerald-tinted
-                    // card's background while using the shared rich-text
-                    // typography system.
-                    className={cn("text-sm leading-8 rich-text-content", isDark ? "text-slate-100" : "text-slate-800")}
-                    dangerouslySetInnerHTML={{ __html: currentQuestion.answer }}
-                  />
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-emerald-200/90" : "text-emerald-700")}>
+                      Answer
+                    </p>
+                    {isAnswerVisible ? (
+                      <button
+                        className={cn(
+                          "inline-flex h-9 items-center justify-center gap-2 rounded-full border px-3.5 text-xs font-semibold transition",
+                          isDark
+                            ? "border-slate-700 bg-slate-900/60 text-slate-200 hover:bg-slate-900"
+                            : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+                        )}
+                        onClick={() => setIsAnswerVisible(false)}
+                        type="button"
+                      >
+                        Hide answer
+                      </button>
+                    ) : (
+                      <button
+                        className={cn(
+                          "inline-flex h-9 items-center justify-center gap-2 rounded-full border px-3.5 text-xs font-semibold transition",
+                          isDark
+                            ? "border-emerald-400/40 bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25"
+                            : "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100",
+                        )}
+                        onClick={() => setIsAnswerVisible(true)}
+                        type="button"
+                      >
+                        <Eye className="h-3.5 w-3.5" />
+                        View answer
+                      </button>
+                    )}
+                  </div>
+                  {isAnswerVisible ? (
+                    <>
+                      {contentAccess?.isPreview ? (
+                        <p className="mt-4 text-xs font-medium text-amber-600/90">Preview mode — only the first {contentAccess.previewWordLimit} words of the model answer are shown.</p>
+                      ) : null}
+                      <div
+                        // Rich-text answer rendering inherits the emerald-tinted
+                        // card's background while using the shared rich-text
+                        // typography system.
+                        className={cn("mt-4 text-sm leading-8 rich-text-content", isDark ? "text-slate-100" : "text-slate-800")}
+                        dangerouslySetInnerHTML={{ __html: currentQuestion.answer }}
+                      />
+                    </>
+                  ) : (
+                    <p className={cn("mt-4 text-sm", isDark ? "text-slate-300" : "text-slate-600")}>
+                      Read the question first, then click <strong>View answer</strong> to reveal the model solution.
+                    </p>
+                  )}
                 </div>
               </div>
 
