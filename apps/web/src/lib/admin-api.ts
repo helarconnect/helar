@@ -20,9 +20,11 @@ export type AdminLibraryMaterialType =
 
 export type PremiumContentAccess = {
   activeSubscriptionEndsAt: string | null;
+  activeSubscriptionId?: string | null;
   hasFullAccess: boolean;
   isPreview: boolean;
   previewWordLimit: number;
+  previewCharLimit: number;
   requiresSubscription: boolean;
   upgradeMessage: string;
 };

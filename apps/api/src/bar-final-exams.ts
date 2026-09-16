@@ -7,8 +7,11 @@ import { containsText } from "./lib/text-search.js";
 import {
   type PremiumContentAccess,
   PREMIUM_PREVIEW_WORD_LIMIT,
+  PREMIUM_PREVIEW_CHAR_LIMIT,
   createPreviewHtml,
   getPremiumContentAccess,
+  stripHtmlToText,
+  truncateChars,
   truncateWords
 } from "./premium-access.js";
 
@@ -369,20 +372,30 @@ function serializeContentAccess(access: PremiumContentAccess): SerializedPremium
   };
 }
 
-// Strips the full answer down to a 150-word preview paragraph
+// Strips the full NLS theory answer down to a 150-character preview paragraph for
+// unsubscribed users. HTML tags are stripped before truncation so preview length
+// counts actual characters the user would read, not markup.
 function buildRestrictedQuestionPreview<T extends Record<string, unknown> & { answer: string }>(item: T): T {
-  const previewText = truncateWords(item.answer, PREMIUM_PREVIEW_WORD_LIMIT).text;
+  const previewText = truncateChars(stripHtmlToText(item.answer), PREMIUM_PREVIEW_CHAR_LIMIT).text;
   return {
     ...item,
     answer: createPreviewHtml(previewText, PREMIUM_PREVIEW_WORD_LIMIT) as unknown as T["answer"]
   };
 }
 
-// For MCQ questions: keep question + options; NULLIFY correctOptionIndex
-function buildRestrictedMcqQuestionPreview<T extends Record<string, unknown>>(
-  item: T
-): T {
-  return { ...item, correctOptionIndex: null } as T;
+// For MCQ questions: keep question + options; NULLIFY correctOptionIndex and
+// additionally truncate the `explanation` field to 150 characters. Without this
+// second step unsubscribed users were able to read the full explanation (which
+// effectively contains the answer logic) even though the index itself was hidden.
+function buildRestrictedMcqQuestionPreview<
+  T extends Record<string, unknown> & { explanation: string | null }
+>(item: T): T {
+  let explanationPreview: string | null = null;
+  if (item.explanation) {
+    const previewText = truncateChars(stripHtmlToText(item.explanation), PREMIUM_PREVIEW_CHAR_LIMIT).text;
+    explanationPreview = createPreviewHtml(previewText, PREMIUM_PREVIEW_WORD_LIMIT);
+  }
+  return { ...item, correctOptionIndex: null, explanation: explanationPreview } as T;
 }
 
 // Simple types for actual student question items (question list items are returned directly from DB select)
@@ -631,9 +644,10 @@ export async function listStudentBarFinalExamSubjects(
     hasFullAccess: false,
     isPreview: true,
     previewWordLimit: PREMIUM_PREVIEW_WORD_LIMIT,
+    previewCharLimit: PREMIUM_PREVIEW_CHAR_LIMIT,
     requiresSubscription: true,
     upgradeMessage:
-      "Subscribe to unlock every Bar Final subject and the complete model answers. Your preview access is limited until your subscription is active."
+      "Subscribe to unlock every Bar Final subject and the complete model answers. Preview access is limited to 150 characters of each answer until your subscription is active."
   };
 
   const baseWhere: Prisma.BarFinalExamQuestionWhereInput = {
@@ -691,9 +705,10 @@ export async function listStudentBarFinalExamQuestions(
     hasFullAccess: false,
     isPreview: true,
     previewWordLimit: PREMIUM_PREVIEW_WORD_LIMIT,
+    previewCharLimit: PREMIUM_PREVIEW_CHAR_LIMIT,
     requiresSubscription: true,
     upgradeMessage:
-      "Subscribe to unlock the complete model answers for every Bar Final exam question. Preview shows only the first portion of each answer."
+      "Subscribe to unlock the complete model answers for every Bar Final exam question. Preview shows only the first 150 characters of each answer."
   };
 
   const orderBy: Prisma.BarFinalExamQuestionOrderByWithRelationInput[] = [
@@ -987,9 +1002,10 @@ export async function listStudentBarFinalExamMcqSubjects(
     hasFullAccess: false,
     isPreview: true,
     previewWordLimit: PREMIUM_PREVIEW_WORD_LIMIT,
+    previewCharLimit: PREMIUM_PREVIEW_CHAR_LIMIT,
     requiresSubscription: true,
     upgradeMessage:
-      "Subscribe to unlock every Bar Final MCQ subject and reveal the correct answers. Preview access hides the answer key until your subscription is active."
+      "Subscribe to unlock every Bar Final MCQ subject and reveal the correct answers and full explanations. Preview access hides the answer key and limits explanations to 150 characters until your subscription is active."
   };
 
   const baseWhere: Prisma.BarFinalExamMcqQuestionWhereInput = {
@@ -1047,9 +1063,10 @@ export async function listStudentBarFinalExamMcqQuestions(
     hasFullAccess: false,
     isPreview: true,
     previewWordLimit: PREMIUM_PREVIEW_WORD_LIMIT,
+    previewCharLimit: PREMIUM_PREVIEW_CHAR_LIMIT,
     requiresSubscription: true,
     upgradeMessage:
-      "Subscribe to unlock the answer key for every Bar Final MCQ question. Preview access hides the correct option index until your subscription is active."
+      "Subscribe to unlock the answer key and full explanations for every Bar Final MCQ question. Preview access hides the correct option index and limits explanations to 150 characters until your subscription is active."
   };
 
   const orderBy: Prisma.BarFinalExamMcqQuestionOrderByWithRelationInput[] = [

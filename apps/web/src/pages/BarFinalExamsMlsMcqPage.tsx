@@ -681,7 +681,7 @@ export function StudentBarFinalExamsMlsMcqPage() {
             <p className="text-xs uppercase tracking-[0.2em]">Preview only</p>
             <h2 className="mt-3 text-lg font-semibold">Full Bar Final exam access is locked right now.</h2>
             <p className="mt-2 text-sm leading-7">
-              {contentAccess.upgradeMessage} You can read up to {contentAccess.previewWordLimit} words of each published model answer until your subscription is active.
+              {contentAccess.upgradeMessage} You can read up to {contentAccess.previewCharLimit} characters of each published model answer until your subscription is active.
             </p>
             <Link className="mt-3 inline-flex rounded-full border px-4 py-2 text-sm font-medium" to="/app/subscription">
               Subscribe to unlock

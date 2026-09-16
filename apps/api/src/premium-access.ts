@@ -3,6 +3,9 @@ import { SubscriptionStatus } from "@prisma/client";
 import { prisma } from "./lib/prisma.js";
 
 export const PREMIUM_PREVIEW_WORD_LIMIT = 150;
+// Character-based preview limit used for the Bar Final section (NLS Theory + MCQ)
+// so unsubscribed users cannot read long essay answers or MCQ explanations in full.
+export const PREMIUM_PREVIEW_CHAR_LIMIT = 150;
 
 export type PremiumContentAccess = {
   activeSubscriptionEndsAt: Date | null;
@@ -10,6 +13,7 @@ export type PremiumContentAccess = {
   hasFullAccess: boolean;
   isPreview: boolean;
   previewWordLimit: number;
+  previewCharLimit: number;
   requiresSubscription: boolean;
   upgradeMessage: string;
 };
@@ -66,6 +70,45 @@ export function truncateWords(value: string | null | undefined, wordLimit = PREM
   };
 }
 
+// Character-based truncation. Prefers to break on whitespace inside the last
+// 25% of the slice so we avoid cutting a word mid-way. Only use on plain text
+// (call `stripHtmlToText` first when the source is rich HTML).
+export function truncateChars(value: string | null | undefined, charLimit = PREMIUM_PREVIEW_CHAR_LIMIT) {
+  const normalized = (value ?? "").replace(/\s+/g, " ").trim();
+
+  if (!normalized) {
+    return {
+      text: "",
+      wasTruncated: false,
+      charCount: 0
+    };
+  }
+
+  if (normalized.length <= charLimit) {
+    return {
+      text: normalized,
+      wasTruncated: false,
+      charCount: normalized.length
+    };
+  }
+
+  const sliced = normalized.slice(0, charLimit);
+  const lastSpace = sliced.lastIndexOf(" ");
+  if (lastSpace > charLimit * 0.75) {
+    return {
+      text: `${sliced.slice(0, lastSpace).trimEnd()}…`,
+      wasTruncated: true,
+      charCount: lastSpace
+    };
+  }
+
+  return {
+    text: `${sliced.trimEnd()}…`,
+    wasTruncated: true,
+    charCount: charLimit
+  };
+}
+
 export function createPreviewHtml(value: string | null | undefined, wordLimit = PREMIUM_PREVIEW_WORD_LIMIT) {
   const preview = truncateWords(stripHtmlToText(value), wordLimit);
 
@@ -83,6 +126,7 @@ export function createPremiumContentAccess(hasFullAccess: boolean, endsAt: Date 
     hasFullAccess,
     isPreview: !hasFullAccess,
     previewWordLimit: PREMIUM_PREVIEW_WORD_LIMIT,
+    previewCharLimit: PREMIUM_PREVIEW_CHAR_LIMIT,
     requiresSubscription: !hasFullAccess,
     upgradeMessage: hasFullAccess
       ? ""

@@ -1000,7 +1000,7 @@ export function StudentBarFinalExamsMcqPage() {
           <section className={cn("rounded-[28px] border px-6 py-5", isDark ? "border-amber-500/30 bg-amber-500/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-800")}>
             <p className="text-xs uppercase tracking-[0.2em]">Preview only</p>
             <h2 className="mt-3 text-lg font-semibold">Full Bar Final MCQ access is locked right now.</h2>
-            <p className="mt-2 text-sm leading-7">{subjectsQuery.data?.contentAccess.upgradeMessage} The correct answer is hidden on every question until your subscription is active.</p>
+            <p className="mt-2 text-sm leading-7">{subjectsQuery.data?.contentAccess.upgradeMessage} The correct answer is hidden on every question and explanations are limited to {subjectsQuery.data?.contentAccess.previewCharLimit ?? 150} characters until your subscription is active.</p>
             <Link className="mt-3 inline-flex rounded-full border px-4 py-2 text-sm font-medium" to="/app/subscription">Subscribe to unlock</Link>
           </section>
         )}
@@ -1607,7 +1607,7 @@ export function StudentBarFinalExamMcqQuestionPage() {
           <section className={cn("rounded-[28px] border px-6 py-5", isDark ? "border-amber-500/30 bg-amber-500/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-800")}>
             <p className="text-xs uppercase tracking-[0.2em]">Preview only</p>
             <h2 className="mt-3 text-lg font-semibold">Full Bar Final MCQ access is locked right now.</h2>
-            <p className="mt-2 text-sm leading-7">{questionsQuery.data?.contentAccess.upgradeMessage} The correct answer is hidden on every question until your subscription is active.</p>
+            <p className="mt-2 text-sm leading-7">{questionsQuery.data?.contentAccess.upgradeMessage} The correct answer is hidden on every question and explanations are limited to {questionsQuery.data?.contentAccess.previewCharLimit ?? 150} characters until your subscription is active.</p>
             <Link className="mt-3 inline-flex rounded-full border px-4 py-2 text-sm font-medium" to="/app/subscription">Subscribe to unlock</Link>
           </section>
         )}
