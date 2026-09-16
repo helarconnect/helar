@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { createPortal } from "react-dom";
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   AlertCircle,
@@ -18,6 +19,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { ShareButton } from "@/components/common/ShareButton";
 import { RichTextEditor } from "@/components/ui/RichTextEditor";
+import { useTheme } from "@/hooks/useTheme";
 import {
   createHelarConnectAnswer,
   createHelarConnectComment,
@@ -32,7 +34,7 @@ import {
   type HelarConnectSort
 } from "@/lib/connect-api";
 import { queryKeys } from "@/lib/query-keys";
-import { canModerateHelarConnect } from "@/lib/utils";
+import { canModerateHelarConnect, cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth-store";
 
 const leftNavigation: Array<{
@@ -136,6 +138,7 @@ function stripHtml(html: string): string {
 export function HelarConnectPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { isDark } = useTheme();
   const [searchParams, setSearchParams] = useSearchParams();
   const session = useAuthStore((state) => state.session);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
@@ -919,104 +922,151 @@ export function HelarConnectPage() {
         </aside>
       </div>
 
-      {isAskModalOpen ? (
-        <div className="connect-modal-backdrop" role="presentation">
-          <div aria-modal="true" className="connect-modal-card" role="dialog">
-            <div className="connect-modal-header">
-              <div>
-                <h2>Ask a question</h2>
-                <p>Start a new discussion for the Helar Connect community.</p>
-              </div>
-              <button className="connect-modal-close" onClick={() => setIsAskModalOpen(false)} type="button">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <form className="connect-modal-form" onSubmit={(event) => void handleSubmitQuestion(event)}>
-              <label>
-                Question title
-                <input
-                  onChange={(event) => {
-                    setQuestionDraft((current) => ({ ...current, title: event.target.value }));
-                    if (questionFormErrors.title) {
-                      setQuestionFormErrors((prev) => ({ ...prev, title: null, submit: null }));
-                    }
-                  }}
-                  placeholder="e.g. How do I approach conflicting authorities in one memo?"
-                  type="text"
-                  value={questionDraft.title}
-                />
-                {questionFormErrors.title ? (
-                  <p className="mt-2 flex items-center gap-2 text-xs text-rose-600">
-                    <AlertCircle className="h-3.5 w-3.5" />
-                    {questionFormErrors.title}
-                  </p>
-                ) : null}
-              </label>
-
-              <label>
-                Details
-                <RichTextEditor
-                  isDark={true}
-                  label=""
-                  minHeight={160}
-                  onChange={(value) => {
-                    setQuestionDraft((current) => ({ ...current, body: value }));
-                    if (questionFormErrors.body) {
-                      setQuestionFormErrors((prev) => ({ ...prev, body: null, submit: null }));
-                    }
-                  }}
-                  placeholder="Share enough context so other members can give a useful answer."
-                  value={questionDraft.body}
-                />
-                {questionFormErrors.body ? (
-                  <p className="mt-2 flex items-center gap-2 text-xs text-rose-600">
-                    <AlertCircle className="h-3.5 w-3.5" />
-                    {questionFormErrors.body}
-                  </p>
-                ) : null}
-              </label>
-
-              <label>
-                Tags
-                <input
-                  onChange={(event) => {
-                    setQuestionDraft((current) => ({ ...current, tags: event.target.value }));
-                    if (questionFormErrors.tags) {
-                      setQuestionFormErrors((prev) => ({ ...prev, tags: null, submit: null }));
-                    }
-                  }}
-                  placeholder="legal-analysis, notes, workflow"
-                  type="text"
-                  value={questionDraft.tags}
-                />
-                {questionFormErrors.tags ? (
-                  <p className="mt-2 flex items-center gap-2 text-xs text-rose-600">
-                    <AlertCircle className="h-3.5 w-3.5" />
-                    {questionFormErrors.tags}
-                  </p>
-                ) : null}
-              </label>
-
-              {questionFormErrors.submit ? (
-                <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
-                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                  <p>{questionFormErrors.submit}</p>
+      {isAskModalOpen && typeof document !== "undefined"
+        ? createPortal(
+            <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/60 p-6 backdrop-blur-sm">
+              <div
+                aria-modal="true"
+                className={cn(
+                  "relative flex h-[84vh] w-full max-w-[680px] flex-col overflow-hidden rounded-[26px] border shadow-[0_30px_100px_rgba(15,23,42,0.28)]",
+                  isDark ? "border-slate-800 bg-slate-950" : "border-slate-200 bg-white",
+                )}
+                role="dialog"
+              >
+                <div className={cn("flex items-center justify-between border-b px-4 py-3.5", isDark ? "border-slate-800" : "border-slate-200")}>
+                  <div className="min-w-0">
+                    <p className={cn("text-xs uppercase tracking-[0.22em]", isDark ? "text-slate-500" : "text-slate-400")}>Helar Connect</p>
+                    <h3 className={cn("mt-1 font-heading text-[1.55rem]", isDark ? "text-white" : "text-slate-950")}>Ask a question</h3>
+                    <p className={cn("mt-1 text-sm", isDark ? "text-slate-400" : "text-slate-500")}>Start a new discussion for the Helar Connect community.</p>
+                  </div>
+                  <button
+                    className={cn(
+                      "inline-flex h-9 w-9 items-center justify-center rounded-full border transition",
+                      isDark ? "border-slate-700 bg-slate-900 text-slate-200" : "border-slate-200 bg-slate-50 text-slate-700",
+                    )}
+                    onClick={() => setIsAskModalOpen(false)}
+                    type="button"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
                 </div>
-              ) : null}
 
-              <div className="connect-modal-actions">
-                <button className="connect-top-link-button" onClick={() => setIsAskModalOpen(false)} type="button">
-                  Cancel
-                </button>
-                <button className="connect-ask-button" disabled={createQuestionMutation.isPending} type="submit">
-                  {createQuestionMutation.isPending ? "Publishing..." : "Publish question"}
-                </button>
+                <div className="relative min-h-0 flex-1">
+                  <div className="h-full overflow-y-auto px-4 py-3.5">
+                    <form className="grid gap-4 grid-cols-1 pb-2" onSubmit={(event) => void handleSubmitQuestion(event)}>
+                      <label className="space-y-1.5">
+                        <span className={cn("text-xs font-medium uppercase tracking-[0.2em]", isDark ? "text-slate-500" : "text-slate-500")}>Question title</span>
+                        <input
+                          className={cn(
+                            "w-full rounded-2xl border px-3.5 py-2 text-sm outline-none transition",
+                            isDark
+                              ? "border-slate-700 bg-slate-900 text-white placeholder:text-slate-500"
+                              : "border-slate-200 bg-slate-50 text-slate-950 placeholder:text-slate-400",
+                          )}
+                          onChange={(event) => {
+                            setQuestionDraft((current) => ({ ...current, title: event.target.value }));
+                            if (questionFormErrors.title) {
+                              setQuestionFormErrors((prev) => ({ ...prev, title: null, submit: null }));
+                            }
+                          }}
+                          placeholder="e.g. How do I approach conflicting authorities in one memo?"
+                          type="text"
+                          value={questionDraft.title}
+                        />
+                        {questionFormErrors.title ? (
+                          <p className="mt-2 flex items-center gap-2 text-xs text-rose-500">
+                            <AlertCircle className="h-3.5 w-3.5" />
+                            {questionFormErrors.title}
+                          </p>
+                        ) : null}
+                      </label>
+
+                      <div>
+                        <RichTextEditor
+                          isDark={isDark}
+                          label="Details"
+                          minHeight={160}
+                          maxHeight={520}
+                          onChange={(value) => {
+                            setQuestionDraft((current) => ({ ...current, body: value }));
+                            if (questionFormErrors.body) {
+                              setQuestionFormErrors((prev) => ({ ...prev, body: null, submit: null }));
+                            }
+                          }}
+                          placeholder="Share enough context so other members can give a useful answer. Use headings, paragraphs, and lists to organise the content."
+                          value={questionDraft.body}
+                        />
+                        {questionFormErrors.body ? (
+                          <p className="mt-2 flex items-center gap-2 text-xs text-rose-500">
+                            <AlertCircle className="h-3.5 w-3.5" />
+                            {questionFormErrors.body}
+                          </p>
+                        ) : null}
+                      </div>
+
+                      <label className="space-y-1.5">
+                        <span className={cn("text-xs font-medium uppercase tracking-[0.2em]", isDark ? "text-slate-500" : "text-slate-500")}>Tags</span>
+                        <input
+                          className={cn(
+                            "w-full rounded-2xl border px-3.5 py-2 text-sm outline-none transition",
+                            isDark
+                              ? "border-slate-700 bg-slate-900 text-white placeholder:text-slate-500"
+                              : "border-slate-200 bg-slate-50 text-slate-950 placeholder:text-slate-400",
+                          )}
+                          onChange={(event) => {
+                            setQuestionDraft((current) => ({ ...current, tags: event.target.value }));
+                            if (questionFormErrors.tags) {
+                              setQuestionFormErrors((prev) => ({ ...prev, tags: null, submit: null }));
+                            }
+                          }}
+                          placeholder="legal-analysis, notes, workflow"
+                          type="text"
+                          value={questionDraft.tags}
+                        />
+                        {questionFormErrors.tags ? (
+                          <p className="mt-2 flex items-center gap-2 text-xs text-rose-500">
+                            <AlertCircle className="h-3.5 w-3.5" />
+                            {questionFormErrors.tags}
+                          </p>
+                        ) : null}
+                      </label>
+
+                      {questionFormErrors.submit ? (
+                        <div className="flex items-start gap-2 rounded-xl border border-rose-300/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-500">
+                          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                          <p>{questionFormErrors.submit}</p>
+                        </div>
+                      ) : null}
+
+                      <div className="flex items-center justify-end gap-2.5 pt-2">
+                        <button
+                          className={cn(
+                            "inline-flex h-10 items-center justify-center rounded-full border px-5 text-sm font-semibold transition",
+                            isDark
+                              ? "border-slate-700 bg-slate-900 text-slate-200 hover:border-slate-600 hover:bg-slate-800"
+                              : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50",
+                          )}
+                          onClick={() => setIsAskModalOpen(false)}
+                          type="button"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          className="connect-ask-button"
+                          disabled={createQuestionMutation.isPending}
+                          type="submit"
+                        >
+                          {createQuestionMutation.isPending ? "Publishing..." : "Publish question"}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
               </div>
-            </form>
-          </div>
-        </div>
-      ) : null}
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
