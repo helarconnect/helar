@@ -11,7 +11,7 @@ import {
   Strikethrough,
   Underline
 } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { cn } from '@/lib/utils'
 
@@ -43,17 +43,97 @@ export function RichTextEditor({
   const editorRef = useRef<HTMLDivElement | null>(null)
   const colorInputRef = useRef<HTMLInputElement | null>(null)
   const selectionRef = useRef<Range | null>(null)
+  // Guards the useEffect sync from overwriting user's mid-keystroke DOM with a stale value prop.
+  const lastAppliedValueRef = useRef<string>('')
+  const [, forceMount] = useState(0)
 
   useEffect(() => {
-    if (!editorRef.current || editorRef.current.innerHTML === value) {
+    const node = editorRef.current
+    if (!node) {
       return
     }
 
-    editorRef.current.innerHTML = value
+    // Only overwrite DOM when value actually differs from both current innerHTML and
+    // the last value we programmatically wrote. This prevents a sync loop:
+    // user types → onChange → parent updates value → useEffect matches lastAppliedValueRef → no-op.
+    const normalizedIncoming = value ?? ''
+    if (node.innerHTML === normalizedIncoming || lastAppliedValueRef.current === normalizedIncoming) {
+      return
+    }
+
+    // Preserve caret position on external sync (e.g., modal re-opened with previous draft).
+    let offset = 0
+    let wasFocused = false
+    if (document.activeElement === node) {
+      wasFocused = true
+      const sel = window.getSelection()
+      if (sel && sel.rangeCount > 0 && node.contains(sel.anchorNode)) {
+        const range = sel.getRangeAt(0)
+        const preRange = document.createRange()
+        preRange.selectNodeContents(node)
+        preRange.setEnd(range.endContainer, range.endOffset)
+        offset = preRange.toString().length
+      }
+    }
+
+    node.innerHTML = normalizedIncoming
+    lastAppliedValueRef.current = normalizedIncoming
+
+    if (wasFocused) {
+      focusEditor()
+      restoreTextOffset(node, offset)
+    }
+    // Force re-evaluation of the placeholder computed from `value` when syncing externally.
+    forceMount((n) => n + 1)
   }, [value])
 
   function focusEditor() {
-    editorRef.current?.focus()
+    const node = editorRef.current
+    if (!node) return
+    node.focus({ preventScroll: true })
+    // If empty, ensure the caret sits inside a paragraph so typed text inherits prose styles.
+    if (!node.textContent && node.innerHTML.replace(/<br\s*\/?>/gi, '').trim() === '') {
+      node.innerHTML = ''
+      const p = document.createElement('p')
+      const br = document.createElement('br')
+      p.appendChild(br)
+      node.appendChild(p)
+      const range = document.createRange()
+      range.selectNodeContents(p)
+      range.collapse(true)
+      const sel = window.getSelection()
+      sel?.removeAllRanges()
+      sel?.addRange(range)
+    }
+  }
+
+  function restoreTextOffset(node: HTMLElement, offset: number) {
+    const sel = window.getSelection()
+    if (!sel) return
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT)
+    let current: Node | null
+    let remaining = offset
+    let target: Node | null = null
+    let targetOffset = 0
+    while ((current = walker.nextNode())) {
+      const text = (current as Text).data ?? ''
+      if (remaining <= text.length) {
+        target = current
+        targetOffset = remaining
+        break
+      }
+      remaining -= text.length
+    }
+    const range = document.createRange()
+    if (target) {
+      range.setStart(target, targetOffset)
+    } else {
+      range.selectNodeContents(node)
+      range.collapse(false)
+    }
+    range.collapse(true)
+    sel.removeAllRanges()
+    sel.addRange(range)
   }
 
   function saveSelection() {
@@ -98,10 +178,23 @@ export function RichTextEditor({
       return
     }
 
+    // Before any toolbar command, capture selection (toolbar buttons will steal focus on click).
+    saveSelection()
     focusEditor()
-    restoreSelection()
+    // Only restore if the previously saved selection is still valid within the editor.
+    const currentSel = window.getSelection()
+    if (currentSel && currentSel.rangeCount > 0 && editorRef.current?.contains(currentSel.anchorNode)) {
+      // User already has focus inside editor — no stale restore.
+    } else {
+      restoreSelection()
+    }
     document.execCommand(command, false, commandValue)
+    // Wrap edited HTML in a paragraph if needed to keep prose styles.
+    if (editorRef.current && editorRef.current.innerHTML.trim() === '') {
+      editorRef.current.innerHTML = '<p><br></p>'
+    }
     onChange(editorRef.current.innerHTML)
+    lastAppliedValueRef.current = editorRef.current.innerHTML
   }
 
   function insertLink() {
@@ -222,6 +315,16 @@ export function RichTextEditor({
         <div
           className={cn('relative overflow-y-auto', maxHeight ? 'max-h-[var(--editor-max-height)]' : undefined, readOnly ? 'cursor-default' : 'cursor-text')}
           onClick={readOnly ? undefined : focusEditor}
+          onMouseDown={(event) => {
+            // Clicking inside the editor scroll container but outside the contentEditable (e.g.
+            // dead space next to prose box) should still focus into contentEditable. Prevent the
+            // wrapper div from swallowing the native selection placement.
+            if (readOnly) return
+            if (event.target === event.currentTarget || !editorRef.current?.contains(event.target as Node)) {
+              event.preventDefault()
+              focusEditor()
+            }
+          }}
           style={
             maxHeight
               ? ({
@@ -232,22 +335,35 @@ export function RichTextEditor({
           }
         >
           {isEmpty ? (
-            <div className={cn('pointer-events-none absolute left-4 top-4 text-sm', isDark ? 'text-slate-500' : 'text-slate-400')}>
+            <div className={cn('pointer-events-none absolute left-4 top-4 text-sm select-none', isDark ? 'text-slate-500' : 'text-slate-400')}>
               {placeholder}
             </div>
           ) : null}
           <div
             aria-label={label}
             className={cn(
-              'rich-text-content prose prose-sm max-w-none px-4 py-3 leading-7 outline-none',
+              'rich-text-content prose prose-sm max-w-none px-4 py-3 leading-7 outline-none min-h-[inherit]',
               isDark ? 'prose-invert text-slate-200' : 'text-slate-900',
               readOnly ? 'pointer-events-none select-text' : '',
             )}
             contentEditable={!readOnly}
-            onInput={readOnly ? undefined : (event) => onChange(event.currentTarget.innerHTML)}
+            onBlur={() => {
+              // Save latest selection when focus leaves (toolbar clicks will rely on this)
+              if (!readOnly) saveSelection()
+            }}
+            onInput={
+              readOnly
+                ? undefined
+                : (event) => {
+                    const nextHtml = event.currentTarget.innerHTML
+                    lastAppliedValueRef.current = nextHtml
+                    onChange(nextHtml)
+                  }
+            }
             onKeyUp={readOnly ? undefined : saveSelection}
             onMouseUp={readOnly ? undefined : saveSelection}
             ref={editorRef}
+            spellCheck
             suppressContentEditableWarning
             tabIndex={readOnly ? -1 : 0}
           />

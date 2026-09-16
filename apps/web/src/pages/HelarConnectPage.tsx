@@ -512,7 +512,7 @@ export function HelarConnectPage() {
           </h2>
           {isExpanded ? (
             <div
-              className="rich-text-content prose prose-sm max-w-none leading-7 text-slate-800"
+              className="rich-text-content prose prose-invert prose-sm max-w-none leading-7 text-slate-100"
               dangerouslySetInnerHTML={{ __html: question.body }}
             />
           ) : (
@@ -590,7 +590,7 @@ export function HelarConnectPage() {
                     <div className="connect-comment-card" key={answer.id}>
                       <strong>{answer.author.name}</strong>
                       <div
-                        className="rich-text-content prose prose-sm max-w-none leading-7 text-slate-800"
+                        className="rich-text-content prose prose-invert prose-sm max-w-none leading-7 text-slate-100"
                         dangerouslySetInnerHTML={{ __html: answer.body }}
                       />
                       {isModerator ? (
@@ -613,6 +613,7 @@ export function HelarConnectPage() {
                   <div className="connect-comment-grid">
                     <input readOnly type="text" value={isAuthenticated ? currentUserName : "Authentication required"} />
                     <RichTextEditor
+                      isDark={true}
                       minHeight={120}
                       onChange={(value) => setAnswerDrafts((current) => ({ ...current, [question.id]: value }))}
                       placeholder={isAuthenticated ? "Write a helpful answer..." : "Log in to answer this question."}
@@ -639,7 +640,7 @@ export function HelarConnectPage() {
                     <div className="connect-comment-card" key={comment.id}>
                       <strong>{comment.author.name}</strong>
                       <div
-                        className="rich-text-content prose prose-sm max-w-none leading-7 text-slate-800"
+                        className="rich-text-content prose prose-invert prose-sm max-w-none leading-7 text-slate-100"
                         dangerouslySetInnerHTML={{ __html: comment.body }}
                       />
                       {isModerator ? (
@@ -662,6 +663,7 @@ export function HelarConnectPage() {
                   <div className="connect-comment-grid">
                     <input readOnly type="text" value={isAuthenticated ? currentUserName : "Authentication required"} />
                     <RichTextEditor
+                      isDark={true}
                       minHeight={96}
                       onChange={(value) => setCommentDrafts((current) => ({ ...current, [question.id]: value }))}
                       placeholder={isAuthenticated ? "Share your comment..." : "Log in to comment on this discussion."}
@@ -955,6 +957,7 @@ export function HelarConnectPage() {
               <label>
                 Details
                 <RichTextEditor
+                  isDark={true}
                   label=""
                   minHeight={160}
                   onChange={(value) => {
