@@ -19,6 +19,7 @@ import { SocialLinks } from "@/components/layout/SocialLinks";
 import { fetchLatestPublications, type LatestPublicationItem } from "@/lib/catalog-api";
 import { fetchHelarConnectQuestionsPublic, type HelarConnectSnapshot } from "@/lib/connect-api";
 import { formatDateDMY } from "@/lib/date";
+import { buildPlainTextExcerpt } from "@/lib/utils";
 
 type ImageSize =
   | "square_hd"
@@ -611,13 +612,13 @@ export function LandingPage() {
                         >
                           <Link className="block" to={href}>
                             <p className="font-semibold text-white">{question.title}</p>
-                            <p className="mt-2 text-sm leading-6 text-white/70">{question.excerpt}</p>
+                            <p className="mt-2 text-sm leading-6 text-white/70">{buildPlainTextExcerpt(question.excerpt)}</p>
                           </Link>
                           <div className="mt-4 flex items-center justify-end">
                             <ShareButton
                               buttonLabel="Share"
                               size="sm"
-                              text={question.excerpt}
+                              text={buildPlainTextExcerpt(question.excerpt)}
                               title={question.title}
                               url={shareUrl}
                               variant="ghost"

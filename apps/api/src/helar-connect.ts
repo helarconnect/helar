@@ -5,8 +5,49 @@ import { containsText } from "./lib/text-search.js";
 
 // --- Case-insensitive + punctuation-tolerant search helpers (same semantics as portal-search) ---
 
+function decodeHtmlEntities(value: string): string {
+  if (!value) return "";
+  const replaced = value
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
+  return replaced
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/&#([0-9]+);/g, (_, dec) => String.fromCharCode(parseInt(dec, 10)));
+}
+
+// Produces human-readable plain text from a rich-text HTML string: strips script/style
+// blocks and any HTML tags, decodes HTML entities, collapses whitespace.
+// Used for excerpt previews and share-text payloads so raw <div>/<p> tags never leak into
+// collapsed card previews the user sees.
+function stripHtml(value: string): string {
+  return value
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function stripHtmlForSearch(value: string): string {
-  return value.replace(/<[^>]+>/g, " ");
+  return stripHtml(value);
+}
+
+// Builds a plain-text preview excerpt of at most `maxLength` characters from a rich-text
+// HTML body, stripping HTML tags + decoding entities so collapsed card previews and share
+// buttons never render raw markup like `<div><br></div>` to the user.
+function buildHtmlExcerpt(bodyHtml: string, maxLength = 220): string {
+  const plain = stripHtml(decodeHtmlEntities(bodyHtml ?? ""));
+  if (plain.length <= maxLength) return plain;
+  const sliced = plain.slice(0, maxLength);
+  const lastSpace = sliced.lastIndexOf(" ");
+  if (lastSpace > maxLength * 0.75) {
+    return `${sliced.slice(0, lastSpace)}…`;
+  }
+  return `${sliced}…`;
 }
 
 function normalizeConnectSearchText(value: string): string {
@@ -336,7 +377,7 @@ export async function listHelarConnectQuestions(
           updatedAt: comment.updatedAt.toISOString()
         })),
         createdAt: item.createdAt.toISOString(),
-        excerpt: item.body.slice(0, 220),
+        excerpt: buildHtmlExcerpt(item.body, 220),
         id: item.id,
         tags: item.tags,
         title: item.title,

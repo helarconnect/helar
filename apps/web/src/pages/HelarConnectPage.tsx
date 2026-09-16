@@ -34,7 +34,7 @@ import {
   type HelarConnectSort
 } from "@/lib/connect-api";
 import { queryKeys } from "@/lib/query-keys";
-import { canModerateHelarConnect, cn } from "@/lib/utils";
+import { buildPlainTextExcerpt, canModerateHelarConnect, cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth-store";
 
 const leftNavigation: Array<{
@@ -519,7 +519,7 @@ export function HelarConnectPage() {
               dangerouslySetInnerHTML={{ __html: question.body }}
             />
           ) : (
-            <p>{question.excerpt}</p>
+            <p>{buildPlainTextExcerpt(question.excerpt)}</p>
           )}
 
           <div className="connect-tag-row">
@@ -543,7 +543,7 @@ export function HelarConnectPage() {
               buttonClassName="connect-engagement-button"
               buttonLabel="Share"
               size="sm"
-              text={question.excerpt}
+              text={buildPlainTextExcerpt(question.excerpt)}
               title={question.title}
               url={shareUrl}
               variant="ghost"
