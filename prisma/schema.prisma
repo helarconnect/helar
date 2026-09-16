@@ -317,19 +317,20 @@ model SubscriptionPlan {
 }
 
 model Subscription {
-  id         String             @id @default(auto()) @map("_id") @db.ObjectId
-  userId     String             @db.ObjectId
-  planId     String             @db.ObjectId
-  status     SubscriptionStatus
-  startsAt   DateTime
-  endsAt     DateTime?
-  autoRenew  Boolean            @default(true)
-  createdAt  DateTime           @default(now())
-  updatedAt  DateTime           @updatedAt
-  deletedAt  DateTime?
-  user       User               @relation(fields: [userId], references: [id])
-  plan       SubscriptionPlan   @relation(fields: [planId], references: [id])
-  payments   Payment[]
+  id               String             @id @default(auto()) @map("_id") @db.ObjectId
+  userId           String             @db.ObjectId
+  planId           String             @db.ObjectId
+  status           SubscriptionStatus
+  startsAt         DateTime
+  endsAt           DateTime?
+  autoRenew        Boolean            @default(true)
+  notificationFlags Json?             @default("{}")
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  deletedAt        DateTime?
+  user             User               @relation(fields: [userId], references: [id])
+  plan             SubscriptionPlan   @relation(fields: [planId], references: [id])
+  payments         Payment[]
 
   @@index([userId, createdAt])
   @@index([planId])

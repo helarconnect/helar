@@ -444,9 +444,9 @@ export function LandingPage() {
                 </Link>
                 <Link
                   className="inline-flex items-center justify-center gap-2 border border-white/18 bg-white/6 px-8 py-4 font-heading text-base text-white backdrop-blur-sm transition hover:bg-white/10 sm:justify-start"
-                  to="/app/dashboard"
+                  to="/auth/sign-up"
                 >
-                  Explore Library
+                  Register
                 </Link>
               </div>
           </div>

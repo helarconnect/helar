@@ -22,20 +22,22 @@ type ToolbarItem =
   | { command: 'createLink'; icon: any; label: string }
 
 export function RichTextEditor({
-  isDark,
+  isDark = false,
   label,
   minHeight,
   maxHeight,
   onChange,
   placeholder,
+  readOnly = false,
   value,
 }: {
-  isDark: boolean
-  label: string
+  isDark?: boolean
+  label?: string
   minHeight: number
   maxHeight?: number
   onChange: (value: string) => void
   placeholder: string
+  readOnly?: boolean
   value: string
 }) {
   const editorRef = useRef<HTMLDivElement | null>(null)
@@ -143,75 +145,83 @@ export function RichTextEditor({
 
   return (
     <div className="space-y-2">
-      <span className={cn('text-xs font-medium uppercase tracking-[0.18em]', isDark ? 'text-slate-500' : 'text-slate-500')}>
-        {label}
-      </span>
+      {label ? (
+        <span className={cn('text-xs font-medium uppercase tracking-[0.18em]', isDark ? 'text-slate-500' : 'text-slate-500')}>
+          {label}
+        </span>
+      ) : null}
       <div className={cn('rounded-[24px] border', isDark ? 'border-slate-700 bg-slate-900' : 'border-slate-200 bg-slate-50')}>
-        <div className={cn('flex flex-wrap gap-2 border-b px-3 py-2.5', isDark ? 'border-slate-700' : 'border-slate-200')}>
-          {toolbar.map((item) => {
-            if (item.command === 'formatBlock') {
+        {!readOnly ? (
+          <div className={cn('flex flex-wrap gap-2 border-b px-3 py-2.5', isDark ? 'border-slate-700' : 'border-slate-200')}>
+            {toolbar.map((item) => {
+              if (item.command === 'formatBlock') {
+                return (
+                  <button
+                    className={cn(
+                      'inline-flex h-9 items-center justify-center rounded-2xl border px-3 text-xs font-semibold transition',
+                      isDark
+                        ? 'border-slate-700 bg-slate-950 text-slate-200 hover:border-slate-600 hover:text-white'
+                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
+                    )}
+                    disabled={readOnly}
+                    key={`${item.command}-${item.value}`}
+                    onMouseDown={(event) => {
+                      event.preventDefault()
+                      if (!readOnly) applyCommand(item.command, item.value)
+                    }}
+                    title={item.label}
+                    type="button"
+                  >
+                    {item.label}
+                  </button>
+                )
+              }
+
+              const Icon = item.icon
               return (
                 <button
                   className={cn(
-                    'inline-flex h-9 items-center justify-center rounded-2xl border px-3 text-xs font-semibold transition',
+                    'inline-flex h-9 w-9 items-center justify-center rounded-2xl border transition disabled:cursor-not-allowed disabled:opacity-50',
                     isDark
                       ? 'border-slate-700 bg-slate-950 text-slate-200 hover:border-slate-600 hover:text-white'
                       : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
                   )}
-                  key={`${item.command}-${item.value}`}
+                  disabled={readOnly}
+                  key={`${item.command}-${item.label}`}
                   onMouseDown={(event) => {
                     event.preventDefault()
-                    applyCommand(item.command, item.value)
+                    if (readOnly) return
+                    if (item.command === 'foreColor') {
+                      saveSelection()
+                      colorInputRef.current?.click()
+                      return
+                    }
+                    if (item.command === 'createLink') {
+                      insertLink()
+                      return
+                    }
+                    applyCommand(item.command)
                   }}
                   title={item.label}
                   type="button"
                 >
-                  {item.label}
+                  <Icon className="h-4 w-4" />
                 </button>
               )
-            }
-
-            const Icon = item.icon
-            return (
-              <button
-                className={cn(
-                  'inline-flex h-9 w-9 items-center justify-center rounded-2xl border transition',
-                  isDark
-                    ? 'border-slate-700 bg-slate-950 text-slate-200 hover:border-slate-600 hover:text-white'
-                    : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
-                )}
-                key={`${item.command}-${item.label}`}
-                onMouseDown={(event) => {
-                  event.preventDefault()
-                  if (item.command === 'foreColor') {
-                    saveSelection()
-                    colorInputRef.current?.click()
-                    return
-                  }
-                  if (item.command === 'createLink') {
-                    insertLink()
-                    return
-                  }
-                  applyCommand(item.command)
-                }}
-                title={item.label}
-                type="button"
-              >
-                <Icon className="h-4 w-4" />
-              </button>
-            )
-          })}
-          <input
-            className="sr-only"
-            onChange={(event) => applyCommand('foreColor', event.target.value)}
-            ref={colorInputRef}
-            type="color"
-          />
-        </div>
+            })}
+            <input
+              className="sr-only"
+              disabled={readOnly}
+              onChange={(event) => applyCommand('foreColor', event.target.value)}
+              ref={colorInputRef}
+              type="color"
+            />
+          </div>
+        ) : null}
 
         <div
-          className={cn('relative cursor-text overflow-y-auto', maxHeight ? 'max-h-[var(--editor-max-height)]' : undefined)}
-          onClick={focusEditor}
+          className={cn('relative overflow-y-auto', maxHeight ? 'max-h-[var(--editor-max-height)]' : undefined, readOnly ? 'cursor-default' : 'cursor-text')}
+          onClick={readOnly ? undefined : focusEditor}
           style={
             maxHeight
               ? ({
@@ -231,14 +241,15 @@ export function RichTextEditor({
             className={cn(
               'rich-text-content prose prose-sm max-w-none px-4 py-3 leading-7 outline-none',
               isDark ? 'prose-invert text-slate-200' : 'text-slate-900',
+              readOnly ? 'pointer-events-none select-text' : '',
             )}
-            contentEditable
-            onInput={(event) => onChange(event.currentTarget.innerHTML)}
-            onKeyUp={saveSelection}
-            onMouseUp={saveSelection}
+            contentEditable={!readOnly}
+            onInput={readOnly ? undefined : (event) => onChange(event.currentTarget.innerHTML)}
+            onKeyUp={readOnly ? undefined : saveSelection}
+            onMouseUp={readOnly ? undefined : saveSelection}
             ref={editorRef}
             suppressContentEditableWarning
-            tabIndex={0}
+            tabIndex={readOnly ? -1 : 0}
           />
         </div>
       </div>

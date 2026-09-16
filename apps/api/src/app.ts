@@ -9,7 +9,7 @@ import { Prisma } from "@prisma/client";
 import type { NextFunction, Request, Response } from "express";
 import { z } from "zod";
 
-import { sendContactEmail, sendPasswordResetEmail, sendRegistrationVerificationEmails } from "./lib/email.js";
+import { sendContactEmail, sendPasswordResetEmail, sendRegistrationVerificationEmails, sendWelcomeEmail } from "./lib/email.js";
 import {
   appendAdminLibraryChunkBuffer,
   clearAdminLibraryChunkBuffer,
@@ -1361,6 +1361,8 @@ async function persistRegister(payload: z.infer<typeof registerSchema>) {
   const emailVerificationToken = createEmailVerificationToken(createdSession.user.id, createdSession.user.email);
   const emailVerificationUrl = createEmailVerificationUrl(emailVerificationToken);
   let verificationEmailStatus: "sent" | "skipped" | "failed" = "failed";
+  let welcomeEmailStatus: "sent" | "skipped" | "failed" = "failed";
+  const isAlreadyVerified = createdSession.user.emailVerifiedAt !== null;
 
   try {
     const result = await sendRegistrationVerificationEmails({
@@ -1375,13 +1377,32 @@ async function persistRegister(payload: z.infer<typeof registerSchema>) {
     verificationEmailStatus = "failed";
   }
 
+  try {
+    const publicWebBaseUrl = getPublicWebBaseUrl();
+    const signInUrl = `${publicWebBaseUrl}/auth/sign-in`;
+    const pricingUrl = `${publicWebBaseUrl}/pricing`;
+    const welcomeResult = await sendWelcomeEmail({
+      email: createdSession.user.email,
+      fullName: createdSession.user.fullName,
+      roleCodes: [payload.registrationRole],
+      signInUrl,
+      pricingUrl,
+      isAlreadyVerified
+    });
+    welcomeEmailStatus = welcomeResult.skipped ? "skipped" : "sent";
+  } catch (error) {
+    console.error("Failed to send welcome email:", error);
+    welcomeEmailStatus = "failed";
+  }
+
   return {
     status: 201 as const,
     body: {
       success: true,
       data: createSessionPayload(apiUser, createdSession.refreshToken),
       meta: {
-        verificationEmailStatus
+        verificationEmailStatus,
+        welcomeEmailStatus
       }
     }
   };

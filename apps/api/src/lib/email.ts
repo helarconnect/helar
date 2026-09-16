@@ -67,6 +67,32 @@ type SubscriptionActivationEmailInput = {
   endsAt: string | null;
 };
 
+export type WelcomeEmailInput = {
+  email: string;
+  fullName: string;
+  roleCodes: string[];
+  signInUrl: string;
+  pricingUrl: string;
+  isAlreadyVerified: boolean;
+};
+
+export type SubscriptionExpiringSoonEmailInput = {
+  email: string;
+  fullName: string;
+  planName: string;
+  endsAt: string;
+  daysRemaining: 7 | 3 | 1 | 0;
+  renewUrl: string;
+};
+
+export type SubscriptionExpiredEmailInput = {
+  email: string;
+  fullName: string;
+  planName: string;
+  endedAt: string;
+  renewUrl: string;
+};
+
 let hasLoggedMissingEmailConfig = false;
 
 type EmailTransportRecipient = string | { address?: string | null };
@@ -252,6 +278,31 @@ function assertEmailAccepted(
   }
 }
 
+function logSendResult(input: {
+  emailType: string;
+  to: string | string[];
+  subject: string;
+  accepted: string[];
+  rejected: string[];
+  skipped?: boolean;
+  error?: string;
+}) {
+  const toRecipients = Array.isArray(input.to) ? input.to : [input.to];
+  console.info(
+    JSON.stringify({
+      event: "email_send_result",
+      emailType: input.emailType,
+      to: toRecipients,
+      subject: input.subject,
+      accepted: input.accepted,
+      rejected: input.rejected,
+      skipped: input.skipped ?? false,
+      error: input.error ?? null,
+      timestamp: new Date().toISOString()
+    })
+  );
+}
+
 function prettifyRoleCode(roleCode: string) {
   return roleCode
     .split(/[_\s-]+/)
@@ -299,11 +350,11 @@ function getGoogleMailConfig(): GoogleMailConfig | null {
       fromEmail,
     appPassword: appPassword || undefined,
     fromEmail,
-    fromName: process.env.MAIL_FROM_NAME?.trim() || "Helar",
+    fromName: process.env.MAIL_FROM_NAME?.trim() || "Helar Support",
     clientId: process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() || DEFAULT_GOOGLE_OAUTH_CLIENT_ID,
     clientSecret,
     refreshToken,
-    replyTo: process.env.MAIL_REPLY_TO?.trim() || undefined,
+    replyTo: process.env.MAIL_REPLY_TO?.trim() || fromEmail,
     smtpHost: smtpHost || undefined,
     smtpUser: smtpUser || undefined,
     smtpPort: Number.isFinite(smtpPort) ? smtpPort : undefined,
@@ -383,12 +434,12 @@ function buildProvisioningEmailHtml(input: AdminUserProvisioningEmailInput) {
 
   return `
     <div style="font-family: Arial, Helvetica, sans-serif; line-height: 1.6; color: #0f172a;">
-      <p>Hello ${input.fullName},</p>
+      <p>Hello ${escapeHtml(input.fullName)},</p>
       <p>Your Helar account has been created.</p>
       <p>
-        <strong>Email:</strong> ${input.email}<br />
-        <strong>Temporary password:</strong> ${input.password}<br />
-        <strong>Assigned roles:</strong> ${roleSummary}
+        <strong>Email:</strong> ${escapeHtml(input.email)}<br />
+        <strong>Temporary password:</strong> ${escapeHtml(input.password)}<br />
+        <strong>Assigned roles:</strong> ${escapeHtml(roleSummary)}
       </p>
       <p>Please sign in and change your password as soon as possible.</p>
       <p>Regards,<br />Helar</p>
@@ -570,21 +621,24 @@ function buildSubscriberSubscriptionText(input: SubscriptionActivationEmailInput
 }
 
 function buildSubscriberSubscriptionHtml(input: SubscriptionActivationEmailInput) {
-  return `
-    <div style="font-family: Arial, Helvetica, sans-serif; line-height: 1.6; color: #0f172a;">
-      <p>Hello ${input.fullName},</p>
-      <p>Your Helar subscription payment was successful.</p>
-      <p>
-        <strong>Plan:</strong> ${input.planName}<br />
-        <strong>Amount:</strong> ${formatMoney(input.amountMinor, input.currency)}<br />
-        <strong>Reference:</strong> ${input.reference}<br />
-        <strong>Starts at:</strong> ${formatDateTime(input.startsAt)}<br />
-        <strong>Ends at:</strong> ${formatDateTime(input.endsAt)}
-      </p>
-      <p>Thank you for subscribing to Helar.</p>
-      <p>Regards,<br />Helar</p>
-    </div>
-  `.trim();
+  return renderEmailLayout({
+    preheader: "Your Helar subscription payment was successful. Here are the details.",
+    eyebrow: "Subscription Active",
+    title: "Your subscription is active",
+    intro: `Hello ${input.fullName}, your Helar subscription payment was successful.`,
+    body: [
+      "Thank you for subscribing to Helar. Your subscription has been activated and you now have full access to all the features included in your plan.",
+      "You can review your subscription details, manage your plan, and update your billing information at any time from your account settings."
+    ],
+    details: [
+      { label: "Plan", value: input.planName },
+      { label: "Amount paid", value: formatMoney(input.amountMinor, input.currency) },
+      { label: "Payment reference", value: input.reference },
+      { label: "Starts on", value: formatDateTime(input.startsAt) },
+      { label: "Ends on", value: formatDateTime(input.endsAt) }
+    ],
+    footerNote: "Thank you for choosing Helar. Reply to this email if you need any assistance from our support team."
+  });
 }
 
 function buildAdminSubscriptionText(input: SubscriptionActivationEmailInput) {
@@ -602,20 +656,220 @@ function buildAdminSubscriptionText(input: SubscriptionActivationEmailInput) {
 }
 
 function buildAdminSubscriptionHtml(input: SubscriptionActivationEmailInput) {
-  return `
-    <div style="font-family: Arial, Helvetica, sans-serif; line-height: 1.6; color: #0f172a;">
-      <p>A Helar subscription has been activated.</p>
-      <p>
-        <strong>Subscriber:</strong> ${input.fullName}<br />
-        <strong>Subscriber email:</strong> ${input.email}<br />
-        <strong>Plan:</strong> ${input.planName}<br />
-        <strong>Amount:</strong> ${formatMoney(input.amountMinor, input.currency)}<br />
-        <strong>Reference:</strong> ${input.reference}<br />
-        <strong>Starts at:</strong> ${formatDateTime(input.startsAt)}<br />
-        <strong>Ends at:</strong> ${formatDateTime(input.endsAt)}
-      </p>
-    </div>
-  `.trim();
+  return renderEmailLayout({
+    preheader: `New subscription activated for ${input.fullName}.`,
+    eyebrow: "Subscription Alert",
+    title: "New subscription activated",
+    intro: "A Helar subscription has been successfully activated.",
+    body: [
+      "A new subscriber has completed payment and their subscription is now active.",
+      "Use the summary below for quick reference and follow up if needed."
+    ],
+    details: [
+      { label: "Subscriber name", value: input.fullName },
+      { label: "Subscriber email", value: input.email },
+      { label: "Plan", value: input.planName },
+      { label: "Amount", value: formatMoney(input.amountMinor, input.currency) },
+      { label: "Payment reference", value: input.reference },
+      { label: "Starts on", value: formatDateTime(input.startsAt) },
+      { label: "Ends on", value: formatDateTime(input.endsAt) }
+    ],
+    footerNote: "This notification was sent automatically by Helar to keep the operations inbox up to date."
+  });
+}
+
+function buildWelcomeEmailText(input: WelcomeEmailInput) {
+  const roleSummary = input.roleCodes.map(prettifyRoleCode).join(", ") || "User";
+  const lines = [
+    `Hello ${input.fullName},`,
+    "",
+    "Welcome to Helar — we're excited to have you on board.",
+    "",
+    "Helar is the modern study and reference workspace built for law students and lawyers in Nigeria.",
+    "",
+    "What you get with Helar:",
+    "  • Structured Law Reports & Cases — read the most important judgments with clear context",
+    "  • Subject Summaries (Cases & Ratios) — concise, exam-ready review for every subject",
+    "  • Bar Final past papers — MCQ and Theory with model answers",
+    "  • Helar Connect community — ask questions, share answers, and learn together",
+    "",
+    `Your account type: ${roleSummary}`,
+    ""
+  ];
+
+  if (!input.isAlreadyVerified) {
+    lines.push("Next steps:");
+    lines.push("  1. Check your inbox for the separate email verification link and click it to activate your account.");
+    lines.push("  2. Sign in and explore the Library to start reading.");
+    lines.push(`  3. Review the pricing page (${input.pricingUrl}) to unlock the full premium experience.`);
+  } else {
+    lines.push("Next steps:");
+    lines.push("  1. Sign in and explore the Library to start reading.");
+    lines.push(`  2. Review the pricing page (${input.pricingUrl}) to unlock the full premium experience.`);
+    lines.push("  3. Join a discussion on Helar Connect or introduce yourself to the community.");
+  }
+
+  lines.push("");
+  lines.push(`Sign in to Helar: ${input.signInUrl}`);
+  lines.push("");
+  lines.push("If you have any questions, reply to this email or contact support@helar.law — we're happy to help.");
+  lines.push("");
+  lines.push("Regards,");
+  lines.push("The Helar Team");
+
+  return lines.join("\n");
+}
+
+function buildWelcomeEmailHtml(input: WelcomeEmailInput) {
+  const roleSummary = input.roleCodes.map(prettifyRoleCode).join(", ") || "User";
+  const firstName = input.fullName.trim().split(/\s+/)[0] ?? input.fullName.trim();
+
+  const nextStepsBody = input.isAlreadyVerified
+    ? [
+        "Your account is active and ready. Here's how to get the most out of Helar:",
+        "Sign in below and explore the Library to start reading structured Law Reports. If you'd like to unlock the full premium library, Subject Summaries, Bar Final past papers with model answers, and CBT practice, visit the Pricing page."
+      ]
+    : [
+        "Good news: we've also sent a separate email verification link to your inbox. Click the link in that email to fully activate your account.",
+        "Once your email is verified, sign in below to explore the Library, browse Subject Summaries, and join the Helar Connect community. To unlock the full premium library, Bar Final past papers, CBT practice tools, and more, visit Pricing."
+      ];
+
+  return renderEmailLayout({
+    preheader: "Your Helar legal learning workspace is ready. Welcome aboard.",
+    eyebrow: "Welcome aboard",
+    title: `Welcome to Helar, ${firstName} 👋`,
+    intro: `Hello ${input.fullName}, we're excited to have you as part of the Helar community.`,
+    body: nextStepsBody,
+    ctaLabel: "Sign in to Helar",
+    ctaUrl: input.signInUrl,
+    details: [
+      { label: "Registered email", value: input.email },
+      { label: "Account type", value: roleSummary },
+      { label: "Next step", value: input.isAlreadyVerified ? "Sign in and explore the Library" : "Verify your email, then sign in" },
+      { label: "Pricing & plans", value: input.pricingUrl }
+    ],
+    footerNote: "Need help getting started? Reply to this email or reach out to support@helar.law — we usually reply within one business day."
+  });
+}
+
+function getExpiringSoonSubject(daysRemaining: 7 | 3 | 1 | 0) {
+  if (daysRemaining === 7) {
+    return "Your Helar subscription expires in 7 days — renew early";
+  }
+  if (daysRemaining === 3) {
+    return "Heads up: your Helar subscription ends in 3 days";
+  }
+  if (daysRemaining === 1) {
+    return "Reminder: your Helar subscription expires tomorrow";
+  }
+  return "Last chance: your Helar subscription expires today";
+}
+
+function getExpiredSubject() {
+  return "Your Helar subscription has expired — renew to restore access";
+}
+
+function buildSubscriptionExpiringSoonText(input: SubscriptionExpiringSoonEmailInput) {
+  const lines = [
+    `Hello ${input.fullName},`,
+    "",
+    `Your Helar ${input.planName} subscription is expiring soon.`,
+    ""
+  ];
+
+  if (input.daysRemaining <= 0) {
+    lines.push("Your subscription ends today.");
+  } else if (input.daysRemaining === 1) {
+    lines.push("Your subscription ends tomorrow.");
+  } else {
+    lines.push(`Your subscription ends in ${input.daysRemaining} days.`);
+  }
+
+  lines.push("");
+  lines.push(`Plan: ${input.planName}`);
+  lines.push(`Ends on: ${formatDateTime(input.endsAt)}`);
+  lines.push("");
+  lines.push(`Renew now to keep your access: ${input.renewUrl}`);
+  lines.push("");
+  lines.push("If you have any questions, reply to this email and our support team will help.");
+  lines.push("");
+  lines.push("Regards,");
+  lines.push("Helar Support");
+
+  return lines.join("\n");
+}
+
+function buildSubscriptionExpiringSoonHtml(input: SubscriptionExpiringSoonEmailInput) {
+  const urgencyNote =
+    input.daysRemaining <= 0
+      ? "Your subscription ends today — renew now to avoid losing premium access to the library, Bar materials, and CBT tools."
+      : input.daysRemaining === 1
+      ? "Your subscription ends tomorrow — renew now to avoid interruption."
+      : `Your subscription ends in ${input.daysRemaining} days — renew early to keep your premium access uninterrupted.`;
+
+  const subjectLine = getExpiringSoonSubject(input.daysRemaining);
+
+  return renderEmailLayout({
+    preheader: subjectLine,
+    eyebrow: "Subscription Reminder",
+    title: subjectLine,
+    intro: `Hello ${input.fullName}, a quick heads-up about your Helar subscription.`,
+    body: [
+      urgencyNote,
+      "On expiry your access to premium Law Reports, Subject Summaries, Bar Final past papers, and premium Helar Connect tools will be restricted."
+    ],
+    ctaLabel: "Renew subscription now",
+    ctaUrl: input.renewUrl,
+    details: [
+      { label: "Plan", value: input.planName },
+      { label: "Expiry date", value: formatDateTime(input.endsAt) }
+    ],
+    footerNote: "Need help with your renewal? Reply to this email or contact support@helar.law."
+  });
+}
+
+function buildSubscriptionExpiredText(input: SubscriptionExpiredEmailInput) {
+  const lines = [
+    `Hello ${input.fullName},`,
+    "",
+    `Your Helar ${input.planName} subscription has ended.`,
+    "",
+    `Plan: ${input.planName}`,
+    `Ended on: ${formatDateTime(input.endedAt)}`,
+    "",
+    "Access to premium features including the full Law Reports library, Subject Summaries, Bar Final past papers, CBT practice, and premium Helar Connect tools is currently restricted.",
+    "",
+    `Renew now to restore full access: ${input.renewUrl}`,
+    "",
+    "If you have any questions, reply to this email and our support team will help.",
+    "",
+    "Regards,",
+    "Helar Support"
+  ];
+
+  return lines.join("\n");
+}
+
+function buildSubscriptionExpiredHtml(input: SubscriptionExpiredEmailInput) {
+  const subjectLine = getExpiredSubject();
+
+  return renderEmailLayout({
+    preheader: subjectLine,
+    eyebrow: "Subscription Ended",
+    title: "Your subscription has expired",
+    intro: `Hello ${input.fullName}, your Helar ${input.planName} subscription has ended.`,
+    body: [
+      "Your access to premium features is currently restricted. This includes the full Law Reports library, Subject Summaries (Cases & Ratios), Bar Final past papers with model answers, CBT practice tools, and premium Helar Connect perks.",
+      "Renewing your subscription will immediately restore full access so you can pick up right where you left off."
+    ],
+    ctaLabel: "Renew subscription",
+    ctaUrl: input.renewUrl,
+    details: [
+      { label: "Plan", value: input.planName },
+      { label: "Expired on", value: formatDateTime(input.endedAt) }
+    ],
+    footerNote: "Need a custom plan or have questions about renewal? Reply to this email or contact support@helar.law."
+  });
 }
 
 function createGoogleTransport(config: GoogleMailConfig) {
@@ -662,6 +916,8 @@ export function isGoogleOAuthEmailConfigured() {
 
 export async function sendAdminUserProvisioningEmail(input: AdminUserProvisioningEmailInput) {
   const config = getGoogleMailConfig();
+  const subject = "Your Helar account has been created";
+  const emailType = "admin_user_provisioning";
 
   if (!config) {
     if (!hasLoggedMissingEmailConfig) {
@@ -671,26 +927,58 @@ export async function sendAdminUserProvisioningEmail(input: AdminUserProvisionin
       );
     }
 
+    logSendResult({
+      emailType,
+      to: input.email,
+      subject,
+      accepted: [],
+      rejected: [],
+      skipped: true
+    });
+
     return { skipped: true as const };
   }
 
   const transporter = createGoogleTransport(config);
+  try {
+    const result = await transporter.sendMail(
+      buildTransactionalMailOptions({
+        config,
+        to: input.email,
+        subject,
+        text: buildProvisioningEmailText(input),
+        html: buildProvisioningEmailHtml(input)
+      })
+    );
 
-  await transporter.sendMail(
-    buildTransactionalMailOptions({
-      config,
+    logSendResult({
+      emailType,
       to: input.email,
-      subject: "Your Helar account has been created",
-      text: buildProvisioningEmailText(input),
-      html: buildProvisioningEmailHtml(input)
-    })
-  );
+      subject,
+      accepted: normalizeRecipients(result.accepted),
+      rejected: getRejectedRecipients(result)
+    });
 
-  return { skipped: false as const };
+    return { skipped: false as const };
+  } catch (error) {
+    logSendResult({
+      emailType,
+      to: input.email,
+      subject,
+      accepted: [],
+      rejected: [],
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return { skipped: false as const, error: true as const };
+  }
 }
 
 export async function sendRegistrationVerificationEmails(input: RegistrationVerificationEmailInput) {
   const config = getGoogleMailConfig();
+  const userSubject = "Verify your Helar account";
+  const adminSubject = "New Helar user registration";
+  const userEmailType = "registration_verification_user";
+  const adminEmailType = "registration_verification_admin";
 
   if (!config) {
     if (!hasLoggedMissingEmailConfig) {
@@ -700,49 +988,99 @@ export async function sendRegistrationVerificationEmails(input: RegistrationVeri
       );
     }
 
+    logSendResult({
+      emailType: userEmailType,
+      to: input.email,
+      subject: userSubject,
+      accepted: [],
+      rejected: [],
+      skipped: true
+    });
+
     return { skipped: true as const };
   }
 
   const transporter = createGoogleTransport(config);
-  const userEmailResult = await transporter.sendMail(
-    buildTransactionalMailOptions({
-      config,
-      to: input.email,
-      subject: "Verify your Helar account",
-      text: buildRegistrationVerificationText(input),
-      html: buildRegistrationVerificationHtml(input)
-    })
-  );
-
-  assertEmailAccepted(userEmailResult, input.email, "User verification");
-
-  let adminEmailResult:
-    | EmailTransportResult
-    | undefined;
-
-  if (config.adminNotificationEmail) {
-    adminEmailResult = await transporter.sendMail(
+  let userAccepted: string[] = [];
+  try {
+    const userEmailResult = await transporter.sendMail(
       buildTransactionalMailOptions({
         config,
-        to: config.adminNotificationEmail,
-        subject: "New Helar user registration",
-        text: buildAdminRegistrationNotificationText(input),
-        html: buildAdminRegistrationNotificationHtml(input)
+        to: input.email,
+        subject: userSubject,
+        text: buildRegistrationVerificationText(input),
+        html: buildRegistrationVerificationHtml(input)
       })
     );
 
-    assertEmailAccepted(adminEmailResult, config.adminNotificationEmail, "Admin registration notification");
+    assertEmailAccepted(userEmailResult, input.email, "User verification");
+
+    logSendResult({
+      emailType: userEmailType,
+      to: input.email,
+      subject: userSubject,
+      accepted: normalizeRecipients(userEmailResult.accepted),
+      rejected: getRejectedRecipients(userEmailResult)
+    });
+    userAccepted = normalizeRecipients(userEmailResult.accepted);
+  } catch (error) {
+    logSendResult({
+      emailType: userEmailType,
+      to: input.email,
+      subject: userSubject,
+      accepted: [],
+      rejected: [],
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+
+  let adminAccepted: string[] = [];
+
+  if (config.adminNotificationEmail) {
+    try {
+      const adminEmailResult = await transporter.sendMail(
+        buildTransactionalMailOptions({
+          config,
+          to: config.adminNotificationEmail,
+          subject: adminSubject,
+          text: buildAdminRegistrationNotificationText(input),
+          html: buildAdminRegistrationNotificationHtml(input)
+        })
+      );
+
+      assertEmailAccepted(adminEmailResult, config.adminNotificationEmail, "Admin registration notification");
+
+      logSendResult({
+        emailType: adminEmailType,
+        to: config.adminNotificationEmail,
+        subject: adminSubject,
+        accepted: normalizeRecipients(adminEmailResult.accepted),
+        rejected: getRejectedRecipients(adminEmailResult)
+      });
+      adminAccepted = normalizeRecipients(adminEmailResult.accepted);
+    } catch (error) {
+      logSendResult({
+        emailType: adminEmailType,
+        to: config.adminNotificationEmail,
+        subject: adminSubject,
+        accepted: [],
+        rejected: [],
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
   }
 
   return {
     skipped: false as const,
-    adminAccepted: normalizeRecipients(adminEmailResult?.accepted),
-    userAccepted: normalizeRecipients(userEmailResult.accepted)
+    adminAccepted,
+    userAccepted
   };
 }
 
 export async function sendPasswordResetEmail(input: PasswordResetEmailInput) {
   const config = getGoogleMailConfig();
+  const subject = "Reset your Helar password";
+  const emailType = "password_reset";
 
   if (!config) {
     if (!hasLoggedMissingEmailConfig) {
@@ -752,30 +1090,62 @@ export async function sendPasswordResetEmail(input: PasswordResetEmailInput) {
       );
     }
 
+    logSendResult({
+      emailType,
+      to: input.email,
+      subject,
+      accepted: [],
+      rejected: [],
+      skipped: true
+    });
+
     return { skipped: true as const };
   }
 
   const transporter = createGoogleTransport(config);
-  const userEmailResult = await transporter.sendMail(
-    buildTransactionalMailOptions({
-      config,
+  try {
+    const userEmailResult = await transporter.sendMail(
+      buildTransactionalMailOptions({
+        config,
+        to: input.email,
+        subject,
+        text: buildPasswordResetText(input),
+        html: buildPasswordResetHtml(input)
+      })
+    );
+
+    assertEmailAccepted(userEmailResult, input.email, "Password reset");
+
+    logSendResult({
+      emailType,
       to: input.email,
-      subject: "Reset your Helar password",
-      text: buildPasswordResetText(input),
-      html: buildPasswordResetHtml(input)
-    })
-  );
+      subject,
+      accepted: normalizeRecipients(userEmailResult.accepted),
+      rejected: getRejectedRecipients(userEmailResult)
+    });
 
-  assertEmailAccepted(userEmailResult, input.email, "Password reset");
-
-  return {
-    skipped: false as const,
-    userAccepted: normalizeRecipients(userEmailResult.accepted)
-  };
+    return {
+      skipped: false as const,
+      userAccepted: normalizeRecipients(userEmailResult.accepted)
+    };
+  } catch (error) {
+    logSendResult({
+      emailType,
+      to: input.email,
+      subject,
+      accepted: [],
+      rejected: [],
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return { skipped: false as const, error: true as const, userAccepted: [] };
+  }
 }
 
 export async function sendContactEmail(input: ContactEmailInput) {
   const config = getGoogleMailConfig();
+  const subject = `Helar contact: ${input.subject}`;
+  const emailType = "contact_form";
+  const recipient = process.env.CONTACT_TO_EMAIL?.trim() || "info@helar.law";
 
   if (!config) {
     if (!hasLoggedMissingEmailConfig) {
@@ -785,33 +1155,65 @@ export async function sendContactEmail(input: ContactEmailInput) {
       );
     }
 
+    logSendResult({
+      emailType,
+      to: recipient,
+      subject,
+      accepted: [],
+      rejected: [],
+      skipped: true
+    });
+
     return { skipped: true as const };
   }
 
-  const recipient = process.env.CONTACT_TO_EMAIL?.trim() || "info@helar.law";
   const transporter = createGoogleTransport(config);
-  const mail = buildTransactionalMailOptions({
-    config,
-    to: recipient,
-    subject: `Helar contact: ${input.subject}`,
-    text: buildContactEmailText(input),
-    html: buildContactEmailHtml(input)
-  });
-  const result = await transporter.sendMail({
-    ...mail,
-    replyTo: input.email
-  });
+  try {
+    const mail = buildTransactionalMailOptions({
+      config,
+      to: recipient,
+      subject,
+      text: buildContactEmailText(input),
+      html: buildContactEmailHtml(input)
+    });
+    const result = await transporter.sendMail({
+      ...mail,
+      replyTo: input.email
+    });
 
-  assertEmailAccepted(result, recipient, "Contact form");
+    assertEmailAccepted(result, recipient, "Contact form");
 
-  return {
-    skipped: false as const,
-    accepted: normalizeRecipients(result.accepted)
-  };
+    logSendResult({
+      emailType,
+      to: recipient,
+      subject,
+      accepted: normalizeRecipients(result.accepted),
+      rejected: getRejectedRecipients(result)
+    });
+
+    return {
+      skipped: false as const,
+      accepted: normalizeRecipients(result.accepted)
+    };
+  } catch (error) {
+    logSendResult({
+      emailType,
+      to: recipient,
+      subject,
+      accepted: [],
+      rejected: [],
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return { skipped: false as const, error: true as const, accepted: [] };
+  }
 }
 
 export async function sendSubscriptionActivationEmails(input: SubscriptionActivationEmailInput) {
   const config = getGoogleMailConfig();
+  const subscriberSubject = "Your Helar subscription is active — thank you";
+  const adminSubject = `New Helar subscription: ${input.planName} (${input.email})`;
+  const subscriberEmailType = "subscription_activation_subscriber";
+  const adminEmailType = "subscription_activation_admin";
 
   if (!config) {
     if (!hasLoggedMissingEmailConfig) {
@@ -821,37 +1223,271 @@ export async function sendSubscriptionActivationEmails(input: SubscriptionActiva
       );
     }
 
+    logSendResult({
+      emailType: subscriberEmailType,
+      to: input.email,
+      subject: subscriberSubject,
+      accepted: [],
+      rejected: [],
+      skipped: true
+    });
+
     return { skipped: true as const };
   }
 
   const transporter = createGoogleTransport(config);
-  const sendTasks = [
-    transporter.sendMail(
+  try {
+    const subscriberResult = await transporter.sendMail(
       buildTransactionalMailOptions({
         config,
         to: input.email,
-        subject: "Your Helar subscription is active",
+        subject: subscriberSubject,
         text: buildSubscriberSubscriptionText(input),
         html: buildSubscriberSubscriptionHtml(input)
       })
-    )
-  ];
+    );
+
+    logSendResult({
+      emailType: subscriberEmailType,
+      to: input.email,
+      subject: subscriberSubject,
+      accepted: normalizeRecipients(subscriberResult.accepted),
+      rejected: getRejectedRecipients(subscriberResult)
+    });
+  } catch (error) {
+    logSendResult({
+      emailType: subscriberEmailType,
+      to: input.email,
+      subject: subscriberSubject,
+      accepted: [],
+      rejected: [],
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
 
   if (config.adminNotificationEmail) {
-    sendTasks.push(
-      transporter.sendMail(
+    try {
+      const adminResult = await transporter.sendMail(
         buildTransactionalMailOptions({
           config,
           to: config.adminNotificationEmail,
-          subject: `New Helar subscription: ${input.planName}`,
+          subject: adminSubject,
           text: buildAdminSubscriptionText(input),
           html: buildAdminSubscriptionHtml(input)
         })
-      )
-    );
+      );
+
+      logSendResult({
+        emailType: adminEmailType,
+        to: config.adminNotificationEmail,
+        subject: adminSubject,
+        accepted: normalizeRecipients(adminResult.accepted),
+        rejected: getRejectedRecipients(adminResult)
+      });
+    } catch (error) {
+      logSendResult({
+        emailType: adminEmailType,
+        to: config.adminNotificationEmail,
+        subject: adminSubject,
+        accepted: [],
+        rejected: [],
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
   }
 
-  await Promise.all(sendTasks);
-
   return { skipped: false as const };
+}
+
+export async function sendWelcomeEmail(input: WelcomeEmailInput) {
+  const config = getGoogleMailConfig();
+  const firstName = input.fullName.trim().split(/\s+/)[0] ?? input.fullName.trim();
+  const subject = `Welcome to Helar, ${firstName} 👋`;
+  const emailType = "welcome";
+
+  if (!config) {
+    if (!hasLoggedMissingEmailConfig) {
+      hasLoggedMissingEmailConfig = true;
+      console.warn(
+        "Email sending is not fully configured. Set MAIL_FROM_EMAIL, MAIL_HOST, MAIL_PORT, and MAIL_APP_PASSWORD for SMTP auth, or configure the Gmail OAuth fallback variables."
+      );
+    }
+
+    logSendResult({
+      emailType,
+      to: input.email,
+      subject,
+      accepted: [],
+      rejected: [],
+      skipped: true
+    });
+
+    return { skipped: true as const };
+  }
+
+  const transporter = createGoogleTransport(config);
+  try {
+    const result = await transporter.sendMail(
+      buildTransactionalMailOptions({
+        config,
+        to: input.email,
+        subject,
+        text: buildWelcomeEmailText(input),
+        html: buildWelcomeEmailHtml(input)
+      })
+    );
+
+    assertEmailAccepted(result, input.email, "Welcome");
+
+    logSendResult({
+      emailType,
+      to: input.email,
+      subject,
+      accepted: normalizeRecipients(result.accepted),
+      rejected: getRejectedRecipients(result)
+    });
+
+    return {
+      skipped: false as const,
+      userAccepted: normalizeRecipients(result.accepted)
+    };
+  } catch (error) {
+    logSendResult({
+      emailType,
+      to: input.email,
+      subject,
+      accepted: [],
+      rejected: [],
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return { skipped: false as const, error: true as const, userAccepted: [] };
+  }
+}
+
+export async function sendSubscriptionExpiringSoonEmail(input: SubscriptionExpiringSoonEmailInput) {
+  const config = getGoogleMailConfig();
+  const subject = getExpiringSoonSubject(input.daysRemaining);
+  const emailType = "subscription_expiring_soon";
+
+  if (!config) {
+    if (!hasLoggedMissingEmailConfig) {
+      hasLoggedMissingEmailConfig = true;
+      console.warn(
+        "Email sending is not fully configured. Set MAIL_FROM_EMAIL, MAIL_HOST, MAIL_PORT, and MAIL_APP_PASSWORD for SMTP auth, or configure the Gmail OAuth fallback variables."
+      );
+    }
+
+    logSendResult({
+      emailType,
+      to: input.email,
+      subject,
+      accepted: [],
+      rejected: [],
+      skipped: true
+    });
+
+    return { skipped: true as const };
+  }
+
+  const transporter = createGoogleTransport(config);
+  try {
+    const result = await transporter.sendMail(
+      buildTransactionalMailOptions({
+        config,
+        to: input.email,
+        subject,
+        text: buildSubscriptionExpiringSoonText(input),
+        html: buildSubscriptionExpiringSoonHtml(input)
+      })
+    );
+
+    assertEmailAccepted(result, input.email, "Subscription expiring soon");
+
+    logSendResult({
+      emailType,
+      to: input.email,
+      subject,
+      accepted: normalizeRecipients(result.accepted),
+      rejected: getRejectedRecipients(result)
+    });
+
+    return {
+      skipped: false as const,
+      userAccepted: normalizeRecipients(result.accepted)
+    };
+  } catch (error) {
+    logSendResult({
+      emailType,
+      to: input.email,
+      subject,
+      accepted: [],
+      rejected: [],
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return { skipped: false as const, error: true as const, userAccepted: [] };
+  }
+}
+
+export async function sendSubscriptionExpiredEmail(input: SubscriptionExpiredEmailInput) {
+  const config = getGoogleMailConfig();
+  const subject = getExpiredSubject();
+  const emailType = "subscription_expired";
+
+  if (!config) {
+    if (!hasLoggedMissingEmailConfig) {
+      hasLoggedMissingEmailConfig = true;
+      console.warn(
+        "Email sending is not fully configured. Set MAIL_FROM_EMAIL, MAIL_HOST, MAIL_PORT, and MAIL_APP_PASSWORD for SMTP auth, or configure the Gmail OAuth fallback variables."
+      );
+    }
+
+    logSendResult({
+      emailType,
+      to: input.email,
+      subject,
+      accepted: [],
+      rejected: [],
+      skipped: true
+    });
+
+    return { skipped: true as const };
+  }
+
+  const transporter = createGoogleTransport(config);
+  try {
+    const result = await transporter.sendMail(
+      buildTransactionalMailOptions({
+        config,
+        to: input.email,
+        subject,
+        text: buildSubscriptionExpiredText(input),
+        html: buildSubscriptionExpiredHtml(input)
+      })
+    );
+
+    assertEmailAccepted(result, input.email, "Subscription expired");
+
+    logSendResult({
+      emailType,
+      to: input.email,
+      subject,
+      accepted: normalizeRecipients(result.accepted),
+      rejected: getRejectedRecipients(result)
+    });
+
+    return {
+      skipped: false as const,
+      userAccepted: normalizeRecipients(result.accepted)
+    };
+  } catch (error) {
+    logSendResult({
+      emailType,
+      to: input.email,
+      subject,
+      accepted: [],
+      rejected: [],
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return { skipped: false as const, error: true as const, userAccepted: [] };
+  }
 }

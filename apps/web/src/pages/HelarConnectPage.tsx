@@ -17,6 +17,7 @@ import {
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { ShareButton } from "@/components/common/ShareButton";
+import { RichTextEditor } from "@/components/ui/RichTextEditor";
 import {
   createHelarConnectAnswer,
   createHelarConnectComment,
@@ -114,6 +115,22 @@ function formatRelativeTime(value: string) {
 
 function formatCompactCount(value: number) {
   return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+}
+
+// Strip HTML tags to get plain text length for validation
+function stripHtml(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 export function HelarConnectPage() {
@@ -329,7 +346,8 @@ export function HelarConnectPage() {
     event.preventDefault();
 
     const title = questionDraft.title.trim();
-    const body = questionDraft.body.trim();
+    const bodyHtml = questionDraft.body;
+    const bodyPlainText = stripHtml(bodyHtml);
     // Allow any number of tags and any tag length per user requirement
     const tagList = questionDraft.tags
       .split(",")
@@ -342,8 +360,8 @@ export function HelarConnectPage() {
     if (!title) nextErrors.title = "Title is required.";
     else if (title.length < 8) nextErrors.title = "Title must be at least 8 characters.";
 
-    if (!body) nextErrors.body = "Details are required.";
-    else if (body.length < 20) nextErrors.body = "Details must be at least 20 characters.";
+    if (!bodyPlainText) nextErrors.body = "Details are required.";
+    else if (bodyPlainText.length < 20) nextErrors.body = "Details must be at least 20 characters.";
 
     for (const tag of tagList) {
       if (tag.length < 1) {
@@ -361,7 +379,7 @@ export function HelarConnectPage() {
     setQuestionFormErrors({ body: null, submit: null, tags: null, title: null });
 
     await createQuestionMutation.mutateAsync({
-      body,
+      body: bodyHtml,
       tags: tagList,
       title
     });
@@ -398,13 +416,14 @@ export function HelarConnectPage() {
       return;
     }
 
-    const body = commentDrafts[questionId]?.trim() ?? "";
+    const bodyHtml = commentDrafts[questionId] ?? "";
+    const bodyPlainText = stripHtml(bodyHtml);
 
-    if (!body) {
+    if (!bodyPlainText) {
       return;
     }
 
-    await commentMutation.mutateAsync({ body, questionId });
+    await commentMutation.mutateAsync({ body: bodyHtml, questionId });
   }
 
   async function handleSubmitComment(questionId: string, event: FormEvent<HTMLFormElement>) {
@@ -418,13 +437,14 @@ export function HelarConnectPage() {
       return;
     }
 
-    const body = answerDrafts[questionId]?.trim() ?? "";
+    const bodyHtml = answerDrafts[questionId] ?? "";
+    const bodyPlainText = stripHtml(bodyHtml);
 
-    if (!body) {
+    if (!bodyPlainText) {
       return;
     }
 
-    await answerMutation.mutateAsync({ body, questionId });
+    await answerMutation.mutateAsync({ body: bodyHtml, questionId });
   }
 
   async function handleSubmitAnswer(questionId: string, event: FormEvent<HTMLFormElement>) {
@@ -490,7 +510,14 @@ export function HelarConnectPage() {
               {question.title}
             </button>
           </h2>
-          <p>{isExpanded ? question.body : question.excerpt}</p>
+          {isExpanded ? (
+            <div
+              className="rich-text-content prose prose-sm max-w-none leading-7 text-slate-800"
+              dangerouslySetInnerHTML={{ __html: question.body }}
+            />
+          ) : (
+            <p>{question.excerpt}</p>
+          )}
 
           <div className="connect-tag-row">
             {question.tags.map((tag) => (
@@ -562,7 +589,10 @@ export function HelarConnectPage() {
                   {question.answers.map((answer) => (
                     <div className="connect-comment-card" key={answer.id}>
                       <strong>{answer.author.name}</strong>
-                      <p>{answer.body}</p>
+                      <div
+                        className="rich-text-content prose prose-sm max-w-none leading-7 text-slate-800"
+                        dangerouslySetInnerHTML={{ __html: answer.body }}
+                      />
                       {isModerator ? (
                         <button
                           className="connect-engagement-button"
@@ -582,11 +612,11 @@ export function HelarConnectPage() {
                 <form className="connect-comment-form" onSubmit={(event) => void handleSubmitAnswer(question.id, event)}>
                   <div className="connect-comment-grid">
                     <input readOnly type="text" value={isAuthenticated ? currentUserName : "Authentication required"} />
-                    <textarea
-                      onChange={(event) => setAnswerDrafts((current) => ({ ...current, [question.id]: event.target.value }))}
+                    <RichTextEditor
+                      minHeight={120}
+                      onChange={(value) => setAnswerDrafts((current) => ({ ...current, [question.id]: value }))}
                       placeholder={isAuthenticated ? "Write a helpful answer..." : "Log in to answer this question."}
                       readOnly={!isAuthenticated}
-                      rows={4}
                       value={answerDraft}
                     />
                   </div>
@@ -608,7 +638,10 @@ export function HelarConnectPage() {
                   {question.comments.map((comment) => (
                     <div className="connect-comment-card" key={comment.id}>
                       <strong>{comment.author.name}</strong>
-                      <p>{comment.body}</p>
+                      <div
+                        className="rich-text-content prose prose-sm max-w-none leading-7 text-slate-800"
+                        dangerouslySetInnerHTML={{ __html: comment.body }}
+                      />
                       {isModerator ? (
                         <button
                           className="connect-engagement-button"
@@ -628,11 +661,11 @@ export function HelarConnectPage() {
                 <form className="connect-comment-form" onSubmit={(event) => void handleSubmitComment(question.id, event)}>
                   <div className="connect-comment-grid">
                     <input readOnly type="text" value={isAuthenticated ? currentUserName : "Authentication required"} />
-                    <textarea
-                      onChange={(event) => setCommentDrafts((current) => ({ ...current, [question.id]: event.target.value }))}
+                    <RichTextEditor
+                      minHeight={96}
+                      onChange={(value) => setCommentDrafts((current) => ({ ...current, [question.id]: value }))}
                       placeholder={isAuthenticated ? "Share your comment..." : "Log in to comment on this discussion."}
                       readOnly={!isAuthenticated}
-                      rows={3}
                       value={commentDraft}
                     />
                   </div>
@@ -921,15 +954,16 @@ export function HelarConnectPage() {
 
               <label>
                 Details
-                <textarea
-                  onChange={(event) => {
-                    setQuestionDraft((current) => ({ ...current, body: event.target.value }));
+                <RichTextEditor
+                  label=""
+                  minHeight={160}
+                  onChange={(value) => {
+                    setQuestionDraft((current) => ({ ...current, body: value }));
                     if (questionFormErrors.body) {
                       setQuestionFormErrors((prev) => ({ ...prev, body: null, submit: null }));
                     }
                   }}
                   placeholder="Share enough context so other members can give a useful answer."
-                  rows={5}
                   value={questionDraft.body}
                 />
                 {questionFormErrors.body ? (
