@@ -18,7 +18,8 @@ import {
   updateAdminBarFinalExamMcqQuestion,
   type BarFinalExamMcqQuestion,
   type BarFinalExamMcqQuestionInput,
-  type BarFinalExamQuestionStatus
+  type BarFinalExamQuestionStatus,
+  type PremiumContentAccess
 } from "@/lib/admin-api";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
@@ -1525,6 +1526,13 @@ export function StudentBarFinalExamMcqQuestionPage() {
     explanation: string | null;
     isCorrect: boolean | null;
     selectedOptionIndex: number;
+    // Optional PremiumContentAccess snapshot carried from the submit mutation's
+    // response. We use it inside the review result card to decide whether we
+    // should render the preview-mode banner + Subscribe CTA at the top of the
+    // card (preview users only get 150-char explanation + Correct/Incorrect
+    // teaser; correct answer letter + full explanation is locked behind a
+    // subscription).
+    contentAccess?: PremiumContentAccess | null;
   } | null>(null);
   const routeParams = useParams();
   const subjectId = routeParams.subjectId ?? "";
@@ -1579,6 +1587,10 @@ export function StudentBarFinalExamMcqQuestionPage() {
         explanation: data.explanation ?? null,
         isCorrect: data.isCorrect ?? null,
         selectedOptionIndex: data.selectedOptionIndex,
+        // Capture the submit-response contentAccess snapshot so the review
+        // result card reliably reflects the gating the server used when it
+        // produced this payload (preview mode vs full access).
+        contentAccess: data.contentAccess ?? null,
       });
       setSubmitted(true);
       setReviewAnswerVisible(false);
@@ -1887,7 +1899,72 @@ export function StudentBarFinalExamMcqQuestionPage() {
                           {yourAnswerBadge}
                         </div>
 
-                        {correctIdx !== null && stripHtml(correctText) ? (
+                        {/* PREVIEW MODE UPGRADE BANNER: rendered directly inside the
+                            Answer review card for users on the 150-char preview tier.
+                            Calls out exactly what's locked (the precise correct-answer
+                            letter + full-length explanation) and gives a single-click
+                            Subscribe CTA to jump to the subscription page. */}
+                        {lastAttemptResult.contentAccess?.isPreview ? (
+                          <div
+                            className={cn(
+                              "rounded-2xl border px-4 py-3",
+                              isDark
+                                ? "border-amber-500/35 bg-amber-500/10"
+                                : "border-amber-200 bg-amber-50"
+                            )}
+                          >
+                            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                              <div>
+                                <p
+                                  className={cn(
+                                    "text-[10px] font-semibold uppercase tracking-[0.18em]",
+                                    isDark ? "text-amber-300/90" : "text-amber-700"
+                                  )}
+                                >
+                                  Preview mode
+                                </p>
+                                <p
+                                  className={cn(
+                                    "mt-1 text-sm leading-6",
+                                    isDark ? "text-amber-100" : "text-amber-900"
+                                  )}
+                                >
+                                  Correct answer letter and full explanation are locked.
+                                  Explanations are currently limited to{" "}
+                                  <strong>
+                                    {lastAttemptResult.contentAccess.previewCharLimit ??
+                                      150}
+                                  </strong>{" "}
+                                  characters. Subscribe to unlock the complete answer review.
+                                </p>
+                              </div>
+                              <button
+                                className={cn(
+                                  "inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold transition",
+                                  isDark
+                                    ? "bg-amber-400 text-slate-950 hover:bg-amber-300"
+                                    : "bg-amber-500 text-white hover:bg-amber-600"
+                                )}
+                                onClick={() => navigate("/app/subscription")}
+                                type="button"
+                              >
+                                <Lock className="h-4 w-4" />
+                                Subscribe now
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {/* Render the Correct answer box whenever we have a numeric
+                            correctIdx that falls within the question's options array.
+                            Don't require stripHtml(correctText) because legitimate
+                            answers can be formatting-only HTML (e.g. a blank paragraph
+                            or line-break layout) — we still want to show "Empty option"
+                            with the letter badge so the page never looks like "the
+                            review button did nothing". */}
+                        {typeof correctIdx === "number" &&
+                        correctIdx >= 0 &&
+                        correctIdx < currentQuestion.options.length ? (
                           <div
                             className={cn(
                               "rounded-2xl border px-4 py-3",
@@ -1911,7 +1988,11 @@ export function StudentBarFinalExamMcqQuestionPage() {
                               )}
                             >
                               {optionLetter(correctIdx)}.{" "}
-                              <span dangerouslySetInnerHTML={{ __html: correctText }} />
+                              {stripHtml(correctText) ? (
+                                <span dangerouslySetInnerHTML={{ __html: correctText }} />
+                              ) : (
+                                <span className="italic opacity-80">Empty option</span>
+                              )}
                             </p>
                           </div>
                         ) : null}

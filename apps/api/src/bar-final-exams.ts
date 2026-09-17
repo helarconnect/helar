@@ -1167,12 +1167,39 @@ export async function submitStudentBarFinalExamMcqAttempt(
     }
   });
 
-  return {
-    correctOptionIndex: contentAccess.hasFullAccess ? question.correctOptionIndex : null,
-    explanation: contentAccess.hasFullAccess ? question.explanation ?? null : null,
+  // Preview-gated response for unsubscribed users mirrors the same rules used
+  // by `buildRestrictedMcqQuestionPreview` on the question list screen:
+  //   1. Hide the exact correct option index (preview users can't read the
+  //      answer key for free).
+  //   2. Truncate the `explanation` field to a 150-character HTML preview
+  //      (closes the "full explanation leaks the answer" gap we patched in
+  //      Block E).
+  //   3. However we *still* reveal the boolean `isCorrect` outcome to
+  //      preview users. This is the teaser that gives them the "I got it
+  //      right / wrong" dopamine hit and drives them to Subscribe to see
+  //      *which* exact letter was correct + the full explanation.
+  // Full-access users get the unfiltered payload (the original behavior).
+  if (contentAccess.hasFullAccess) {
+    return {
+      correctOptionIndex: question.correctOptionIndex,
+      explanation: question.explanation ?? null,
+      id: savedAttempt.id,
+      isCorrect: savedAttempt.isCorrect,
+      selectedOptionIndex: savedAttempt.selectedOptionIndex,
+      contentAccess: serializeContentAccess(contentAccess)
+    };
+  }
+
+  const basePayload = {
+    correctOptionIndex: null,
     id: savedAttempt.id,
-    isCorrect: contentAccess.hasFullAccess ? savedAttempt.isCorrect : null,
+    isCorrect: savedAttempt.isCorrect,
     selectedOptionIndex: savedAttempt.selectedOptionIndex,
     contentAccess: serializeContentAccess(contentAccess)
   };
+  if (!question.explanation) {
+    return { ...basePayload, explanation: null };
+  }
+  const previewText = truncateChars(stripHtmlToText(question.explanation), PREMIUM_PREVIEW_CHAR_LIMIT).text;
+  return { ...basePayload, explanation: createPreviewHtml(previewText, PREMIUM_PREVIEW_WORD_LIMIT) };
 }
