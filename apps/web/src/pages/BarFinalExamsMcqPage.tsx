@@ -1776,18 +1776,25 @@ export function StudentBarFinalExamMcqQuestionPage() {
                   After you submit answers for <span className={cn("font-semibold", isDark ? "text-white" : "text-slate-950")}>all {gating.totalQuestions} question{gating.totalQuestions === 1 ? "" : "s"}</span> in this subject, return here to read the full Answers &amp; Explanations section.
                 </p>
               </div>
-              <Link
+              {/* Navigate (not a <Link to="/${subjectId}">) because the router has no
+                  standalone :subjectId route. The list page already pre-selects the
+                  correct subject via location.state.subjectId, matching the "Back to
+                  questions" button pattern used at the top of this same detail page. */}
+              <button
                 className={cn(
                   "inline-flex items-center gap-2 rounded-2xl border px-4 py-2.5 text-sm font-medium transition",
                   isDark
                     ? "border-white/15 bg-white/10 text-white hover:bg-white/15"
                     : "border-slate-950 bg-slate-950 text-white hover:bg-slate-900"
                 )}
-                to={`/app/bar-final-exams-mcq/${subjectId}`}
+                onClick={() =>
+                  navigate("/app/bar-final-exams-mcq", { state: { subjectId } })
+                }
+                type="button"
               >
                 <ChevronRight className="h-4 w-4 rotate-180" />
                 Back to subject
-              </Link>
+              </button>
             </div>
           </div>
         ) : null}

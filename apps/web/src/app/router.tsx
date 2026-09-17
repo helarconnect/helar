@@ -1,4 +1,14 @@
-import { createBrowserRouter, Navigate } from 'react-router-dom'
+import { createBrowserRouter, Navigate, useParams } from 'react-router-dom'
+
+// Lightweight redirect wrapper: mounts inside a :subjectId route, reads the URL param
+// via useParams, and forwards to the list route with pre-selection state. This
+// prevents 404s on URLs like bar-final-exams-mcq/:subjectId even when a stale
+// <Link to=…/:subjectId> slips through (React Router <Navigate /> can't itself
+// read parent params inline).
+function RedirectMcqSubjectIdToList() {
+  const { subjectId } = useParams()
+  return <Navigate replace state={{ subjectId }} to="/app/bar-final-exams-mcq" />
+}
 
 import { AppLayout } from '@/components/layout/AppLayout'
 import { MarketingLayout } from '@/components/layout/MarketingLayout'
@@ -122,6 +132,19 @@ export const router = createBrowserRouter([
           {
             path: 'bar-final-exams-mcq/:subjectId/questions/:questionId',
             element: <StudentBarFinalExamMcqQuestionPage />,
+          },
+          // Defensive normalize: there is no standalone "subject details" screen for
+          // MCQ — the list page handles subject selection via location.state.subjectId.
+          // Any direct visit / stale bookmark to bar-final-exams-mcq/:subjectId or
+          // bar-final-exams-mcq/:subjectId/questions is forwarded to the list URL with
+          // the subjectId pre-selected so users never hit "route does not exist".
+          {
+            path: 'bar-final-exams-mcq/:subjectId',
+            element: <RedirectMcqSubjectIdToList />,
+          },
+          {
+            path: 'bar-final-exams-mcq/:subjectId/questions',
+            element: <RedirectMcqSubjectIdToList />,
           },
           { path: 'library/law-reports/:materialId', element: <AdminLawReportReaderPage /> },
           { path: 'library/helarpedia/:materialId', element: <AdminLawReportReaderPage /> },
