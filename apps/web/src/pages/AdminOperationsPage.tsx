@@ -335,11 +335,25 @@ export function AdminContentPage() {
   const pendingQueueRef = useRef<HTMLDivElement | null>(null)
   const [declineTarget, setDeclineTarget] = useState<null | AdminContentReviewQueueItem>(null)
   const [declineReason, setDeclineReason] = useState('')
+  // Content-type filter state for the segment-control row above the pending items list.
+  // IMPORTANT: all hooks are declared BEFORE the loading/role early returns to comply with
+  // React's Rules of Hooks — otherwise React throws error #310 ("fewer hooks than expected")
+  // on first paint while the queue query is still pending.
+  const [queueTypeFilter, setQueueTypeFilter] = useState<
+    'all' | AdminContentReviewQueueItemType
+  >('all')
   const contentReviewQuery = useQuery({
     queryKey: queryKeys.adminContentReview,
     queryFn: fetchAdminContentReviewQueue,
     enabled: isSuperAdminWorkspace,
   })
+  // Memoized filtered items: placed AFTER the content-review query (so its dependency
+  // variable exists) but BEFORE the loading/role early returns (to satisfy the Rules of Hooks).
+  const filteredItems = useMemo(() => {
+    const items = contentReviewQuery.data?.items ?? []
+    if (queueTypeFilter === 'all') return items
+    return items.filter((item) => item.type === queueTypeFilter)
+  }, [contentReviewQuery.data, queueTypeFilter])
 
   // Bulk approve: approves every pending item across all content types + MCQ questions in one request.
   // On success, shows a summary toast and refreshes every affected query so counts/tables reflect the new statuses.
@@ -461,18 +475,11 @@ export function AdminContentPage() {
   }
 
   const reviewQueue = contentReviewQuery.data
-  // Content-type filter state used by the segment-control row above the pending items list.
-  // "all" disables filtering; any specific value narrows the visible rows to that type only
-  // while hero counters, summary cards, Approve-all button, and bulk-approve mutation
-  // continue to reflect the unfiltered queue so no functionality is lost.
-  const [queueTypeFilter, setQueueTypeFilter] = useState<
-    'all' | AdminContentReviewQueueItemType
-  >('all')
-  const filteredItems = useMemo(() => {
-    const items = reviewQueue?.items ?? []
-    if (queueTypeFilter === 'all') return items
-    return items.filter((item) => item.type === queueTypeFilter)
-  }, [queueTypeFilter, reviewQueue?.items])
+  // NOTE: queueTypeFilter useState + filteredItems useMemo are intentionally declared
+  // EARLIER in the component (directly after the contentReviewQuery hook), ABOVE the
+  // loading + role early returns, to satisfy React's Rules of Hooks and avoid error #310.
+  // The constants below (iconByType, filterLabelsByType, filterSegments) are NOT hooks so
+  // they can remain here without affecting the hook-count contract.
   const iconByType = {
     bar_final_exam_mcq_question: ClipboardList,
     library_material: LibraryBig,
