@@ -1500,7 +1500,32 @@ export function StudentBarFinalExamMcqQuestionPage() {
   const { isDark } = useTheme();
   const navigate = useNavigate();
   const [selectedOptionIndex, setSelectedOptionIndex] = useState<number | null>(null);
+  // Two-stage reveal on the detail page per product spec:
+  //   (1) `submitted` becomes true once the user clicks "Submit answer" and the
+  //       server success payload returns.
+  //   (2) `reviewAnswerVisible` is flipped ONLY when the user explicitly clicks
+  //       the amber "Click to review answer" confirm button that appears post-
+  //       submit. This avoids surprise reveal of the correct option/explanation
+  //       at the moment the answer is submitted.
+  //   (3) Both values (plus the selected option) are reset whenever the user
+  //       navigates to a new questionId (including leaving the page and coming
+  //       back to the same question later), enforcing "leave → re-attempt before
+  //       re-revealing the answer".
   const [submitted, setSubmitted] = useState<boolean>(false);
+  const [reviewAnswerVisible, setReviewAnswerVisible] = useState<boolean>(false);
+  // Cache the last server response (correct option index, option text, and
+  // explanation) for the currently-displayed question. The fetch response for
+  // fetchStudentBarFinalExamMcqQuestions intentionally strips correctOptionIndex
+  // + explanation until the user submits — so we read them only from the
+  // submit-mutation success payload. Reset to null on questionId change so the
+  // user can't "carry over" a cached answer from a different question (or re-
+  // surface an old answer on return-to-page without re-submitting).
+  const [lastAttemptResult, setLastAttemptResult] = useState<{
+    correctOptionIndex: number | null;
+    explanation: string | null;
+    isCorrect: boolean | null;
+    selectedOptionIndex: number;
+  } | null>(null);
   const routeParams = useParams();
   const subjectId = routeParams.subjectId ?? "";
   const questionId = routeParams.questionId ?? "";
@@ -1519,6 +1544,8 @@ export function StudentBarFinalExamMcqQuestionPage() {
   useEffect(() => {
     setSelectedOptionIndex(null);
     setSubmitted(false);
+    setReviewAnswerVisible(false);
+    setLastAttemptResult(null);
   }, [questionId]);
 
   const subjects = subjectsQuery.data?.subjects ?? [];
@@ -1544,14 +1571,30 @@ export function StudentBarFinalExamMcqQuestionPage() {
       submitStudentBarFinalExamMcqAttempt(payload.questionId, { selectedOptionIndex: payload.selectedOptionIndex }),
     onSuccess: (data) => {
       gating.registerAttemptOutcome(questionId, {
-        isCorrect: data.isCorrect,
+        isCorrect: data.isCorrect ?? false,
         selectedOptionIndex: data.selectedOptionIndex
       });
+      setLastAttemptResult({
+        correctOptionIndex: data.correctOptionIndex ?? null,
+        explanation: data.explanation ?? null,
+        isCorrect: data.isCorrect ?? null,
+        selectedOptionIndex: data.selectedOptionIndex,
+      });
       setSubmitted(true);
+      setReviewAnswerVisible(false);
     }
   });
 
   const canSubmit = selectedOptionIndex !== null && !attemptMutation.isPending && !submitted;
+  // Re-attempt = clear the post-submit gating state so the user can pick a
+  // different option and re-submit. Does NOT reset the server-side attempt
+  // record (progress counters stay intact); it just gives the user another
+  // chance to re-engage with the question before reviewing the answer.
+  function restartAttemptForReview() {
+    setSubmitted(false);
+    setReviewAnswerVisible(false);
+    setSelectedOptionIndex(null);
+  }
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-8">
@@ -1641,21 +1684,66 @@ export function StudentBarFinalExamMcqQuestionPage() {
                 <div className="space-y-2">
                   {currentQuestion.options.map((option, index) => {
                     const isSelected = selectedOptionIndex === index;
+                    // Once the user has explicitly clicked "Click to review answer"
+                    // we color-code the options so they can compare: correct answer
+                    // (emerald), the user's incorrect pick (rose), others neutral.
+                    const reviewActive = reviewAnswerVisible && lastAttemptResult !== null;
+                    const isCorrectOption =
+                      reviewActive &&
+                      lastAttemptResult.correctOptionIndex !== null &&
+                      lastAttemptResult.correctOptionIndex === index;
+                    const isIncorrectPick =
+                      reviewActive &&
+                      !isCorrectOption &&
+                      lastAttemptResult.selectedOptionIndex === index;
 
                     return (
                       <button
                         className={cn(
                           "flex w-full items-start gap-3 rounded-3xl border px-4 py-4 text-left text-sm transition",
                           isDark ? "border-slate-800 bg-slate-950/30 text-slate-200" : "border-slate-200 bg-white text-slate-900",
-                          isSelected ? (isDark ? "border-white/15 bg-white/10" : "border-slate-950 bg-slate-950 text-white") : null
+                          isSelected ? (isDark ? "border-white/15 bg-white/10" : "border-slate-950 bg-slate-950 text-white") : null,
+                          isCorrectOption
+                            ? isDark
+                              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100"
+                              : "border-emerald-500 bg-emerald-50 text-emerald-900"
+                            : null,
+                          isIncorrectPick
+                            ? isDark
+                              ? "border-rose-500/40 bg-rose-500/10 text-rose-100"
+                              : "border-rose-500 bg-rose-50 text-rose-900"
+                            : null
                         )}
-                        disabled={attemptMutation.isPending || submitted}
+                        // Lock option selection after submit OR during submit OR
+                        // while the answer is being reviewed.
+                        disabled={attemptMutation.isPending || submitted || reviewAnswerVisible}
                         key={index}
                         onClick={() => setSelectedOptionIndex(index)}
                         type="button"
                       >
-                        <span className={cn("mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs font-semibold", isDark ? "border-slate-700" : "border-slate-200")}>
-                          {index + 1}
+                        <span
+                          className={cn(
+                            "mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs font-semibold",
+                            isDark ? "border-slate-700" : "border-slate-200",
+                            isCorrectOption
+                              ? isDark
+                                ? "border-emerald-300 bg-emerald-500/20 text-emerald-100"
+                                : "border-emerald-600 bg-emerald-500 text-white"
+                              : null,
+                            isIncorrectPick
+                              ? isDark
+                                ? "border-rose-300 bg-rose-500/20 text-rose-100"
+                                : "border-rose-600 bg-rose-500 text-white"
+                              : null
+                          )}
+                        >
+                          {isCorrectOption ? (
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                          ) : isIncorrectPick ? (
+                            <X className="h-3.5 w-3.5" />
+                          ) : (
+                            index + 1
+                          )}
                         </span>
                         {stripHtml(option) ? (
                           <div
@@ -1670,20 +1758,202 @@ export function StudentBarFinalExamMcqQuestionPage() {
                   })}
                 </div>
 
-                {submitted ? (
+                {/* TWO-STAGE DETAIL-PAGE REVEAL FLOW (per product spec for
+                    student / lawyer / judge portals):
+                    (1) User selects an option, clicks "Submit answer" (side column).
+                    (2) After successful submit, a confirmation banner appears
+                        directly below the options (right here) with a bold amber
+                        button labeled "Click to review answer". The correct
+                        answer + explanation remain HIDDEN until that confirm
+                        click so the reveal is never an accidental surprise.
+                    (3) After confirm click, the "Click to review answer" button
+                        is replaced by the result card: Correct vs Incorrect
+                        badge, the correct option text, and the rich-text
+                        explanation.
+                    (4) Leaving the page (questionId change / navigate away +
+                        come back) resets submitted + reviewAnswerVisible + the
+                        cached attempt result back to null, enforcing a fresh
+                        re-attempt before the user can re-review. */}
+                {submitted && !reviewAnswerVisible ? (
                   <div
                     className={cn(
-                      "rounded-3xl border p-4",
+                      "rounded-3xl border p-5",
                       isDark
-                        ? "border-sky-500/25 bg-sky-500/10 text-sky-100"
-                        : "border-sky-200 bg-sky-50 text-sky-800"
+                        ? "border-amber-500/35 bg-amber-500/10 text-amber-100"
+                        : "border-amber-200 bg-amber-50 text-amber-800"
                     )}
                   >
-                    <p className="text-xs uppercase tracking-[0.18em]">Answer saved</p>
-                    <p className="mt-2 text-sm leading-7">
-                      Your answer has been saved. When you've attempted every question in this subject, return to view the full Answers and explanations section.
-                    </p>
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="space-y-2">
+                        <p className="text-xs uppercase tracking-[0.2em] font-semibold">
+                          Answer submitted
+                        </p>
+                        <p className="text-sm leading-7">
+                          Your answer has been saved. Click <strong>"Click to review answer"</strong> below to reveal the correct option and explanation
+                          directly on this page. If you leave and come back later, you'll need to attempt the question again before the answer is shown.
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          className={cn(
+                            "inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold transition",
+                            isDark
+                              ? "bg-amber-400 text-slate-950 hover:bg-amber-300"
+                              : "bg-amber-500 text-white hover:bg-amber-600"
+                          )}
+                          onClick={() => setReviewAnswerVisible(true)}
+                          type="button"
+                        >
+                          <Eye className="h-4 w-4" />
+                          Click to review answer
+                        </button>
+                        <button
+                          className={cn(
+                            "inline-flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium transition",
+                            isDark
+                              ? "border-white/15 bg-white/10 text-white hover:bg-white/15"
+                              : "border-slate-950 bg-slate-950 text-white hover:bg-slate-900"
+                          )}
+                          onClick={restartAttemptForReview}
+                          type="button"
+                        >
+                          <Pencil className="h-4 w-4" />
+                          Re-attempt question
+                        </button>
+                      </div>
+                    </div>
                   </div>
+                ) : null}
+
+                {reviewAnswerVisible && lastAttemptResult !== null ? (
+                  (() => {
+                    const correctIdx = lastAttemptResult.correctOptionIndex;
+                    const correctText =
+                      correctIdx !== null ? currentQuestion.options[correctIdx] ?? "" : "";
+                    const hasExplanation = Boolean(
+                      lastAttemptResult.explanation &&
+                        stripHtml(lastAttemptResult.explanation).length > 0
+                    );
+                    const yourAnswerBadge =
+                      lastAttemptResult.isCorrect === null ? (
+                        <span
+                          className={cn(
+                            "inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]",
+                            isDark ? "bg-slate-700/60 text-slate-300" : "bg-slate-100 text-slate-600"
+                          )}
+                        >
+                          Your answer: Not scored
+                        </span>
+                      ) : lastAttemptResult.isCorrect ? (
+                        <span
+                          className={cn(
+                            "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]",
+                            isDark ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-50 text-emerald-700"
+                          )}
+                        >
+                          Your answer: Correct ✅
+                        </span>
+                      ) : (
+                        <span
+                          className={cn(
+                            "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]",
+                            isDark ? "bg-rose-500/15 text-rose-200" : "bg-rose-50 text-rose-700"
+                          )}
+                        >
+                          Your answer: Incorrect ❌
+                        </span>
+                      );
+
+                    function optionLetter(index: number) {
+                      return String.fromCharCode(65 + index);
+                    }
+
+                    return (
+                      <div
+                        className={cn(
+                          "rounded-3xl border p-5 space-y-4",
+                          isDark ? "border-slate-800 bg-slate-950/30" : "border-slate-200 bg-slate-50"
+                        )}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p
+                            className={cn(
+                              "text-xs font-semibold uppercase tracking-[0.18em]",
+                              isDark ? "text-slate-500" : "text-slate-500"
+                            )}
+                          >
+                            Answer review
+                          </p>
+                          {yourAnswerBadge}
+                        </div>
+
+                        {correctIdx !== null && stripHtml(correctText) ? (
+                          <div
+                            className={cn(
+                              "rounded-2xl border px-4 py-3",
+                              isDark
+                                ? "border-emerald-500/25 bg-emerald-500/10"
+                                : "border-emerald-200 bg-emerald-50"
+                            )}
+                          >
+                            <p
+                              className={cn(
+                                "text-xs font-semibold uppercase tracking-[0.18em]",
+                                isDark ? "text-emerald-300/90" : "text-emerald-700"
+                              )}
+                            >
+                              Correct answer
+                            </p>
+                            <p
+                              className={cn(
+                                "mt-1.5 text-sm leading-7 font-semibold rich-text-content",
+                                isDark ? "text-emerald-100" : "text-emerald-900"
+                              )}
+                            >
+                              {optionLetter(correctIdx)}.{" "}
+                              <span dangerouslySetInnerHTML={{ __html: correctText }} />
+                            </p>
+                          </div>
+                        ) : null}
+
+                        {hasExplanation ? (
+                          <div className="space-y-2">
+                            <p
+                              className={cn(
+                                "text-xs font-semibold uppercase tracking-[0.18em]",
+                                isDark ? "text-slate-500" : "text-slate-500"
+                              )}
+                            >
+                              Explanation
+                            </p>
+                            <div
+                              className={cn(
+                                "text-sm leading-7 rich-text-content",
+                                isDark ? "text-slate-300" : "text-slate-800"
+                              )}
+                              dangerouslySetInnerHTML={{ __html: lastAttemptResult.explanation! }}
+                            />
+                          </div>
+                        ) : null}
+
+                        <div className="flex justify-end">
+                          <button
+                            className={cn(
+                              "inline-flex items-center justify-center gap-2 rounded-2xl border px-4 py-2.5 text-sm font-medium transition",
+                              isDark
+                                ? "border-white/15 bg-white/10 text-white hover:bg-white/15"
+                                : "border-slate-950 bg-slate-950 text-white hover:bg-slate-900"
+                            )}
+                            onClick={restartAttemptForReview}
+                            type="button"
+                          >
+                            <Pencil className="h-4 w-4" />
+                            Re-attempt question
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()
                 ) : null}
               </div>
 
@@ -1714,46 +1984,90 @@ export function StudentBarFinalExamMcqQuestionPage() {
                     />
                   </div>
                   <p className={cn("mt-2 text-xs", isDark ? "text-slate-400" : "text-slate-600")}>
-                    Submit an answer for every question in this subject to unlock Answers &amp; Explanations.
+                    Submit and then <strong>Click to review answer</strong> on each question to reveal its correct option and explanation right here.
                   </p>
                 </div>
 
                 <div className={cn("rounded-3xl border px-4 py-4", isDark ? "border-slate-800 bg-slate-950/30" : "border-slate-200 bg-slate-50")}>
                   <p className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Controls</p>
-                  <button
-                    className={cn(
-                      "mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium transition",
-                      !canSubmit
-                        ? isDark
-                          ? "cursor-not-allowed bg-slate-800 text-slate-500"
-                          : "cursor-not-allowed bg-slate-200 text-slate-500"
-                        : isDark
-                          ? "bg-white text-slate-950 hover:bg-slate-100"
-                          : "bg-slate-950 text-white hover:bg-slate-900"
-                    )}
-                    disabled={!canSubmit}
-                    onClick={() => {
-                      if (!currentQuestion || selectedOptionIndex === null) {
-                        return;
-                      }
-                      attemptMutation.mutate({ questionId: currentQuestion.id, selectedOptionIndex });
-                    }}
-                    type="button"
-                  >
-                    {attemptMutation.isPending ? (
-                      <span>Submitting...</span>
-                    ) : submitted ? (
-                      <>
-                        <CheckCircle2 className="h-4 w-4" />
-                        <span>Submitted</span>
-                      </>
-                    ) : (
-                      <>
-                        <Pencil className="h-4 w-4" />
-                        <span>Submit answer</span>
-                      </>
-                    )}
-                  </button>
+                  {/* Side-column Submit button: after submit, the button flips to
+                      CTA prompts that guide the user towards the new on-page review
+                      flow instead of the old "Submitted" dead label. */}
+                  {submitted || reviewAnswerVisible ? (
+                    <div className="mt-3 space-y-2">
+                      {reviewAnswerVisible ? (
+                        <button
+                          className={cn(
+                            "inline-flex w-full items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-semibold transition",
+                            isDark
+                              ? "border-white/15 bg-white/10 text-white hover:bg-white/15"
+                              : "border-slate-950 bg-slate-950 text-white hover:bg-slate-900"
+                          )}
+                          onClick={() => {
+                            setReviewAnswerVisible(false);
+                            restartAttemptForReview();
+                          }}
+                          type="button"
+                        >
+                          <Pencil className="h-4 w-4" />
+                          Re-attempt question
+                        </button>
+                      ) : (
+                        <button
+                          className={cn(
+                            "inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold transition",
+                            isDark
+                              ? "bg-amber-400 text-slate-950 hover:bg-amber-300"
+                              : "bg-amber-500 text-white hover:bg-amber-600"
+                          )}
+                          onClick={() => setReviewAnswerVisible(true)}
+                          type="button"
+                        >
+                          <Eye className="h-4 w-4" />
+                          Click to review answer
+                        </button>
+                      )}
+                      {reviewAnswerVisible ? (
+                        <p className={cn("text-xs text-center", isDark ? "text-slate-400" : "text-slate-600")}>
+                          Answer review is open. Scroll up to view the result or click above to attempt again.
+                        </p>
+                      ) : (
+                        <p className={cn("text-xs text-center", isDark ? "text-slate-400" : "text-slate-600")}>
+                          Your submission is saved — confirm the review to reveal the correct answer and explanation.
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <button
+                      className={cn(
+                        "mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium transition",
+                        !canSubmit
+                          ? isDark
+                            ? "cursor-not-allowed bg-slate-800 text-slate-500"
+                            : "cursor-not-allowed bg-slate-200 text-slate-500"
+                          : isDark
+                            ? "bg-white text-slate-950 hover:bg-slate-100"
+                            : "bg-slate-950 text-white hover:bg-slate-900"
+                      )}
+                      disabled={!canSubmit}
+                      onClick={() => {
+                        if (!currentQuestion || selectedOptionIndex === null) {
+                          return;
+                        }
+                        attemptMutation.mutate({ questionId: currentQuestion.id, selectedOptionIndex });
+                      }}
+                      type="button"
+                    >
+                      {attemptMutation.isPending ? (
+                        <span>Submitting...</span>
+                      ) : (
+                        <>
+                          <Pencil className="h-4 w-4" />
+                          <span>Submit answer</span>
+                        </>
+                      )}
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -1773,7 +2087,7 @@ export function StudentBarFinalExamMcqQuestionPage() {
                   Subject overview
                 </p>
                 <p className={cn("mt-1 text-sm leading-6", isDark ? "text-slate-400" : "text-slate-600")}>
-                  After you submit answers for <span className={cn("font-semibold", isDark ? "text-white" : "text-slate-950")}>all {gating.totalQuestions} question{gating.totalQuestions === 1 ? "" : "s"}</span> in this subject, return here to read the full Answers &amp; Explanations section.
+                  For each question in <span className={cn("font-semibold", isDark ? "text-white" : "text-slate-950")}>{activeSubject?.name ?? "this subject"}</span>, submit an answer and click <strong>"Click to review answer"</strong> to reveal the correct option and explanation directly on the question page. You can also view the full Answers &amp; Explanations summary for this subject at the end of the MCQ question list once you've attempted every question.
                 </p>
               </div>
               {/* Navigate (not a <Link to="/${subjectId}">) because the router has no
