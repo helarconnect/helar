@@ -271,13 +271,14 @@ export type AdminApprovalQueueItem = {
   submittedRoleLabel: string;
   subtitle: string;
   title: string;
-  type: "library_material" | "subject_summary_case" | "subject_summary_entry" | "bar_final_exam_question";
+  type: "library_material" | "subject_summary_case" | "subject_summary_entry" | "bar_final_exam_question" | "bar_final_exam_mcq_question";
 };
 
 export type AdminApprovalQueueSnapshot = {
   items: AdminApprovalQueueItem[];
   summary: {
     itemsSubmittedToday: number;
+    barFinalExamMcqQuestions: number;
     barFinalExamQuestions: number;
     libraryMaterials: number;
     oldestPendingHours: number;

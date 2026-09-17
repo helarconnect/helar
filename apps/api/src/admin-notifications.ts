@@ -42,6 +42,7 @@ export type AdminApprovalQueueSnapshot = {
   items: AdminApprovalQueueItem[];
   summary: {
     itemsSubmittedToday: number;
+    barFinalExamMcqQuestions: number;
     barFinalExamQuestions: number;
     libraryMaterials: number;
     oldestPendingHours: number;
@@ -257,7 +258,7 @@ async function findLatestContentAdminActorDetails(resourceId: string, actions: s
 }
 
 async function listPendingApprovalItems() {
-  const [pendingLibraryMaterials, pendingCases, pendingEntries, pendingBarFinalExamQuestions] = await Promise.all([
+  const [pendingLibraryMaterials, pendingCases, pendingEntries, pendingBarFinalExamQuestions, pendingBarFinalExamMcqQuestions] = await Promise.all([
     prisma.studyMaterial.findMany({
       where: {
         OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
@@ -342,6 +343,26 @@ async function listPendingApprovalItems() {
         },
         updatedAt: true
       }
+    }),
+    prisma.barFinalExamMcqQuestion.findMany({
+      where: {
+        OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
+        status: BarFinalExamQuestionStatus.PENDING_APPROVAL
+      },
+      orderBy: {
+        updatedAt: "desc"
+      },
+      take: 8,
+      select: {
+        id: true,
+        question: true,
+        subject: {
+          select: {
+            name: true
+          }
+        },
+        updatedAt: true
+      }
     })
   ]);
 
@@ -385,6 +406,16 @@ async function listPendingApprovalItems() {
       resourceId: item.id,
       title: buildPreviewTitle(item.question),
       type: "bar_final_exam_question"
+    })),
+    ...pendingBarFinalExamMcqQuestions.map<AdminNotificationCenterItem>((item) => ({
+      actionPath: "/app/admin/bar-final-exams-mcq",
+      body: `${item.subject.name} bar final MCQ question is waiting for approval.`,
+      canApprove: true,
+      createdAt: item.updatedAt.toISOString(),
+      id: `bar-final-exam-mcq-${item.id}`,
+      resourceId: item.id,
+      title: buildPreviewTitle(item.question),
+      type: "bar_final_exam_mcq_question"
     }))
   ].sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
 }
@@ -688,9 +719,8 @@ export async function getSuperAdminApprovalQueue(): Promise<AdminApprovalQueueSn
     items,
     summary: {
       itemsSubmittedToday: items.filter((item) => new Date(item.createdAt).getTime() >= startOfToday.getTime()).length,
-      // barFinalExamQuestions summary now includes both NLS theory + MCQ pending items so the
-      // hero counters match the total that the "Approve all pending" button will process.
-      barFinalExamQuestions: barFinalExamItems.length + barFinalExamMcqItems.length,
+      barFinalExamMcqQuestions: barFinalExamMcqItems.length,
+      barFinalExamQuestions: barFinalExamItems.length,
       libraryMaterials: libraryItems.length,
       oldestPendingHours: items.length
         ? Math.max(

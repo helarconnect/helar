@@ -606,6 +606,14 @@ export function AdminContentPage() {
                   label: 'Subject summary entries',
                   value: reviewQueue?.summary.subjectSummaryEntries ?? 0,
                 },
+                {
+                  label: 'Bar final NLS theory questions',
+                  value: reviewQueue?.summary.barFinalExamQuestions ?? 0,
+                },
+                {
+                  label: 'Bar final MCQ questions',
+                  value: reviewQueue?.summary.barFinalExamMcqQuestions ?? 0,
+                },
               ].map((item) => (
                 <div
                   className="flex items-center justify-between gap-3 rounded-[18px] border border-white/10 bg-slate-950/15 px-4 py-3"
@@ -752,6 +760,8 @@ export function AdminContentPage() {
                 `${reviewQueue?.summary.subjectSummaryEntries ?? 0} subject summary entries are waiting in the revision queue.`,
                 `${reviewQueue?.summary.subjectSummaryCases ?? 0} case records are waiting for publish approval.`,
                 `${reviewQueue?.summary.libraryMaterials ?? 0} library materials still need executive sign-off.`,
+                `${reviewQueue?.summary.barFinalExamQuestions ?? 0} bar final NLS theory questions still need approval.`,
+                `${reviewQueue?.summary.barFinalExamMcqQuestions ?? 0} bar final MCQ questions still need approval.`,
               ].map((item) => (
                 <div
                   className={cn('rounded-[20px] border px-4 py-4 text-sm leading-6', isDark ? 'border-slate-700 bg-slate-800 text-slate-300' : 'border-slate-200 bg-slate-50 text-slate-700')}
@@ -974,7 +984,9 @@ function buildEditableDraft(
     const snapshot = data as Awaited<ReturnType<typeof fetchAdminBarFinalExamQuestionDetail>>
     return {
       answer: snapshot.answer ?? '',
+      examDate: snapshot.examDate ?? null,
       question: snapshot.question ?? '',
+      status: snapshot.status ?? 'DRAFT',
       subjectId: snapshot.subject?.id ?? '',
     }
   }
@@ -1131,9 +1143,12 @@ export function AdminContentReviewDetailPage() {
         const original = dataSnapshot as Awaited<ReturnType<typeof fetchAdminBarFinalExamQuestionDetail>>
         return updateAdminBarFinalExamQuestion(targetItem.resourceId, {
           answer: draftSnapshot.answer ?? original.answer ?? '',
-          examDate: original.examDate ?? new Date().toISOString().slice(0, 10),
+          // Prefer draft value over original so edits during approval work-flows
+          // (e.g. adjusting exam date or toggling status to PUBLISHED) persist
+          // correctly after the save handler runs.
+          examDate: (draftSnapshot.examDate as string | null | undefined) ?? original.examDate ?? new Date().toISOString().slice(0, 10),
           question: draftSnapshot.question ?? original.question ?? '',
-          status: (original.status ?? 'DRAFT') as any,
+          status: (draftSnapshot.status as string | undefined) ?? (original.status ?? 'DRAFT') as any,
           subjectId: draftSnapshot.subjectId ?? original.subject?.id ?? '',
         })
       }
@@ -2465,18 +2480,54 @@ function BarTheoryEditor({
 }) {
   const question = (draft?.question as string | undefined) ?? node.question ?? ''
   const answer = (draft?.answer as string | undefined) ?? node.answer ?? ''
+  const status = (draft?.status as string | undefined) ?? node.status ?? 'DRAFT'
+  // examDate is returned from server as ISO string (YYYY-MM-DD) or null; keep in YYYY-MM-DD
+  // form for the native date input so it renders correctly across browsers.
+  const examDate = (draft?.examDate as string | null | undefined) ?? node.examDate ?? ''
+  const examDateValue = examDate ? new Date(examDate).toISOString().slice(0, 10) : ''
 
   return (
     <div className="space-y-5">
       <ReviewBlock isDark={isDark}>
         <p className={cn('text-sm', isDark ? 'text-slate-400' : 'text-slate-500')}>{node.subject.name}</p>
-        {node.examDate ? (
-          <p className={cn('mt-1 text-xs', isDark ? 'text-slate-400' : 'text-slate-500')}>
-            Exam date: {new Date(node.examDate).toLocaleDateString()}
-          </p>
-        ) : null}
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <label className="space-y-2">
+            <span className={cn('text-xs font-medium uppercase tracking-[0.18em]', isDark ? 'text-slate-500' : 'text-slate-500')}>Status</span>
+            <select
+              className={cn(
+                'w-full rounded-2xl border px-3.5 py-3 text-sm outline-none',
+                isDark ? 'border-slate-700 bg-slate-900 text-white' : 'border-slate-200 bg-slate-50 text-slate-950'
+              )}
+              onChange={(event) => onChange('status', event.target.value)}
+              value={status}
+            >
+              <option value="DRAFT">Draft</option>
+              <option value="PENDING_APPROVAL">Pending approval</option>
+              <option value="PUBLISHED">Published</option>
+              <option value="ARCHIVED">Archived</option>
+            </select>
+          </label>
+
+          <label className="space-y-2">
+            <span className={cn('text-xs font-medium uppercase tracking-[0.18em]', isDark ? 'text-slate-500' : 'text-slate-500')}>
+              Exam date
+            </span>
+            <input
+              className={cn(
+                'w-full rounded-2xl border px-3.5 py-3 text-sm outline-none',
+                isDark ? 'border-slate-700 bg-slate-900 text-white' : 'border-slate-200 bg-slate-50 text-slate-950'
+              )}
+              onChange={(event) => onChange('examDate', event.target.value)}
+              type="date"
+              value={examDateValue}
+            />
+          </label>
+        </div>
         <div className="mt-4">
-          <LongTextField isDark={isDark} label="Question" minHeight={180} onChange={(v) => onChange('question', v)} placeholder="Theory question" value={question} />
+          {/* RichTextField uses contentEditable instead of a plain textarea so when
+              node.question is rich HTML (e.g. `<p>...<br></p>`) we render formatted
+              content rather than raw HTML tags as user-visible text. */}
+          <RichTextField isDark={isDark} label="Question" minHeight={180} onChange={(v) => onChange('question', v)} placeholder="Theory question" value={question} />
         </div>
       </ReviewBlock>
 
