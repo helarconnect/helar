@@ -461,6 +461,18 @@ export function AdminContentPage() {
   }
 
   const reviewQueue = contentReviewQuery.data
+  // Content-type filter state used by the segment-control row above the pending items list.
+  // "all" disables filtering; any specific value narrows the visible rows to that type only
+  // while hero counters, summary cards, Approve-all button, and bulk-approve mutation
+  // continue to reflect the unfiltered queue so no functionality is lost.
+  const [queueTypeFilter, setQueueTypeFilter] = useState<
+    'all' | AdminContentReviewQueueItemType
+  >('all')
+  const filteredItems = useMemo(() => {
+    const items = reviewQueue?.items ?? []
+    if (queueTypeFilter === 'all') return items
+    return items.filter((item) => item.type === queueTypeFilter)
+  }, [queueTypeFilter, reviewQueue?.items])
   const iconByType = {
     bar_final_exam_mcq_question: ClipboardList,
     library_material: LibraryBig,
@@ -468,6 +480,51 @@ export function AdminContentPage() {
     subject_summary_entry: FileClock,
     bar_final_exam_question: ClipboardList,
   } as const
+  // Label definitions mirror the 5-card "Queue contents" section above so names stay
+  // consistent across summaries and the filter bar.
+  const filterLabelsByType: Record<AdminContentReviewQueueItemType, string> = {
+    bar_final_exam_mcq_question: 'Bar Final MCQ',
+    bar_final_exam_question: 'NLS Theory',
+    library_material: 'Law reports / Library',
+    subject_summary_case: 'Subject summary cases',
+    subject_summary_entry: 'Subject summary entries',
+  }
+  const filterSegments: Array<{
+    count: number
+    label: string
+    value: 'all' | AdminContentReviewQueueItemType
+  }> = [
+    {
+      label: 'All items',
+      value: 'all',
+      count: reviewQueue?.summary.totalPending ?? 0,
+    },
+    {
+      label: filterLabelsByType.bar_final_exam_question,
+      value: 'bar_final_exam_question',
+      count: reviewQueue?.summary.barFinalExamQuestions ?? 0,
+    },
+    {
+      label: filterLabelsByType.bar_final_exam_mcq_question,
+      value: 'bar_final_exam_mcq_question',
+      count: reviewQueue?.summary.barFinalExamMcqQuestions ?? 0,
+    },
+    {
+      label: filterLabelsByType.library_material,
+      value: 'library_material',
+      count: reviewQueue?.summary.libraryMaterials ?? 0,
+    },
+    {
+      label: filterLabelsByType.subject_summary_case,
+      value: 'subject_summary_case',
+      count: reviewQueue?.summary.subjectSummaryCases ?? 0,
+    },
+    {
+      label: filterLabelsByType.subject_summary_entry,
+      value: 'subject_summary_entry',
+      count: reviewQueue?.summary.subjectSummaryEntries ?? 0,
+    },
+  ]
 
   if (!isSuperAdminWorkspace) {
     return (
@@ -664,9 +721,57 @@ export function AdminContentPage() {
             </div>
           </div>
 
+          {/* Segment-control filter: click a content-type pill to narrow the queue below.
+              Hero counters, the Approve-all button, and bulk-approve mutation continue to
+              reflect the entire unfiltered queue so approval workflows stay intact. */}
+          <div className="mt-6 rounded-[20px] border border-white/10 bg-white/5 px-4 py-3.5 backdrop-blur-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs uppercase tracking-[0.2em] text-white/45">Filter by content type</p>
+              <p className="text-xs text-white/60">
+                Showing <strong className="text-white">{filteredItems.length}</strong> of{' '}
+                <strong className="text-white">{reviewQueue?.summary.totalPending ?? 0}</strong> pending approvals
+                {queueTypeFilter !== 'all' && (
+                  <>
+                    {' '}
+                    — <span className="text-white/80">{filterLabelsByType[queueTypeFilter]}</span>
+                  </>
+                )}
+              </p>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {filterSegments.map((segment) => {
+                const isActive = queueTypeFilter === segment.value
+                return (
+                  <button
+                    className={cn(
+                      'inline-flex items-center gap-2 rounded-full border px-3.5 py-2 text-xs font-semibold transition',
+                      isActive
+                        ? 'border-white/10 bg-white text-slate-950 shadow-sm'
+                        : 'border-white/10 bg-slate-950/25 text-white/70 hover:bg-white/10 hover:text-white'
+                    )}
+                    disabled={segment.count === 0 && !isActive}
+                    key={segment.value}
+                    onClick={() => setQueueTypeFilter(segment.value)}
+                    type="button"
+                  >
+                    {segment.label}
+                    <span
+                      className={cn(
+                        'inline-flex min-w-[22px] items-center justify-center rounded-full px-2 py-0.5 text-[10px] font-semibold',
+                        isActive ? 'bg-slate-950/80 text-white' : 'bg-white/10 text-white/80'
+                      )}
+                    >
+                      {segment.count}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
           <div className="mt-6 space-y-3">
-            {reviewQueue?.items.length ? (
-              reviewQueue.items.map((item) => {
+            {filteredItems.length ? (
+              filteredItems.map((item) => {
                 const ItemIcon = iconByType[item.type]
 
                 return (
@@ -737,7 +842,9 @@ export function AdminContentPage() {
               })
             ) : (
               <div className={cn('rounded-[24px] border px-5 py-10 text-center', isDark ? 'border-slate-700 bg-slate-800 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-500')}>
-                There are no pending approvals right now.
+                {queueTypeFilter !== 'all'
+                  ? `No pending ${filterLabelsByType[queueTypeFilter]} items right now — try switching to "All items" or another type.`
+                  : 'There are no pending approvals right now.'}
               </div>
             )}
           </div>
