@@ -1228,6 +1228,9 @@ export function AdminSubjectSummaryModulePage() {
     queryKey: queryKeys.subjectSummaryModuleAdminFormOptions(draft.subjectId),
     staleTime: 30_000
   });
+  const formOptionsError = formOptionsQuery.isError
+    ? getErrorMessage(formOptionsQuery.error, "Could not load subjects for this workspace.")
+    : null;
   const topicsQuery = useQuery({
     enabled: Boolean(filters.subjectId),
     placeholderData: (previous) => previous,
@@ -1896,7 +1899,7 @@ export function AdminSubjectSummaryModulePage() {
           onSubmit={() => saveMutation.mutate()}
           onSubmitAndAddQuestions={handleSaveAndAddQuestions}
           relatedCases={formOptionsQuery.data?.relatedCases ?? []}
-          saveError={entrySaveError}
+          saveError={entrySaveError ?? formOptionsError}
           subjects={formOptionsQuery.data?.subjects ?? []}
           title="Edit subject summary"
         />
@@ -1918,7 +1921,7 @@ export function AdminSubjectSummaryModulePage() {
           onUpdate={(nextDraft) => setTopicDraft(nextDraft)}
           subjects={formOptionsQuery.data?.subjects ?? []}
           title={filters.topic ? "Add questions" : "Create topic summary"}
-          topicSaveError={topicSaveError}
+          topicSaveError={topicSaveError ?? formOptionsError}
         />
       ) : null}
 

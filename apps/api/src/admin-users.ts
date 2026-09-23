@@ -1967,6 +1967,8 @@ export async function updateAdminUserRoles(userId: string, roleCodes: string[], 
   const nextRoleCodes = new Set(availableRoles.map((role) => role.code));
   const currentActiveRoleIds = new Set(currentUserRoles.map((userRole) => userRole.roleId));
   const currentRoleCodes = currentUserRoles.map((userRole) => userRole.role.code);
+  const rolesChanged =
+    currentRoleCodes.length !== nextRoleCodes.size || currentRoleCodes.some((roleCode) => !nextRoleCodes.has(roleCode));
 
   await runInTransaction(async (tx) => {
     for (const currentUserRole of currentUserRoles) {
@@ -2017,6 +2019,10 @@ export async function updateAdminUserRoles(userId: string, roleCodes: string[], 
           roleId: nextRole.id
         }
       });
+    }
+
+    if (rolesChanged) {
+      await revokeUserSessions(tx, userId);
     }
 
     await tx.auditLog.create({
