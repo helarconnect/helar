@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 
 import { sendAdminUserProvisioningEmail } from "./lib/email.js";
 import { prisma } from "./lib/prisma.js";
+import { normalizeRoleName } from "./lib/roles.js";
 import { revokeUserSessions } from "./lib/sessions.js";
 import { containsText } from "./lib/text-search.js";
 import { runInTransaction } from "./lib/transactions.js";
@@ -503,11 +504,14 @@ function getPrimaryRoleName(userRoles: Array<{ role: { code: string; name: strin
   for (const code of precedence) {
     const found = userRoles.find((userRole) => userRole.role.code === code);
     if (found) {
-      return found.role.name;
+      return normalizeRoleName(found.role);
     }
   }
 
-  return userRoles[0]?.role.name ?? "Unassigned";
+  if (userRoles.length > 0) {
+    return normalizeRoleName(userRoles[0].role);
+  }
+  return "Unassigned";
 }
 
 function normalizeUserSummary(user: {
@@ -550,7 +554,6 @@ function normalizeUserSummary(user: {
   const latestSubscription = user.subscriptions[0];
   const latestPayment = user.payments[0];
   const lastActiveAt = getLastActiveAt(user);
-  const hasStudentRole = user.roles.some((userRole) => userRole.role.code === "student");
 
   return {
     id: user.id,
@@ -560,7 +563,7 @@ function normalizeUserSummary(user: {
     status: user.status,
     roles: user.roles.map((userRole) => ({
       code: userRole.role.code,
-      name: userRole.role.name
+      name: normalizeRoleName(userRole.role)
     })),
     primaryRole: getPrimaryRoleName(user.roles),
     city: user.city,
@@ -779,7 +782,7 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
         const existingRole = roleBreakdownMap.get(role.code);
         roleBreakdownMap.set(role.code, {
           code: role.code,
-          name: role.name,
+          name: normalizeRoleName(role),
           count: (existingRole?.count ?? 0) + 1
         });
       }
@@ -846,7 +849,7 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
         .filter((role) => assignableRoleCodes.includes(role.code))
         .map((role) => ({
           code: role.code,
-          name: role.name
+          name: normalizeRoleName(role)
         })),
       appliedFilters: filters
     };
@@ -981,7 +984,7 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
         const existingRole = roleBreakdownMap.get(userRole.role.code);
         roleBreakdownMap.set(userRole.role.code, {
           code: userRole.role.code,
-          name: userRole.role.name,
+          name: normalizeRoleName(userRole.role),
           count: (existingRole?.count ?? 0) + 1
         });
       }
@@ -1064,7 +1067,7 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
         .filter((role) => assignableRoleCodes.includes(role.code))
         .map((role) => ({
           code: role.code,
-          name: role.name
+          name: normalizeRoleName(role)
         })),
       appliedFilters: filters
     };
@@ -1215,7 +1218,7 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
       const existingRole = roleBreakdownMap.get(userRole.role.code);
       roleBreakdownMap.set(userRole.role.code, {
         code: userRole.role.code,
-        name: userRole.role.name,
+        name: normalizeRoleName(userRole.role),
         count: (existingRole?.count ?? 0) + 1
       });
     }
@@ -1282,7 +1285,7 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
       .filter((role) => assignableRoleCodes.includes(role.code))
       .map((role) => ({
       code: role.code,
-      name: role.name
+      name: normalizeRoleName(role)
       })),
     appliedFilters: filters
   };
@@ -1474,7 +1477,7 @@ export async function getAdminUserDetail(userId: string) {
     },
     roles: user.roles.map((userRole) => ({
       code: userRole.role.code,
-      name: userRole.role.name,
+      name: normalizeRoleName(userRole.role),
       description: userRole.role.description
     })),
     profileType: user.student || hasStudentRole ? "student" : user.tutor ? "tutor" : "general",
@@ -1837,7 +1840,7 @@ export async function exportAdminUsersCsv(filters: AdminUserFilters) {
       user.fullName,
       user.email,
       toTitleCase(user.status),
-      user.roles.map((userRole) => userRole.role.name).join(", "),
+      user.roles.map((userRole) => normalizeRoleName(userRole.role)).join(", "),
       user.phoneNumber ?? "",
       user.addressLine1 ?? "",
       user.addressLine2 ?? "",

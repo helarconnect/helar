@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { prisma } from "./lib/prisma.js";
+import { normalizeRoleName } from "./lib/roles.js";
 import { parseSearchDateRange, parseSearchYear } from "./lib/search-utils.js";
 import { containsText } from "./lib/text-search.js";
 
@@ -666,7 +667,7 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
           user.city,
           user.state,
           user.country,
-          user.roles.map((role) => `${role.role.name} ${role.role.code}`).join(" ")
+          user.roles.map((role) => `${normalizeRoleName(role.role)} ${role.role.code}`).join(" ")
         )
     }),
     completeMongoMatches({
@@ -851,7 +852,7 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
       key: "users" as const,
       label: "Users",
       items: users.map((user) => ({
-        badge: user.roles[0]?.role.name ?? user.status,
+        badge: user.roles[0]?.role ? normalizeRoleName(user.roles[0].role) : user.status,
         id: user.id,
         kind: "user" as const,
         path: buildPath("/app/admin/users", {
@@ -861,7 +862,7 @@ export async function searchAdminPortal(query: AdminPortalSearchQuery) {
         snippet: formatUserSnippet({
           city: user.city,
           country: user.country,
-          roleNames: user.roles.map((role) => role.role.name),
+          roleNames: user.roles.map((role) => normalizeRoleName(role.role)),
           state: user.state,
           status: user.status
         }),

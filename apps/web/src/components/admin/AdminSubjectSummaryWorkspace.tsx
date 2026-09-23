@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AxiosError } from "axios";
 import {
   BarChart3,
   ChevronDown,
@@ -128,6 +129,22 @@ function parseStringList(value: string) {
 
 function toMultilineValue(values: string[]) {
   return values.join("\n");
+}
+
+function getApiErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof AxiosError) {
+    const payload = error.response?.data as { error?: { message?: string; details?: { formErrors?: string[] } } } | undefined;
+    const message = payload?.error?.message?.trim();
+    if (message) return message;
+    const formErrors = payload?.error?.details?.formErrors;
+    if (Array.isArray(formErrors) && formErrors.length > 0) {
+      return formErrors.filter(Boolean).join(" ");
+    }
+  }
+  if (error instanceof Error) {
+    return error.message || fallback;
+  }
+  return fallback;
 }
 
 function createSubjectDraft(): SubjectSummarySubjectInput {
@@ -1574,7 +1591,7 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
       setSubjectDraft(createSubjectDraft());
       await invalidateSubjectSummaryQueries();
     },
-    onError: () => showToast("Could not create the subject right now.", "error")
+    onError: (error) => showToast(getApiErrorMessage(error, "Could not create the subject right now."), "error")
   });
 
   const updateSubjectMutation = useMutation({
@@ -1586,7 +1603,7 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
       setSubjectDraft(createSubjectDraft());
       await invalidateSubjectSummaryQueries();
     },
-    onError: () => showToast("Could not update the subject right now.", "error")
+    onError: (error) => showToast(getApiErrorMessage(error, "Could not update the subject right now."), "error")
   });
 
   const deleteSubjectMutation = useMutation({
@@ -1595,7 +1612,7 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
       showToast("Subject removed successfully.", "success");
       await invalidateSubjectSummaryQueries();
     },
-    onError: () => showToast("Could not remove the subject right now.", "error")
+    onError: (error) => showToast(getApiErrorMessage(error, "Could not remove the subject right now."), "error")
   });
 
   const createTopicMutation = useMutation({
@@ -1607,7 +1624,7 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
       setTopicDraft(createTopicDraft());
       await invalidateSubjectSummaryQueries();
     },
-    onError: () => showToast("Could not create the topic right now.", "error")
+    onError: (error) => showToast(getApiErrorMessage(error, "Could not create the topic right now."), "error")
   });
 
   const updateTopicMutation = useMutation({
@@ -1619,7 +1636,7 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
       setTopicDraft(createTopicDraft());
       await invalidateSubjectSummaryQueries();
     },
-    onError: () => showToast("Could not update the topic right now.", "error")
+    onError: (error) => showToast(getApiErrorMessage(error, "Could not update the topic right now."), "error")
   });
 
   const deleteTopicMutation = useMutation({
@@ -1628,7 +1645,7 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
       showToast("Topic removed successfully.", "success");
       await invalidateSubjectSummaryQueries();
     },
-    onError: () => showToast("Could not remove the topic right now.", "error")
+    onError: (error) => showToast(getApiErrorMessage(error, "Could not remove the topic right now."), "error")
   });
 
   const createCaseMutation = useMutation({
@@ -1642,7 +1659,7 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
       setCaseDraft(createCaseDraft());
       await invalidateSubjectSummaryQueries();
     },
-    onError: () => showToast("Could not create the case right now.", "error")
+    onError: (error) => showToast(getApiErrorMessage(error, "Could not create the case right now."), "error")
   });
 
   const updateCaseMutation = useMutation({
@@ -1656,7 +1673,7 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
       setCaseDraft(createCaseDraft());
       await invalidateSubjectSummaryQueries();
     },
-    onError: () => showToast("Could not update the case right now.", "error")
+    onError: (error) => showToast(getApiErrorMessage(error, "Could not update the case right now."), "error")
   });
 
   const deleteCaseMutation = useMutation({
@@ -1665,7 +1682,7 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
       showToast("Case removed successfully.", "success");
       await invalidateSubjectSummaryQueries();
     },
-    onError: () => showToast("Could not remove the case right now.", "error")
+    onError: (error) => showToast(getApiErrorMessage(error, "Could not remove the case right now."), "error")
   });
 
   const bulkSubjectsMutation = useMutation({
@@ -1869,8 +1886,9 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
   }
 
   function handleSubjectSubmit() {
-    if (!subjectDraft.name.trim()) {
-      showToast("Add a subject name before saving.", "error");
+    const normalizedName = subjectDraft.name.trim();
+    if (normalizedName.length < 2) {
+      showToast("Subject name must be at least 2 characters.", "error");
       return;
     }
 

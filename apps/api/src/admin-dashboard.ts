@@ -1,6 +1,7 @@
 import { MaterialType, PaymentStatus, StudentStudyContentType, SubscriptionStatus, SubjectSummaryCaseStatus, UserStatus, type Prisma } from "@prisma/client";
 
 import { prisma } from "./lib/prisma.js";
+import { normalizeRoleName } from "./lib/roles.js";
 import { containsText } from "./lib/text-search.js";
 
 const adminRoleCodes = ["super_admin", "administrator", "academic_administrator", "finance_officer", "moderator", "content_admin"] as const;
@@ -1931,7 +1932,7 @@ export async function getAdminDashboardOverview() {
       lastLoginAt: item.sessions[0]?.updatedAt?.toISOString() ?? null,
       name: item.fullName,
       registeredAt: item.createdAt.toISOString(),
-      role: item.roles[0]?.role.name ?? item.roles[0]?.role.code ?? "User",
+      role: item.roles[0]?.role ? normalizeRoleName(item.roles[0].role) : "User",
       status: normalizeLabel(item.status)
     })),
     security: {
