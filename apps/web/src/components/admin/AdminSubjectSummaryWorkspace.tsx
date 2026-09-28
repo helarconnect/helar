@@ -685,8 +685,10 @@ function TopicModal({
   onChange,
   onClose,
   onSubmit,
+  saveError,
   subjects,
   subjectsLoading,
+  subjectsError,
   title
 }: {
   draft: SubjectSummaryTopicInput;
@@ -696,13 +698,17 @@ function TopicModal({
   onChange: (field: keyof SubjectSummaryTopicInput, value: string | number) => void;
   onClose: () => void;
   onSubmit: () => void;
+  saveError: string | null;
   subjects: Array<{ id: string; name: string }>;
   subjectsLoading: boolean;
+  subjectsError: string | null;
   title: string;
 }) {
   if (!isOpen || typeof document === "undefined") {
     return null;
   }
+
+  const canSubmit = Boolean(draft.subjectId) && draft.name.trim().length >= 2 && !subjectsLoading && !subjectsError;
 
   return createPortal(
     <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/45 px-4 py-6 backdrop-blur-sm" onClick={onClose}>
@@ -720,6 +726,16 @@ function TopicModal({
           </IconButton>
         </div>
         <div className="grid gap-4 px-6 py-6 md:grid-cols-2">
+          {subjectsError ? (
+            <div
+              className={cn(
+                "rounded-3xl border px-4 py-3 text-sm md:col-span-2",
+                isDark ? "border-rose-500/20 bg-rose-500/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-700"
+              )}
+            >
+              {subjectsError}
+            </div>
+          ) : null}
           <label className="space-y-2">
             <span className={cn("text-xs font-medium uppercase tracking-[0.2em]", isDark ? "text-slate-500" : "text-slate-500")}>Subject</span>
             <select
@@ -773,11 +789,23 @@ function TopicModal({
             />
           </label>
         </div>
+        {saveError ? (
+          <div className="px-6 pb-4">
+            <div
+              className={cn(
+                "rounded-3xl border px-4 py-3 text-sm",
+                isDark ? "border-rose-500/20 bg-rose-500/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-700"
+              )}
+            >
+              {saveError}
+            </div>
+          </div>
+        ) : null}
         <div className={cn("flex items-center justify-end gap-3 border-t px-6 py-4", isDark ? "border-slate-800" : "border-slate-200")}>
           <button className="button-secondary !px-4 !py-3" onClick={onClose} type="button">
             Cancel
           </button>
-          <button className="button-primary !px-5 !py-3" disabled={isSaving} onClick={onSubmit} type="button">
+          <button className="button-primary !px-5 !py-3" disabled={isSaving || !canSubmit} onClick={onSubmit} type="button">
             {isSaving ? "Saving..." : "Save topic"}
           </button>
         </div>
@@ -1359,6 +1387,7 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
   const [selectedHierarchyTopic, setSelectedHierarchyTopic] = useState<HierarchyTopicSelection | null>(null);
   const [subjectDraft, setSubjectDraft] = useState<SubjectSummarySubjectInput>(createSubjectDraft());
   const [topicDraft, setTopicDraft] = useState<SubjectSummaryTopicInput>(createTopicDraft(searchParams.get("subjectId") ?? ""));
+  const [topicModalError, setTopicModalError] = useState<string | null>(null);
   const [caseDraft, setCaseDraft] = useState<SubjectSummaryCaseInput>(createCaseDraft(searchParams.get("subjectId") ?? "", searchParams.get("topicId") ?? ""));
   const [toasts, setToasts] = useState<Array<{ id: number; message: string; tone: ToastTone }>>([]);
 
@@ -1617,26 +1646,38 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
 
   const createTopicMutation = useMutation({
     mutationFn: createSubjectSummaryTopic,
+    onMutate: () => setTopicModalError(null),
     onSuccess: async () => {
+      setTopicModalError(null);
       showToast("Topic created successfully.", "success");
       setTopicModalOpen(false);
       setEditingTopic(null);
       setTopicDraft(createTopicDraft());
       await invalidateSubjectSummaryQueries();
     },
-    onError: (error) => showToast(getApiErrorMessage(error, "Could not create the topic right now."), "error")
+    onError: (error) => {
+      const message = getApiErrorMessage(error, "Could not create the topic right now.");
+      setTopicModalError(message);
+      showToast(message, "error");
+    }
   });
 
   const updateTopicMutation = useMutation({
     mutationFn: ({ id, payload }: { id: string; payload: SubjectSummaryTopicInput }) => updateSubjectSummaryTopic(id, payload),
+    onMutate: () => setTopicModalError(null),
     onSuccess: async () => {
+      setTopicModalError(null);
       showToast("Topic updated successfully.", "success");
       setTopicModalOpen(false);
       setEditingTopic(null);
       setTopicDraft(createTopicDraft());
       await invalidateSubjectSummaryQueries();
     },
-    onError: (error) => showToast(getApiErrorMessage(error, "Could not update the topic right now."), "error")
+    onError: (error) => {
+      const message = getApiErrorMessage(error, "Could not update the topic right now.");
+      setTopicModalError(message);
+      showToast(message, "error");
+    }
   });
 
   const deleteTopicMutation = useMutation({
@@ -1959,6 +2000,12 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
     subjectReferenceQuery.data?.items,
     subjectsQuery.data?.items
   ]);
+
+  const subjectOptionsError = subjectsQuery.isError
+    ? getApiErrorMessage(subjectsQuery.error, "Could not load subjects for topics. Refresh and try again.")
+    : subjectReferenceQuery.isError
+      ? getApiErrorMessage(subjectReferenceQuery.error, "Could not load subjects for topics. Refresh and try again.")
+      : null;
   const topicOptions = availableCaseTopics;
   const readingInsightActions = (
     <>
@@ -2001,8 +2048,10 @@ export function AdminSubjectSummaryWorkspace({ mode }: { mode: ViewMode }) {
         }
         onClose={() => setTopicModalOpen(false)}
         onSubmit={handleTopicSubmit}
+        saveError={topicModalError}
         subjects={subjectOptions}
-        subjectsLoading={subjectReferenceQuery.isLoading}
+        subjectsLoading={subjectReferenceQuery.isLoading || subjectReferenceQuery.isFetching}
+        subjectsError={subjectOptionsError}
         title={editingTopic ? "Edit topic" : "Add topic"}
       />
 
