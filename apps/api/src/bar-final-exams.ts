@@ -1,4 +1,4 @@
-import { BarFinalExamQuestionStatus, type Prisma } from "@prisma/client";
+import { BarFinalExamQuestionStatus, SubjectSummaryStatus, type Prisma } from "@prisma/client";
 import { z } from "zod";
 
 import { recordIdSchema } from "./lib/record-id.js";
@@ -88,7 +88,8 @@ const adminQuestionFiltersSchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(500).default(20),
   search: z.string().trim().max(160).default(""),
   status: z.union([z.nativeEnum(BarFinalExamQuestionStatus), z.literal("all")]).default("all"),
-  subjectId: recordIdSchema.optional()
+  subjectId: recordIdSchema.optional(),
+  topicId: recordIdSchema.optional()
 });
 
 const questionInputSchema = z
@@ -97,7 +98,8 @@ const questionInputSchema = z
     examDate: z.string().trim().optional().or(z.literal("")),
     question: z.string().trim().min(2),
     status: z.nativeEnum(BarFinalExamQuestionStatus).default(BarFinalExamQuestionStatus.DRAFT),
-    subjectId: recordIdSchema
+    subjectId: recordIdSchema,
+    topicId: recordIdSchema.optional()
   })
   .strict();
 
@@ -108,7 +110,8 @@ const studentSubjectsQuerySchema = z.object({
 const studentQuestionsQuerySchema = z.object({
   sortBy: z.enum(["createdAt", "examDate"]).default("createdAt"),
   sortOrder: z.enum(["asc", "desc"]).default("asc"),
-  subjectId: recordIdSchema
+  subjectId: recordIdSchema,
+  topicId: recordIdSchema.optional()
 });
 
 const adminMcqQuestionFiltersSchema = z.object({
@@ -116,7 +119,8 @@ const adminMcqQuestionFiltersSchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(500).default(20),
   search: z.string().trim().max(160).default(""),
   status: z.union([z.nativeEnum(BarFinalExamQuestionStatus), z.literal("all")]).default("all"),
-  subjectId: recordIdSchema.optional()
+  subjectId: recordIdSchema.optional(),
+  topicId: recordIdSchema.optional()
 });
 
 const mcqQuestionInputSchema = z
@@ -131,7 +135,8 @@ const mcqQuestionInputSchema = z
       .transform((items) => items.map((item) => item.trim()).filter(Boolean)),
     question: z.string().trim().min(2),
     status: z.nativeEnum(BarFinalExamQuestionStatus).default(BarFinalExamQuestionStatus.DRAFT),
-    subjectId: recordIdSchema
+    subjectId: recordIdSchema,
+    topicId: recordIdSchema.optional()
   })
   .strict()
   .refine((value) => value.correctOptionIndex >= 0 && value.correctOptionIndex < value.options.length, {
@@ -145,7 +150,8 @@ const mcqQuestionInputSchema = z
 const studentMcqQuestionsQuerySchema = z.object({
   sortBy: z.enum(["createdAt", "examDate"]).default("createdAt"),
   sortOrder: z.enum(["asc", "desc"]).default("asc"),
-  subjectId: recordIdSchema
+  subjectId: recordIdSchema,
+  topicId: recordIdSchema.optional()
 });
 
 const studentMcqAttemptSchema = z
@@ -153,6 +159,26 @@ const studentMcqAttemptSchema = z
     selectedOptionIndex: z.coerce.number().int().min(0).max(10)
   })
   .strict();
+
+const adminTopicQuerySchema = z
+  .object({
+    subjectId: recordIdSchema
+  })
+  .strict();
+
+const topicInputSchema = z
+  .object({
+    subjectId: recordIdSchema,
+    name: z.string().trim().min(2),
+    description: z.string().trim().max(800).optional().or(z.literal("")),
+    displayOrder: z.coerce.number().int().min(0).default(0),
+    status: z.nativeEnum(SubjectSummaryStatus).default(SubjectSummaryStatus.ACTIVE)
+  })
+  .strict()
+  .transform((value) => ({
+    ...value,
+    description: value.description === "" ? null : value.description ?? null
+  }));
 
 export type AdminBarFinalExamQuestionFilters = z.infer<typeof adminQuestionFiltersSchema>;
 export type BarFinalExamQuestionInput = z.infer<typeof questionInputSchema>;
@@ -162,6 +188,8 @@ export type AdminBarFinalExamMcqQuestionFilters = z.infer<typeof adminMcqQuestio
 export type BarFinalExamMcqQuestionInput = z.infer<typeof mcqQuestionInputSchema>;
 export type StudentBarFinalExamMcqQuestionsQuery = z.infer<typeof studentMcqQuestionsQuerySchema>;
 export type StudentBarFinalExamMcqAttemptInput = z.infer<typeof studentMcqAttemptSchema>;
+export type AdminBarFinalExamTopicsQuery = z.infer<typeof adminTopicQuerySchema>;
+export type BarFinalExamTopicInput = z.infer<typeof topicInputSchema>;
 
 export function parseAdminBarFinalExamQuestionFilters(query: Record<string, string | string[] | undefined>) {
   return adminQuestionFiltersSchema.parse(query);
@@ -217,13 +245,22 @@ export function parseStudentBarFinalExamMcqAttemptInput(payload: unknown) {
   return studentMcqAttemptSchema.parse(payload);
 }
 
+export function parseAdminBarFinalExamTopicsQuery(query: Record<string, string | string[] | undefined>) {
+  return adminTopicQuerySchema.parse(query);
+}
+
+export function parseBarFinalExamTopicInput(payload: unknown) {
+  return topicInputSchema.parse(payload);
+}
+
 function buildAdminWhere(filters: AdminBarFinalExamQuestionFilters): Prisma.BarFinalExamQuestionWhereInput {
   return {
-    deletedAt: null,
+    OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
     subject: {
-      deletedAt: null
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }]
     },
     ...(filters.subjectId ? { subjectId: filters.subjectId } : {}),
+    ...(filters.topicId ? { topicId: filters.topicId } : {}),
     ...(filters.status === "all" ? {} : { status: filters.status }),
     ...(filters.search
       ? {
@@ -244,11 +281,12 @@ function buildAdminWhere(filters: AdminBarFinalExamQuestionFilters): Prisma.BarF
 // Broad variant: keeps scoping filters but drops the search OR-clause for fallback candidate fetch
 function buildBroadAdminWhere(filters: AdminBarFinalExamQuestionFilters): Prisma.BarFinalExamQuestionWhereInput {
   return {
-    deletedAt: null,
+    OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
     subject: {
-      deletedAt: null
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }]
     },
     ...(filters.subjectId ? { subjectId: filters.subjectId } : {}),
+    ...(filters.topicId ? { topicId: filters.topicId } : {}),
     ...(filters.status === "all" ? {} : { status: filters.status })
   };
 }
@@ -256,6 +294,7 @@ function buildBroadAdminWhere(filters: AdminBarFinalExamQuestionFilters): Prisma
 function mapQuestion(item: {
   id: string;
   subjectId: string;
+  topicId: string | null;
   question: string;
   answer: string;
   examDate: Date | null;
@@ -266,6 +305,10 @@ function mapQuestion(item: {
     id: string;
     name: string;
   };
+  topic: {
+    id: string;
+    name: string;
+  } | null;
 }) {
   return {
     answer: item.answer,
@@ -276,6 +319,8 @@ function mapQuestion(item: {
     status: item.status,
     subject: item.subject,
     subjectId: item.subjectId,
+    topic: item.topic,
+    topicId: item.topicId,
     updatedAt: item.updatedAt.toISOString()
   };
 }
@@ -293,11 +338,12 @@ async function createAuditLog(actorUserId: string, action: string, resourceId: s
 
 function buildAdminMcqWhere(filters: AdminBarFinalExamMcqQuestionFilters): Prisma.BarFinalExamMcqQuestionWhereInput {
   return {
-    deletedAt: null,
+    OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
     subject: {
-      deletedAt: null
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }]
     },
     ...(filters.subjectId ? { subjectId: filters.subjectId } : {}),
+    ...(filters.topicId ? { topicId: filters.topicId } : {}),
     ...(filters.status === "all" ? {} : { status: filters.status }),
     ...(filters.search
       ? {
@@ -319,11 +365,12 @@ function buildBroadAdminMcqWhere(
   filters: AdminBarFinalExamMcqQuestionFilters
 ): Prisma.BarFinalExamMcqQuestionWhereInput {
   return {
-    deletedAt: null,
+    OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
     subject: {
-      deletedAt: null
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }]
     },
     ...(filters.subjectId ? { subjectId: filters.subjectId } : {}),
+    ...(filters.topicId ? { topicId: filters.topicId } : {}),
     ...(filters.status === "all" ? {} : { status: filters.status })
   };
 }
@@ -331,6 +378,7 @@ function buildBroadAdminMcqWhere(
 function mapMcqQuestion(item: {
   id: string;
   subjectId: string;
+  topicId: string | null;
   question: string;
   options: string[];
   correctOptionIndex: number;
@@ -343,6 +391,10 @@ function mapMcqQuestion(item: {
     id: string;
     name: string;
   };
+  topic: {
+    id: string;
+    name: string;
+  } | null;
 }) {
   return {
     correctOptionIndex: item.correctOptionIndex,
@@ -355,6 +407,8 @@ function mapMcqQuestion(item: {
     status: item.status,
     subject: item.subject,
     subjectId: item.subjectId,
+    topic: item.topic,
+    topicId: item.topicId,
     updatedAt: item.updatedAt.toISOString()
   };
 }
@@ -429,6 +483,258 @@ export async function fetchBarFinalExamFormOptions() {
   return { subjects };
 }
 
+const notDeletedMongoWhere = {
+  OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }]
+};
+
+async function assertBarFinalExamSubjectExists(subjectId: string) {
+  const subject = await prisma.subjectSummarySubject.findFirst({
+    where: {
+      id: subjectId,
+      ...notDeletedMongoWhere
+    },
+    select: {
+      id: true
+    }
+  });
+
+  if (!subject) {
+    throw new Error("Subject not found.");
+  }
+}
+
+async function resolveBarFinalExamTopicId(subjectId: string, topicId?: string) {
+  if (topicId) {
+    const topic = await prisma.barFinalExamTopic.findFirst({
+      where: {
+        id: topicId,
+        subjectId,
+        ...notDeletedMongoWhere,
+        subject: {
+          ...notDeletedMongoWhere
+        }
+      },
+      select: {
+        id: true
+      }
+    });
+
+    if (!topic) {
+      throw new Error("Topic not found for the selected subject.");
+    }
+
+    return topic.id;
+  }
+
+  const defaultName = "General";
+  const existing = await prisma.barFinalExamTopic.findFirst({
+    where: {
+      subjectId,
+      name: defaultName,
+      ...notDeletedMongoWhere,
+      subject: {
+        ...notDeletedMongoWhere
+      }
+    },
+    select: {
+      id: true
+    }
+  });
+
+  if (existing) {
+    return existing.id;
+  }
+
+  const created = await prisma.barFinalExamTopic.create({
+    data: {
+      subjectId,
+      name: defaultName,
+      description: null,
+      displayOrder: 0,
+      status: SubjectSummaryStatus.ACTIVE,
+      deletedAt: null
+    },
+    select: {
+      id: true
+    }
+  });
+
+  return created.id;
+}
+
+export async function listAdminBarFinalExamTopics(query: AdminBarFinalExamTopicsQuery) {
+  await assertBarFinalExamSubjectExists(query.subjectId);
+
+  const items = await prisma.barFinalExamTopic.findMany({
+    where: {
+      subjectId: query.subjectId,
+      ...notDeletedMongoWhere,
+      subject: {
+        ...notDeletedMongoWhere
+      }
+    },
+    orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      displayOrder: true,
+      status: true,
+      subjectId: true,
+      createdAt: true,
+      updatedAt: true
+    }
+  });
+
+  return {
+    items: items.map((topic) => ({
+      ...topic,
+      createdAt: topic.createdAt.toISOString(),
+      updatedAt: topic.updatedAt.toISOString()
+    }))
+  };
+}
+
+export async function createAdminBarFinalExamTopic(input: BarFinalExamTopicInput, actorUserId: string) {
+  await assertBarFinalExamSubjectExists(input.subjectId);
+
+  const created = await prisma.barFinalExamTopic.create({
+    data: {
+      subjectId: input.subjectId,
+      name: input.name,
+      description: input.description ?? null,
+      displayOrder: input.displayOrder,
+      status: input.status,
+      deletedAt: null
+    },
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      displayOrder: true,
+      status: true,
+      subjectId: true,
+      createdAt: true,
+      updatedAt: true
+    }
+  });
+
+  await createAuditLog(actorUserId, "admin.bar-final-exams.topic.created", created.id, {
+    subjectId: created.subjectId
+  });
+
+  return {
+    ...created,
+    createdAt: created.createdAt.toISOString(),
+    updatedAt: created.updatedAt.toISOString()
+  };
+}
+
+export async function updateAdminBarFinalExamTopic(topicId: string, input: BarFinalExamTopicInput, actorUserId: string) {
+  await assertBarFinalExamSubjectExists(input.subjectId);
+
+  const updated = await prisma.barFinalExamTopic.update({
+    where: {
+      id: topicId
+    },
+    data: {
+      subjectId: input.subjectId,
+      name: input.name,
+      description: input.description ?? null,
+      displayOrder: input.displayOrder,
+      status: input.status,
+      deletedAt: null
+    },
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      displayOrder: true,
+      status: true,
+      subjectId: true,
+      createdAt: true,
+      updatedAt: true
+    }
+  });
+
+  await createAuditLog(actorUserId, "admin.bar-final-exams.topic.updated", updated.id, {
+    subjectId: updated.subjectId
+  });
+
+  return {
+    ...updated,
+    createdAt: updated.createdAt.toISOString(),
+    updatedAt: updated.updatedAt.toISOString()
+  };
+}
+
+export async function deleteAdminBarFinalExamTopic(topicId: string, actorUserId: string) {
+  const deleted = await prisma.barFinalExamTopic.update({
+    where: {
+      id: topicId
+    },
+    data: {
+      deletedAt: new Date()
+    },
+    select: {
+      id: true,
+      subjectId: true
+    }
+  });
+
+  await createAuditLog(actorUserId, "admin.bar-final-exams.topic.deleted", deleted.id, {
+    subjectId: deleted.subjectId
+  });
+
+  return { id: topicId, success: true };
+}
+
+export async function listStudentBarFinalExamTopics(query: AdminBarFinalExamTopicsQuery) {
+  const topics = await prisma.barFinalExamTopic.findMany({
+    where: {
+      subjectId: query.subjectId,
+      ...notDeletedMongoWhere,
+      status: SubjectSummaryStatus.ACTIVE,
+      subject: {
+        ...notDeletedMongoWhere
+      },
+      questions: {
+        some: {
+          OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
+          status: BarFinalExamQuestionStatus.PUBLISHED
+        }
+      }
+    },
+    orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+    select: { id: true, name: true }
+  });
+
+  return { items: topics };
+}
+
+export async function listStudentBarFinalExamMcqTopics(query: AdminBarFinalExamTopicsQuery) {
+  const topics = await prisma.barFinalExamTopic.findMany({
+    where: {
+      subjectId: query.subjectId,
+      ...notDeletedMongoWhere,
+      status: SubjectSummaryStatus.ACTIVE,
+      subject: {
+        ...notDeletedMongoWhere
+      },
+      mcqQuestions: {
+        some: {
+          OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
+          status: BarFinalExamQuestionStatus.PUBLISHED
+        }
+      }
+    },
+    orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+    select: { id: true, name: true }
+  });
+
+  return { items: topics };
+}
+
 export async function listAdminBarFinalExamQuestions(filters: AdminBarFinalExamQuestionFilters) {
   const where = buildAdminWhere(filters);
   const broadWhere = buildBroadAdminWhere(filters);
@@ -449,7 +755,10 @@ export async function listAdminBarFinalExamQuestions(filters: AdminBarFinalExamQ
         orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
         skip,
         take: filters.pageSize,
-        include: { subject: { select: { id: true, name: true } } }
+        include: {
+          subject: { select: { id: true, name: true } },
+          topic: { select: { id: true, name: true } }
+        }
       }),
       prisma.barFinalExamQuestion.count({ where }),
       subjectsPromise
@@ -506,7 +815,10 @@ export async function listAdminBarFinalExamQuestions(filters: AdminBarFinalExamQ
   // Hydrate the exact page with full relations
   const hydrated = await prisma.barFinalExamQuestion.findMany({
     where: { id: { in: pageIds } },
-    include: { subject: { select: { id: true, name: true } } }
+    include: {
+      subject: { select: { id: true, name: true } },
+      topic: { select: { id: true, name: true } }
+    }
   });
 
   // Reorder to match pageIds (Prisma `IN` does not preserve order)
@@ -525,8 +837,10 @@ export async function createAdminBarFinalExamQuestion(
   actorRoleCodes: string[] = [],
   actorUserId: string
 ) {
+  await assertBarFinalExamSubjectExists(input.subjectId);
   const resolvedStatus = resolveQuestionStatus(input.status, actorRoleCodes);
   const resolvedExamDate = parseExamDate(input.examDate);
+  const resolvedTopicId = await resolveBarFinalExamTopicId(input.subjectId, input.topicId);
 
   const created = await prisma.barFinalExamQuestion.create({
     data: {
@@ -536,10 +850,17 @@ export async function createAdminBarFinalExamQuestion(
       question: input.question,
       reviewFeedback: null,
       status: resolvedStatus,
-      subjectId: input.subjectId
+      subjectId: input.subjectId,
+      topicId: resolvedTopicId
     },
     include: {
       subject: {
+        select: {
+          id: true,
+          name: true
+        }
+      },
+      topic: {
         select: {
           id: true,
           name: true
@@ -559,11 +880,17 @@ export async function createAdminBarFinalExamQuestion(
 export async function getAdminBarFinalExamQuestion(questionId: string) {
   const question = await prisma.barFinalExamQuestion.findFirst({
     where: {
-      deletedAt: null,
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
       id: questionId
     },
     include: {
       subject: {
+        select: {
+          id: true,
+          name: true
+        }
+      },
+      topic: {
         select: {
           id: true,
           name: true
@@ -585,8 +912,10 @@ export async function updateAdminBarFinalExamQuestion(
   actorRoleCodes: string[] = [],
   actorUserId: string
 ) {
+  await assertBarFinalExamSubjectExists(input.subjectId);
   const resolvedStatus = resolveQuestionStatus(input.status, actorRoleCodes);
   const resolvedExamDate = parseExamDate(input.examDate);
+  const resolvedTopicId = await resolveBarFinalExamTopicId(input.subjectId, input.topicId);
 
   const updated = await prisma.barFinalExamQuestion.update({
     where: {
@@ -599,10 +928,17 @@ export async function updateAdminBarFinalExamQuestion(
       reviewFeedback: null,
       status: resolvedStatus,
       subjectId: input.subjectId,
+      topicId: resolvedTopicId,
       deletedAt: null
     },
     include: {
       subject: {
+        select: {
+          id: true,
+          name: true
+        }
+      },
+      topic: {
         select: {
           id: true,
           name: true
@@ -723,6 +1059,7 @@ export async function listStudentBarFinalExamQuestions(
       OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
       status: BarFinalExamQuestionStatus.PUBLISHED,
       subjectId: query.subjectId,
+      ...(query.topicId ? { topicId: query.topicId } : {}),
       subject: {
         OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }]
       }
@@ -778,6 +1115,8 @@ export async function listAdminBarFinalExamMcqQuestions(filters: AdminBarFinalEx
           status: true,
           subject: { select: { id: true, name: true } },
           subjectId: true,
+          topic: { select: { id: true, name: true } },
+          topicId: true,
           updatedAt: true
         }
       }),
@@ -845,6 +1184,8 @@ export async function listAdminBarFinalExamMcqQuestions(filters: AdminBarFinalEx
       status: true,
       subject: { select: { id: true, name: true } },
       subjectId: true,
+      topic: { select: { id: true, name: true } },
+      topicId: true,
       updatedAt: true
     }
   });
@@ -864,8 +1205,10 @@ export async function createAdminBarFinalExamMcqQuestion(
   actorRoleCodes: string[] = [],
   actorUserId: string
 ) {
+  await assertBarFinalExamSubjectExists(input.subjectId);
   const resolvedStatus = resolveQuestionStatus(input.status, actorRoleCodes);
   const resolvedExamDate = parseExamDate(input.examDate);
+  const resolvedTopicId = await resolveBarFinalExamTopicId(input.subjectId, input.topicId);
 
   const created = await prisma.barFinalExamMcqQuestion.create({
     data: {
@@ -877,7 +1220,8 @@ export async function createAdminBarFinalExamMcqQuestion(
       question: input.question,
       reviewFeedback: null,
       status: resolvedStatus,
-      subjectId: input.subjectId
+      subjectId: input.subjectId,
+      topicId: resolvedTopicId
     },
     select: {
       correctOptionIndex: true,
@@ -890,6 +1234,8 @@ export async function createAdminBarFinalExamMcqQuestion(
       status: true,
       subject: { select: { id: true, name: true } },
       subjectId: true,
+      topic: { select: { id: true, name: true } },
+      topicId: true,
       updatedAt: true
     }
   });
@@ -905,7 +1251,7 @@ export async function createAdminBarFinalExamMcqQuestion(
 export async function getAdminBarFinalExamMcqQuestion(questionId: string) {
   const question = await prisma.barFinalExamMcqQuestion.findFirst({
     where: {
-      deletedAt: null,
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
       id: questionId
     },
     select: {
@@ -919,6 +1265,8 @@ export async function getAdminBarFinalExamMcqQuestion(questionId: string) {
       status: true,
       subject: { select: { id: true, name: true } },
       subjectId: true,
+      topic: { select: { id: true, name: true } },
+      topicId: true,
       updatedAt: true
     }
   });
@@ -936,8 +1284,10 @@ export async function updateAdminBarFinalExamMcqQuestion(
   actorRoleCodes: string[] = [],
   actorUserId: string
 ) {
+  await assertBarFinalExamSubjectExists(input.subjectId);
   const resolvedStatus = resolveQuestionStatus(input.status, actorRoleCodes);
   const resolvedExamDate = parseExamDate(input.examDate);
+  const resolvedTopicId = await resolveBarFinalExamTopicId(input.subjectId, input.topicId);
 
   const updated = await prisma.barFinalExamMcqQuestion.update({
     where: {
@@ -952,7 +1302,8 @@ export async function updateAdminBarFinalExamMcqQuestion(
       question: input.question,
       reviewFeedback: null,
       status: resolvedStatus,
-      subjectId: input.subjectId
+      subjectId: input.subjectId,
+      topicId: resolvedTopicId
     },
     select: {
       correctOptionIndex: true,
@@ -965,6 +1316,8 @@ export async function updateAdminBarFinalExamMcqQuestion(
       status: true,
       subject: { select: { id: true, name: true } },
       subjectId: true,
+      topic: { select: { id: true, name: true } },
+      topicId: true,
       updatedAt: true
     }
   });
@@ -1081,6 +1434,7 @@ export async function listStudentBarFinalExamMcqQuestions(
       OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
       status: BarFinalExamQuestionStatus.PUBLISHED,
       subjectId: query.subjectId,
+      ...(query.topicId ? { topicId: query.topicId } : {}),
       subject: {
         OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }]
       }

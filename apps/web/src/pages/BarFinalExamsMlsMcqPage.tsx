@@ -12,12 +12,17 @@ import {
   type BarFinalExamQuestion,
   type BarFinalExamQuestionInput,
   type BarFinalExamQuestionStatus,
+  type SubjectSummaryStatus,
   createAdminBarFinalExamQuestion,
+  createAdminBarFinalExamTopic,
   deleteAdminBarFinalExamQuestion,
+  deleteAdminBarFinalExamTopic,
   fetchAdminBarFinalExamQuestions,
+  fetchAdminBarFinalExamTopics,
   fetchBarFinalExamFormOptions,
   fetchStudentBarFinalExamQuestions,
   fetchStudentBarFinalExamSubjects,
+  updateAdminBarFinalExamTopic,
   updateAdminBarFinalExamQuestion
 } from "@/lib/admin-api";
 import { queryKeys } from "@/lib/query-keys";
@@ -121,10 +126,19 @@ export function AdminBarFinalExamsMlsMcqPage() {
   const queryClient = useQueryClient();
   const { isDark } = useTheme();
   const [subjectId, setSubjectId] = useState("");
+  const [topicId, setTopicId] = useState("");
   const [search, setSearch] = useState("");
   const [modalMode, setModalMode] = useState<AdminModalMode>(null);
   const [draft, setDraft] = useState<BarFinalExamQuestionInput>(() => buildDefaultDraft(""));
   const [toasts, setToasts] = useState<Array<{ id: number; message: string; tone: ToastTone }>>([]);
+  const [topicsModalOpen, setTopicsModalOpen] = useState(false);
+  const [topicForm, setTopicForm] = useState<{
+    id: string | null;
+    name: string;
+    description: string;
+    displayOrder: string;
+    status: SubjectSummaryStatus;
+  }>({ id: null, name: "", description: "", displayOrder: "0", status: "ACTIVE" });
 
   function dismissToast(id: number) {
     setToasts((current) => current.filter((toast) => toast.id !== id));
@@ -161,15 +175,28 @@ export function AdminBarFinalExamsMlsMcqPage() {
       pageSize: 50,
       search,
       status: "all" as const,
-      subjectId: subjectId || undefined
+      subjectId: subjectId || undefined,
+      topicId: topicId || undefined
     }),
-    [search, subjectId]
+    [search, subjectId, topicId]
   );
 
   const questionsQuery = useQuery({
     enabled: Boolean(subjectId),
     queryKey: queryKeys.adminBarFinalExamQuestions(filters),
     queryFn: () => fetchAdminBarFinalExamQuestions(filters)
+  });
+
+  const topicsQuery = useQuery({
+    enabled: Boolean(subjectId),
+    queryKey: queryKeys.adminBarFinalExamTopics(subjectId),
+    queryFn: () => fetchAdminBarFinalExamTopics(subjectId)
+  });
+
+  const modalTopicsQuery = useQuery({
+    enabled: Boolean(draft.subjectId),
+    queryKey: queryKeys.adminBarFinalExamTopics(draft.subjectId),
+    queryFn: () => fetchAdminBarFinalExamTopics(draft.subjectId)
   });
 
   const countSubjectId = modalMode?.kind === "create" ? draft.subjectId : subjectId;
@@ -229,6 +256,39 @@ export function AdminBarFinalExamsMlsMcqPage() {
     }
   });
 
+  const createTopicMutation = useMutation({
+    mutationFn: (payload: { subjectId: string; name: string; description?: string; displayOrder?: number; status?: SubjectSummaryStatus }) =>
+      createAdminBarFinalExamTopic(payload),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["admin-bar-final-exam-topics"] });
+      showToast("Topic saved.", "success");
+    },
+    onError: (error) => showToast(resolveMutationError(error), "error")
+  });
+
+  const updateTopicMutation = useMutation({
+    mutationFn: (params: { topicId: string; payload: { subjectId: string; name: string; description?: string; displayOrder?: number; status?: SubjectSummaryStatus } }) =>
+      updateAdminBarFinalExamTopic(params.topicId, params.payload),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["admin-bar-final-exam-topics"] });
+      await queryClient.invalidateQueries({ queryKey: ["admin-bar-final-exam-questions"] });
+      showToast("Topic updated.", "success");
+    },
+    onError: (error) => showToast(resolveMutationError(error), "error")
+  });
+
+  const deleteTopicMutation = useMutation({
+    mutationFn: (params: { topicId: string }) => deleteAdminBarFinalExamTopic(params.topicId),
+    onSuccess: async (_data, params) => {
+      await queryClient.invalidateQueries({ queryKey: ["admin-bar-final-exam-topics"] });
+      await queryClient.invalidateQueries({ queryKey: ["admin-bar-final-exam-questions"] });
+      if (params.topicId === topicId) setTopicId("");
+      if (params.topicId === draft.topicId) setDraft((current) => ({ ...current, topicId: undefined }));
+      showToast("Topic deleted.", "success");
+    },
+    onError: (error) => showToast(resolveMutationError(error), "error")
+  });
+
   const subjects = formOptionsQuery.data?.subjects ?? [];
   const items = questionsQuery.data?.items ?? [];
   // Descending by createdAt — newest uploaded questions appear at the top
@@ -237,13 +297,14 @@ export function AdminBarFinalExamsMlsMcqPage() {
     () => [...items].sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()),
     [items]
   );
-  const canSaveDraft = Boolean(draft.subjectId) && stripHtml(draft.question).length >= 2 && stripHtml(draft.answer).length >= 2;
+  const canSaveDraft =
+    Boolean(draft.subjectId) && stripHtml(draft.question).length >= 2 && stripHtml(draft.answer).length >= 2;
   const canOpenCreate = !formOptionsQuery.isLoading && subjects.length > 0;
   const nextQuestionNumber =
     countSubjectId && modalMode?.kind === "create" ? (questionCountQuery.data?.pagination.totalItems ?? 0) + 1 : null;
 
   function openCreate() {
-    setDraft(buildDefaultDraft(subjectId));
+    setDraft((current) => ({ ...buildDefaultDraft(subjectId), topicId: topicId || current.topicId || undefined }));
     setModalMode({ kind: "create" });
   }
 
@@ -253,7 +314,8 @@ export function AdminBarFinalExamsMlsMcqPage() {
       examDate: question.examDate ? question.examDate.slice(0, 10) : "",
       question: question.question,
       status: question.status,
-      subjectId: question.subjectId
+      subjectId: question.subjectId,
+      topicId: question.topicId ?? undefined
     });
     setModalMode({ kind: "edit", question });
   }
@@ -261,6 +323,38 @@ export function AdminBarFinalExamsMlsMcqPage() {
   function closeModal() {
     setModalMode(null);
   }
+
+  function resetTopicForm(next?: Partial<typeof topicForm>) {
+    setTopicForm({
+      id: null,
+      name: "",
+      description: "",
+      displayOrder: "0",
+      status: "ACTIVE",
+      ...next
+    });
+  }
+
+  function openTopicsModal() {
+    if (!subjectId) return;
+    resetTopicForm();
+    setTopicsModalOpen(true);
+  }
+
+  function closeTopicsModal() {
+    setTopicsModalOpen(false);
+  }
+
+  const topics = topicsQuery.data?.items ?? [];
+  const modalTopics = modalTopicsQuery.data?.items ?? [];
+  const sortedTopics = useMemo(
+    () =>
+      [...topics].sort((left, right) => {
+        if (left.displayOrder !== right.displayOrder) return left.displayOrder - right.displayOrder;
+        return left.name.localeCompare(right.name);
+      }),
+    [topics]
+  );
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-8">
@@ -309,6 +403,7 @@ export function AdminBarFinalExamsMlsMcqPage() {
                 onChange={(event) => {
                   const next = event.target.value;
                   setSubjectId(next);
+                  setTopicId("");
                   setSearch("");
                   setModalMode(null);
                   setDraft(buildDefaultDraft(next));
@@ -322,6 +417,45 @@ export function AdminBarFinalExamsMlsMcqPage() {
                   </option>
                 ))}
               </select>
+            </label>
+
+            <label className="mt-4 space-y-2">
+              <span className={cn("text-xs font-medium uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Topic</span>
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+                <select
+                  className={cn(
+                    "w-full rounded-2xl border px-3.5 py-3 text-sm outline-none",
+                    isDark ? "border-slate-700 bg-slate-900 text-white" : "border-slate-200 bg-slate-50 text-slate-950"
+                  )}
+                  disabled={!subjectId || topicsQuery.isLoading}
+                  onChange={(event) => setTopicId(event.target.value)}
+                  value={topicId}
+                >
+                  <option value="">All topics</option>
+                  {sortedTopics.map((topic) => (
+                    <option key={topic.id} value={topic.id}>
+                      {topic.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className={cn(
+                    "inline-flex items-center justify-center rounded-2xl border px-3 py-3 text-sm font-medium transition",
+                    !subjectId
+                      ? isDark
+                        ? "cursor-not-allowed border-slate-800 bg-slate-950/40 text-slate-500"
+                        : "cursor-not-allowed border-slate-200 bg-slate-50 text-slate-500"
+                      : isDark
+                        ? "border-slate-800 bg-slate-950/40 text-slate-200 hover:bg-slate-900"
+                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                  )}
+                  disabled={!subjectId}
+                  onClick={openTopicsModal}
+                  type="button"
+                >
+                  Manage
+                </button>
+              </div>
             </label>
 
             <label className="mt-4 flex items-center gap-3 rounded-2xl border px-3.5 py-3">
@@ -371,6 +505,9 @@ export function AdminBarFinalExamsMlsMcqPage() {
                             {statusLabel(item.status)}
                           </span>
                           <span className={cn("text-xs", isDark ? "text-slate-500" : "text-slate-500")}>{item.subject.name}</span>
+                          {item.topic ? (
+                            <span className={cn("text-xs", isDark ? "text-slate-500" : "text-slate-500")}>• {item.topic.name}</span>
+                          ) : null}
                         </div>
                         <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>
                           Question {index + 1}
@@ -471,13 +608,37 @@ export function AdminBarFinalExamsMlsMcqPage() {
                     "w-full rounded-2xl border px-3.5 py-3 text-sm outline-none",
                     isDark ? "border-slate-700 bg-slate-900 text-white" : "border-slate-200 bg-slate-50 text-slate-950"
                   )}
-                  onChange={(event) => setDraft((current) => ({ ...current, subjectId: event.target.value }))}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, subjectId: event.target.value, topicId: undefined }))
+                  }
                   value={draft.subjectId}
                 >
                   <option value="">Select subject</option>
                   {subjects.map((subject) => (
                     <option key={subject.id} value={subject.id}>
                       {subject.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="space-y-2">
+                <span className={cn("text-xs font-medium uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Topic</span>
+                <select
+                  className={cn(
+                    "w-full rounded-2xl border px-3.5 py-3 text-sm outline-none",
+                    isDark ? "border-slate-700 bg-slate-900 text-white" : "border-slate-200 bg-slate-50 text-slate-950"
+                  )}
+                  disabled={!draft.subjectId || modalTopicsQuery.isLoading}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, topicId: event.target.value ? event.target.value : undefined }))
+                  }
+                  value={draft.topicId ?? ""}
+                >
+                  <option value="">General (default)</option>
+                  {modalTopics.map((topic) => (
+                    <option key={topic.id} value={topic.id}>
+                      {topic.name}
                     </option>
                   ))}
                 </select>
@@ -576,6 +737,211 @@ export function AdminBarFinalExamsMlsMcqPage() {
           </div>
         </div>
       ) : null}
+
+      {topicsModalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50" onClick={closeTopicsModal} />
+          <div
+            className={cn(
+              "relative flex w-full max-w-2xl flex-col overflow-hidden rounded-[32px] border",
+              isDark ? "border-slate-800 bg-slate-950" : "border-slate-200 bg-white"
+            )}
+            style={{ maxHeight: "82vh" }}
+          >
+            <div className={cn("flex items-start justify-between gap-4 border-b p-5", isDark ? "border-slate-800" : "border-slate-200")}>
+              <div className="space-y-1">
+                <p className={cn("text-lg font-semibold", isDark ? "text-white" : "text-slate-950")}>Manage topics</p>
+                <p className={cn("text-sm", isDark ? "text-slate-400" : "text-slate-600")}>Create, rename, or delete topics for this subject.</p>
+              </div>
+              <button
+                className={cn(
+                  "inline-flex h-10 w-10 items-center justify-center rounded-2xl border",
+                  isDark ? "border-slate-800 bg-slate-950/40 text-slate-200" : "border-slate-200 bg-white text-slate-700"
+                )}
+                onClick={closeTopicsModal}
+                type="button"
+              >
+                <ChevronRight className="h-4 w-4 rotate-180" />
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-5">
+              <div className="grid gap-4">
+                <div className="grid gap-3 rounded-3xl border p-4">
+                  <label className="space-y-2">
+                    <span className={cn("text-xs font-medium uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Name</span>
+                    <input
+                      className={cn(
+                        "w-full rounded-2xl border px-3.5 py-3 text-sm outline-none",
+                        isDark ? "border-slate-700 bg-slate-900 text-white" : "border-slate-200 bg-slate-50 text-slate-950"
+                      )}
+                      onChange={(event) => setTopicForm((current) => ({ ...current, name: event.target.value }))}
+                      placeholder="E.g. Introduction"
+                      value={topicForm.name}
+                    />
+                  </label>
+
+                  <label className="space-y-2">
+                    <span className={cn("text-xs font-medium uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Description (optional)</span>
+                    <input
+                      className={cn(
+                        "w-full rounded-2xl border px-3.5 py-3 text-sm outline-none",
+                        isDark ? "border-slate-700 bg-slate-900 text-white" : "border-slate-200 bg-slate-50 text-slate-950"
+                      )}
+                      onChange={(event) => setTopicForm((current) => ({ ...current, description: event.target.value }))}
+                      placeholder="Short hint for admins"
+                      value={topicForm.description}
+                    />
+                  </label>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="space-y-2">
+                      <span className={cn("text-xs font-medium uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Display order</span>
+                      <input
+                        className={cn(
+                          "w-full rounded-2xl border px-3.5 py-3 text-sm outline-none",
+                          isDark ? "border-slate-700 bg-slate-900 text-white" : "border-slate-200 bg-slate-50 text-slate-950"
+                        )}
+                        inputMode="numeric"
+                        onChange={(event) => setTopicForm((current) => ({ ...current, displayOrder: event.target.value }))}
+                        type="number"
+                        value={topicForm.displayOrder}
+                      />
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className={cn("text-xs font-medium uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Status</span>
+                      <select
+                        className={cn(
+                          "w-full rounded-2xl border px-3.5 py-3 text-sm outline-none",
+                          isDark ? "border-slate-700 bg-slate-900 text-white" : "border-slate-200 bg-slate-50 text-slate-950"
+                        )}
+                        onChange={(event) => setTopicForm((current) => ({ ...current, status: event.target.value as SubjectSummaryStatus }))}
+                        value={topicForm.status}
+                      >
+                        <option value="ACTIVE">Active</option>
+                        <option value="INACTIVE">Inactive</option>
+                        <option value="ARCHIVED">Archived</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+                    <button
+                      className={cn(
+                        "inline-flex items-center justify-center rounded-2xl border px-4 py-3 text-sm font-medium",
+                        isDark ? "border-slate-800 bg-slate-950/40 text-slate-200" : "border-slate-200 bg-white text-slate-700"
+                      )}
+                      onClick={() => resetTopicForm()}
+                      type="button"
+                    >
+                      Reset
+                    </button>
+                    <button
+                      className={cn(
+                        "inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium transition",
+                        topicForm.name.trim().length < 2 || createTopicMutation.isPending || updateTopicMutation.isPending
+                          ? isDark
+                            ? "cursor-not-allowed bg-slate-800 text-slate-500"
+                            : "cursor-not-allowed bg-slate-200 text-slate-500"
+                          : isDark
+                            ? "bg-white text-slate-950 hover:bg-slate-100"
+                            : "bg-slate-950 text-white hover:bg-slate-900"
+                      )}
+                      disabled={topicForm.name.trim().length < 2 || createTopicMutation.isPending || updateTopicMutation.isPending}
+                      onClick={() => {
+                        if (!subjectId) return;
+                        const displayOrder = Number(topicForm.displayOrder);
+                        const payload = {
+                          subjectId,
+                          name: topicForm.name.trim(),
+                          description: topicForm.description.trim() ? topicForm.description.trim() : undefined,
+                          displayOrder: Number.isFinite(displayOrder) ? displayOrder : undefined,
+                          status: topicForm.status
+                        };
+                        if (!topicForm.id) {
+                          createTopicMutation.mutate(payload);
+                          resetTopicForm();
+                          return;
+                        }
+                        updateTopicMutation.mutate({ topicId: topicForm.id, payload });
+                        resetTopicForm();
+                      }}
+                      type="button"
+                    >
+                      {topicForm.id ? <Pencil className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                      {topicForm.id ? "Update topic" : "Create topic"}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  {topicsQuery.isLoading ? (
+                    <div className={cn("rounded-2xl border px-4 py-6 text-sm", isDark ? "border-slate-800 text-slate-400" : "border-slate-200 text-slate-600")}>
+                      Loading topics...
+                    </div>
+                  ) : sortedTopics.length === 0 ? (
+                    <div className={cn("rounded-2xl border px-4 py-6 text-sm", isDark ? "border-slate-800 text-slate-400" : "border-slate-200 text-slate-600")}>
+                      No topics yet for this subject.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {sortedTopics.map((topic) => (
+                        <div
+                          className={cn(
+                            "flex flex-wrap items-center justify-between gap-3 rounded-3xl border px-4 py-3",
+                            isDark ? "border-slate-800 bg-slate-950/40" : "border-slate-200 bg-slate-50"
+                          )}
+                          key={topic.id}
+                        >
+                          <div className="min-w-0">
+                            <p className={cn("truncate text-sm font-medium", isDark ? "text-white" : "text-slate-950")}>{topic.name}</p>
+                            <p className={cn("truncate text-xs", isDark ? "text-slate-500" : "text-slate-500")}>
+                              {topic.status} • order {topic.displayOrder}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              className={cn(
+                                "inline-flex h-10 w-10 items-center justify-center rounded-2xl border",
+                                isDark ? "border-slate-800 bg-slate-950/50 text-slate-200" : "border-slate-200 bg-white text-slate-700"
+                              )}
+                              onClick={() =>
+                                resetTopicForm({
+                                  id: topic.id,
+                                  name: topic.name,
+                                  description: topic.description ?? "",
+                                  displayOrder: String(topic.displayOrder),
+                                  status: topic.status
+                                })
+                              }
+                              type="button"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </button>
+                            <button
+                              className={cn(
+                                "inline-flex h-10 w-10 items-center justify-center rounded-2xl border",
+                                isDark ? "border-slate-800 bg-slate-950/50 text-rose-200" : "border-slate-200 bg-white text-rose-600"
+                              )}
+                              disabled={deleteTopicMutation.isPending}
+                              onClick={() => deleteTopicMutation.mutate({ topicId: topic.id })}
+                              type="button"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <ToastViewport isDark={isDark} onDismiss={dismissToast} toasts={toasts} />
     </div>
   );

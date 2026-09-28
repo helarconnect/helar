@@ -94,28 +94,36 @@ import {
 import {
   createAdminBarFinalExamQuestion,
   createAdminBarFinalExamMcqQuestion,
+  createAdminBarFinalExamTopic,
   deleteAdminBarFinalExamQuestion,
   deleteAdminBarFinalExamMcqQuestion,
+  deleteAdminBarFinalExamTopic,
   fetchBarFinalExamFormOptions,
   getAdminBarFinalExamMcqQuestion,
   getAdminBarFinalExamQuestion,
   listAdminBarFinalExamQuestions,
   listAdminBarFinalExamMcqQuestions,
+  listAdminBarFinalExamTopics,
   listStudentBarFinalExamQuestions,
+  listStudentBarFinalExamTopics,
   listStudentBarFinalExamMcqQuestions,
+  listStudentBarFinalExamMcqTopics,
   listStudentBarFinalExamMcqSubjects,
   listStudentBarFinalExamSubjects,
   parseAdminBarFinalExamMcqQuestionFilters,
   parseAdminBarFinalExamQuestionFilters,
+  parseAdminBarFinalExamTopicsQuery,
   parseBarFinalExamMcqQuestionInput,
   parseBarFinalExamQuestionInput,
+  parseBarFinalExamTopicInput,
   parseStudentBarFinalExamMcqAttemptInput,
   parseStudentBarFinalExamMcqQuestionsQuery,
   parseStudentBarFinalExamQuestionsQuery,
   parseStudentBarFinalExamSubjectsQuery,
   submitStudentBarFinalExamMcqAttempt,
   updateAdminBarFinalExamMcqQuestion,
-  updateAdminBarFinalExamQuestion
+  updateAdminBarFinalExamQuestion,
+  updateAdminBarFinalExamTopic
 } from "./bar-final-exams.js";
 import {
   parseAdminPortalSearchQuery,
@@ -4554,6 +4562,201 @@ export function createApp(options: AppOptions = {}) {
     }
   );
 
+  app.get(
+    ["/api/v1/admin/bar-final-exams-nls-mcq/topics", "/api/v1/admin/bar-final-exams-mls-mcq/topics"],
+    authenticateRequest,
+    requireAdminRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required for bar final exam topics."
+          }
+        });
+      }
+
+      try {
+        const query = parseAdminBarFinalExamTopicsQuery(request.query as Record<string, string | string[] | undefined>);
+        const data = await listAdminBarFinalExamTopics(query);
+
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return response.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "The bar final exam topics query is invalid.",
+              details: error.flatten()
+            }
+          });
+        }
+
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "BAR_FINAL_EXAMS_TOPICS_FETCH_FAILED",
+            message: "Could not load bar final exam topics."
+          }
+        });
+      }
+    }
+  );
+
+  app.post(
+    ["/api/v1/admin/bar-final-exams-nls-mcq/topics", "/api/v1/admin/bar-final-exams-mls-mcq/topics"],
+    authenticateRequest,
+    requireAdminRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required to create bar final exam topics."
+          }
+        });
+      }
+
+      try {
+        const payload = parseBarFinalExamTopicInput(request.body);
+        const data = await createAdminBarFinalExamTopic(payload, request.auth!.userId);
+
+        return response.status(201).json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return response.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "The bar final exam topic payload is invalid.",
+              details: error.flatten()
+            }
+          });
+        }
+
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "BAR_FINAL_EXAMS_TOPICS_CREATE_FAILED",
+            message: "Could not create the bar final exam topic."
+          }
+        });
+      }
+    }
+  );
+
+  app.patch(
+    ["/api/v1/admin/bar-final-exams-nls-mcq/topics/:topicId", "/api/v1/admin/bar-final-exams-mls-mcq/topics/:topicId"],
+    authenticateRequest,
+    requireAdminRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required to update bar final exam topics."
+          }
+        });
+      }
+
+      try {
+        const payload = parseBarFinalExamTopicInput(request.body);
+        const data = await updateAdminBarFinalExamTopic(String(request.params.topicId), payload, request.auth!.userId);
+
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return response.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "The bar final exam topic payload is invalid.",
+              details: error.flatten()
+            }
+          });
+        }
+
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+          return response.status(404).json({
+            success: false,
+            error: {
+              code: "BAR_FINAL_EXAMS_NOT_FOUND",
+              message: "The requested bar final exam topic could not be found."
+            }
+          });
+        }
+
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "BAR_FINAL_EXAMS_TOPICS_UPDATE_FAILED",
+            message: "Could not update the bar final exam topic."
+          }
+        });
+      }
+    }
+  );
+
+  app.delete(
+    ["/api/v1/admin/bar-final-exams-nls-mcq/topics/:topicId", "/api/v1/admin/bar-final-exams-mls-mcq/topics/:topicId"],
+    authenticateRequest,
+    requireAdminRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required to delete bar final exam topics."
+          }
+        });
+      }
+
+      try {
+        const data = await deleteAdminBarFinalExamTopic(String(request.params.topicId), request.auth!.userId);
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+          return response.status(404).json({
+            success: false,
+            error: {
+              code: "BAR_FINAL_EXAMS_NOT_FOUND",
+              message: "The requested bar final exam topic could not be found."
+            }
+          });
+        }
+
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "BAR_FINAL_EXAMS_TOPICS_DELETE_FAILED",
+            message: "Could not delete the bar final exam topic."
+          }
+        });
+      }
+    }
+  );
+
   app.post(
     ["/api/v1/admin/bar-final-exams-nls-mcq/questions", "/api/v1/admin/bar-final-exams-mls-mcq/questions"],
     authenticateRequest,
@@ -4838,6 +5041,201 @@ export function createApp(options: AppOptions = {}) {
           error: {
             code: "BAR_FINAL_EXAMS_MCQ_FORM_OPTIONS_FAILED",
             message: "Could not load bar final exam MCQ form options."
+          }
+        });
+      }
+    }
+  );
+
+  app.get(
+    "/api/v1/admin/bar-final-exams-mcq/topics",
+    authenticateRequest,
+    requireAdminRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required for bar final exam MCQ topics."
+          }
+        });
+      }
+
+      try {
+        const query = parseAdminBarFinalExamTopicsQuery(request.query as Record<string, string | string[] | undefined>);
+        const data = await listAdminBarFinalExamTopics(query);
+
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return response.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "The bar final exam MCQ topics query is invalid.",
+              details: error.flatten()
+            }
+          });
+        }
+
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "BAR_FINAL_EXAMS_MCQ_TOPICS_FETCH_FAILED",
+            message: "Could not load bar final exam MCQ topics."
+          }
+        });
+      }
+    }
+  );
+
+  app.post(
+    "/api/v1/admin/bar-final-exams-mcq/topics",
+    authenticateRequest,
+    requireAdminRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required to create bar final exam MCQ topics."
+          }
+        });
+      }
+
+      try {
+        const payload = parseBarFinalExamTopicInput(request.body);
+        const data = await createAdminBarFinalExamTopic(payload, request.auth!.userId);
+
+        return response.status(201).json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return response.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "The bar final exam MCQ topic payload is invalid.",
+              details: error.flatten()
+            }
+          });
+        }
+
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "BAR_FINAL_EXAMS_MCQ_TOPICS_CREATE_FAILED",
+            message: "Could not create the bar final exam MCQ topic."
+          }
+        });
+      }
+    }
+  );
+
+  app.patch(
+    "/api/v1/admin/bar-final-exams-mcq/topics/:topicId",
+    authenticateRequest,
+    requireAdminRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required to update bar final exam MCQ topics."
+          }
+        });
+      }
+
+      try {
+        const payload = parseBarFinalExamTopicInput(request.body);
+        const data = await updateAdminBarFinalExamTopic(String(request.params.topicId), payload, request.auth!.userId);
+
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return response.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "The bar final exam MCQ topic payload is invalid.",
+              details: error.flatten()
+            }
+          });
+        }
+
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+          return response.status(404).json({
+            success: false,
+            error: {
+              code: "BAR_FINAL_EXAMS_MCQ_NOT_FOUND",
+              message: "The requested bar final exam MCQ topic could not be found."
+            }
+          });
+        }
+
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "BAR_FINAL_EXAMS_MCQ_TOPICS_UPDATE_FAILED",
+            message: "Could not update the bar final exam MCQ topic."
+          }
+        });
+      }
+    }
+  );
+
+  app.delete(
+    "/api/v1/admin/bar-final-exams-mcq/topics/:topicId",
+    authenticateRequest,
+    requireAdminRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required to delete bar final exam MCQ topics."
+          }
+        });
+      }
+
+      try {
+        const data = await deleteAdminBarFinalExamTopic(String(request.params.topicId), request.auth!.userId);
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+          return response.status(404).json({
+            success: false,
+            error: {
+              code: "BAR_FINAL_EXAMS_MCQ_NOT_FOUND",
+              message: "The requested bar final exam MCQ topic could not be found."
+            }
+          });
+        }
+
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "BAR_FINAL_EXAMS_MCQ_TOPICS_DELETE_FAILED",
+            message: "Could not delete the bar final exam MCQ topic."
           }
         });
       }
@@ -7829,6 +8227,52 @@ export function createApp(options: AppOptions = {}) {
   );
 
   app.get(
+    ["/api/v1/library/bar-final-exams-nls-mcq/topics", "/api/v1/library/bar-final-exams-mls-mcq/topics"],
+    authenticateRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required for bar final exam topics."
+          }
+        });
+      }
+
+      try {
+        const query = parseAdminBarFinalExamTopicsQuery(request.query as Record<string, string | string[] | undefined>);
+        const data = await listStudentBarFinalExamTopics(query);
+
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return response.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "The bar final exam topics query is invalid.",
+              details: error.flatten()
+            }
+          });
+        }
+
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "BAR_FINAL_EXAMS_TOPICS_FAILED",
+            message: "Could not load bar final exam topics."
+          }
+        });
+      }
+    }
+  );
+
+  app.get(
     ["/api/v1/library/bar-final-exams-nls-mcq/questions", "/api/v1/library/bar-final-exams-mls-mcq/questions"],
     authenticateRequest,
     async (request: AuthenticatedRequest, response: Response) => {
@@ -7914,6 +8358,52 @@ export function createApp(options: AppOptions = {}) {
           error: {
             code: "BAR_FINAL_EXAMS_MCQ_SUBJECTS_FAILED",
             message: "Could not load bar final exam MCQ subjects."
+          }
+        });
+      }
+    }
+  );
+
+  app.get(
+    "/api/v1/library/bar-final-exams-mcq/topics",
+    authenticateRequest,
+    async (request: AuthenticatedRequest, response: Response) => {
+      if (!useDatabase) {
+        return response.status(503).json({
+          success: false,
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "The database is required for bar final exam MCQ topics."
+          }
+        });
+      }
+
+      try {
+        const query = parseAdminBarFinalExamTopicsQuery(request.query as Record<string, string | string[] | undefined>);
+        const data = await listStudentBarFinalExamMcqTopics(query);
+
+        return response.json({
+          success: true,
+          data
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return response.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "The bar final exam MCQ topics query is invalid.",
+              details: error.flatten()
+            }
+          });
+        }
+
+        console.error(error);
+        return response.status(500).json({
+          success: false,
+          error: {
+            code: "BAR_FINAL_EXAMS_MCQ_TOPICS_FAILED",
+            message: "Could not load bar final exam MCQ topics."
           }
         });
       }

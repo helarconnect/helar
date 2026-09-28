@@ -1056,6 +1056,7 @@ model SubjectSummarySubject {
   topics       SubjectSummaryTopic[]
   cases        SubjectSummaryCase[]
   entries      SubjectSummaryEntry[]
+  barFinalExamTopics BarFinalExamTopic[]
   barFinalExamQuestions BarFinalExamQuestion[]
   barFinalExamMcqQuestions BarFinalExamMcqQuestion[]
   barFinalExamMcqAttempts BarFinalExamMcqAttempt[]
@@ -1064,6 +1065,27 @@ model SubjectSummarySubject {
   cbtQuestions CbtQuestion[]
 
   @@index([displayOrder])
+  @@index([status])
+  @@index([deletedAt])
+}
+
+model BarFinalExamTopic {
+  id           String                 @id @default(auto()) @map("_id") @db.ObjectId
+  subjectId    String                 @db.ObjectId
+  name         String
+  description  String?
+  displayOrder Int                    @default(0)
+  status       SubjectSummaryStatus   @default(ACTIVE)
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+  archivedAt   DateTime?
+  deletedAt    DateTime?
+  subject      SubjectSummarySubject  @relation(fields: [subjectId], references: [id])
+  questions    BarFinalExamQuestion[]
+  mcqQuestions BarFinalExamMcqQuestion[]
+
+  @@unique([subjectId, name])
+  @@index([subjectId, displayOrder])
   @@index([status])
   @@index([deletedAt])
 }
@@ -1171,6 +1193,7 @@ model SubjectSummarySerialCounter {
 model BarFinalExamQuestion {
   id             String                    @id @default(auto()) @map("_id") @db.ObjectId
   subjectId      String                    @db.ObjectId
+  topicId        String?                   @db.ObjectId
   question       String
   answer         String
   examDate       DateTime?
@@ -1182,8 +1205,9 @@ model BarFinalExamQuestion {
   updatedAt      DateTime                  @updatedAt
   deletedAt      DateTime?
   subject        SubjectSummarySubject     @relation(fields: [subjectId], references: [id])
+  topic          BarFinalExamTopic?        @relation(fields: [topicId], references: [id])
 
-  @@index([subjectId, createdAt])
+  @@index([subjectId, topicId, createdAt])
   @@index([status])
   @@index([deletedAt])
 }
@@ -1191,6 +1215,7 @@ model BarFinalExamQuestion {
 model BarFinalExamMcqQuestion {
   id                 String                    @id @default(auto()) @map("_id") @db.ObjectId
   subjectId          String                    @db.ObjectId
+  topicId            String?                   @db.ObjectId
   question           String
   options            String[]
   correctOptionIndex Int
@@ -1204,9 +1229,10 @@ model BarFinalExamMcqQuestion {
   updatedAt          DateTime                  @updatedAt
   deletedAt          DateTime?
   subject            SubjectSummarySubject     @relation(fields: [subjectId], references: [id])
+  topic              BarFinalExamTopic?        @relation(fields: [topicId], references: [id])
   attempts           BarFinalExamMcqAttempt[]
 
-  @@index([subjectId, createdAt])
+  @@index([subjectId, topicId, createdAt])
   @@index([status])
   @@index([deletedAt])
 }

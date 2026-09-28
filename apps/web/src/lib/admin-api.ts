@@ -793,6 +793,11 @@ export type BarFinalExamQuestion = {
     name: string;
   };
   subjectId: string;
+  topic: {
+    id: string;
+    name: string;
+  } | null;
+  topicId: string | null;
   updatedAt: string;
 };
 
@@ -802,6 +807,7 @@ export type BarFinalExamQuestionInput = {
   question: string;
   status: BarFinalExamQuestionStatus;
   subjectId: string;
+  topicId?: string;
 };
 
 export type AdminBarFinalExamQuestionList = {
@@ -832,6 +838,11 @@ export type BarFinalExamMcqQuestion = {
     name: string;
   };
   subjectId: string;
+  topic: {
+    id: string;
+    name: string;
+  } | null;
+  topicId: string | null;
   updatedAt: string;
 };
 
@@ -843,6 +854,34 @@ export type BarFinalExamMcqQuestionInput = {
   question: string;
   status: BarFinalExamQuestionStatus;
   subjectId: string;
+  topicId?: string;
+};
+
+export type BarFinalExamTopic = {
+  createdAt: string;
+  description: string | null;
+  displayOrder: number;
+  id: string;
+  name: string;
+  status: SubjectSummaryStatus;
+  subjectId: string;
+  updatedAt: string;
+};
+
+export type BarFinalExamTopicInput = {
+  description?: string;
+  displayOrder?: number;
+  name: string;
+  status?: SubjectSummaryStatus;
+  subjectId: string;
+};
+
+export type AdminBarFinalExamTopicsResponse = {
+  items: BarFinalExamTopic[];
+};
+
+export type StudentBarFinalExamTopicsResponse = {
+  items: Array<{ id: string; name: string }>;
 };
 
 export type AdminBarFinalExamMcqQuestionList = {
@@ -2230,6 +2269,7 @@ export async function fetchAdminBarFinalExamQuestions(filters: {
   search?: string;
   status?: "all" | BarFinalExamQuestionStatus;
   subjectId?: string;
+  topicId?: string;
 }) {
   const response = await authenticatedHttp.get<{ success: true; data: AdminBarFinalExamQuestionList }>(
     "/api/v1/admin/bar-final-exams-nls-mcq/questions",
@@ -2244,6 +2284,43 @@ export async function fetchAdminBarFinalExamQuestions(filters: {
 export async function fetchBarFinalExamFormOptions() {
   const response = await authenticatedHttp.get<{ success: true; data: BarFinalExamFormOptions }>(
     "/api/v1/admin/bar-final-exams-nls-mcq/form-options"
+  );
+
+  return response.data.data;
+}
+
+export async function fetchAdminBarFinalExamTopics(subjectId: string) {
+  const response = await authenticatedHttp.get<{ success: true; data: AdminBarFinalExamTopicsResponse }>(
+    "/api/v1/admin/bar-final-exams-nls-mcq/topics",
+    {
+      params: { subjectId }
+    }
+  );
+
+  return response.data.data;
+}
+
+export async function createAdminBarFinalExamTopic(payload: BarFinalExamTopicInput) {
+  const response = await authenticatedHttp.post<{ success: true; data: BarFinalExamTopic }>(
+    "/api/v1/admin/bar-final-exams-nls-mcq/topics",
+    payload
+  );
+
+  return response.data.data;
+}
+
+export async function updateAdminBarFinalExamTopic(topicId: string, payload: BarFinalExamTopicInput) {
+  const response = await authenticatedHttp.patch<{ success: true; data: BarFinalExamTopic }>(
+    `/api/v1/admin/bar-final-exams-nls-mcq/topics/${topicId}`,
+    payload
+  );
+
+  return response.data.data;
+}
+
+export async function deleteAdminBarFinalExamTopic(topicId: string) {
+  const response = await authenticatedHttp.delete<{ success: true; data: { id: string; success: true } }>(
+    `/api/v1/admin/bar-final-exams-nls-mcq/topics/${topicId}`
   );
 
   return response.data.data;
@@ -2281,6 +2358,7 @@ export async function fetchAdminBarFinalExamMcqQuestions(filters: {
   search?: string;
   status?: "all" | BarFinalExamQuestionStatus;
   subjectId?: string;
+  topicId?: string;
 }) {
   const response = await authenticatedHttp.get<{ success: true; data: AdminBarFinalExamMcqQuestionList }>(
     "/api/v1/admin/bar-final-exams-mcq/questions",
@@ -2324,6 +2402,43 @@ export async function fetchBarFinalExamMcqFormOptions() {
   return response.data.data;
 }
 
+export async function fetchAdminBarFinalExamMcqTopics(subjectId: string) {
+  const response = await authenticatedHttp.get<{ success: true; data: AdminBarFinalExamTopicsResponse }>(
+    "/api/v1/admin/bar-final-exams-mcq/topics",
+    {
+      params: { subjectId }
+    }
+  );
+
+  return response.data.data;
+}
+
+export async function createAdminBarFinalExamMcqTopic(payload: BarFinalExamTopicInput) {
+  const response = await authenticatedHttp.post<{ success: true; data: BarFinalExamTopic }>(
+    "/api/v1/admin/bar-final-exams-mcq/topics",
+    payload
+  );
+
+  return response.data.data;
+}
+
+export async function updateAdminBarFinalExamMcqTopic(topicId: string, payload: BarFinalExamTopicInput) {
+  const response = await authenticatedHttp.patch<{ success: true; data: BarFinalExamTopic }>(
+    `/api/v1/admin/bar-final-exams-mcq/topics/${topicId}`,
+    payload
+  );
+
+  return response.data.data;
+}
+
+export async function deleteAdminBarFinalExamMcqTopic(topicId: string) {
+  const response = await authenticatedHttp.delete<{ success: true; data: { id: string; success: true } }>(
+    `/api/v1/admin/bar-final-exams-mcq/topics/${topicId}`
+  );
+
+  return response.data.data;
+}
+
 export async function createAdminBarFinalExamMcqQuestion(payload: BarFinalExamMcqQuestionInput) {
   const response = await authenticatedHttp.post<{ success: true; data: BarFinalExamMcqQuestion }>(
     "/api/v1/admin/bar-final-exams-mcq/questions",
@@ -2361,15 +2476,27 @@ export async function fetchStudentBarFinalExamSubjects(search = "") {
   return response.data.data;
 }
 
+export async function fetchStudentBarFinalExamTopics(subjectId: string) {
+  const response = await authenticatedHttp.get<{ success: true; data: StudentBarFinalExamTopicsResponse }>(
+    "/api/v1/library/bar-final-exams-nls-mcq/topics",
+    {
+      params: { subjectId }
+    }
+  );
+
+  return response.data.data;
+}
+
 export async function fetchStudentBarFinalExamQuestions(
   subjectId: string,
-  opts: { sortBy?: "createdAt" | "examDate"; sortOrder?: "asc" | "desc" } = {}
+  opts: { sortBy?: "createdAt" | "examDate"; sortOrder?: "asc" | "desc"; topicId?: string } = {}
 ) {
   const response = await authenticatedHttp.get<{ success: true; data: StudentBarFinalExamQuestionsResponse }>(
     "/api/v1/library/bar-final-exams-nls-mcq/questions",
     {
       params: {
         subjectId,
+        ...(opts.topicId ? { topicId: opts.topicId } : {}),
         ...(opts.sortBy ? { sortBy: opts.sortBy } : {}),
         ...(opts.sortOrder ? { sortOrder: opts.sortOrder } : {})
       }
@@ -2390,15 +2517,27 @@ export async function fetchStudentBarFinalExamMcqSubjects(search = "") {
   return response.data.data;
 }
 
+export async function fetchStudentBarFinalExamMcqTopics(subjectId: string) {
+  const response = await authenticatedHttp.get<{ success: true; data: StudentBarFinalExamTopicsResponse }>(
+    "/api/v1/library/bar-final-exams-mcq/topics",
+    {
+      params: { subjectId }
+    }
+  );
+
+  return response.data.data;
+}
+
 export async function fetchStudentBarFinalExamMcqQuestions(
   subjectId: string,
-  opts: { sortBy?: "createdAt" | "examDate"; sortOrder?: "asc" | "desc" } = {}
+  opts: { sortBy?: "createdAt" | "examDate"; sortOrder?: "asc" | "desc"; topicId?: string } = {}
 ) {
   const response = await authenticatedHttp.get<{ success: true; data: StudentBarFinalExamMcqQuestionsResponse }>(
     "/api/v1/library/bar-final-exams-mcq/questions",
     {
       params: {
         subjectId,
+        ...(opts.topicId ? { topicId: opts.topicId } : {}),
         ...(opts.sortBy ? { sortBy: opts.sortBy } : {}),
         ...(opts.sortOrder ? { sortOrder: opts.sortOrder } : {})
       }
