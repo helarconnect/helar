@@ -1872,6 +1872,7 @@ function RichTextField({
 
   function applyCommand(command: string, commandValue?: string) {
     if (!editorRef.current) return
+    saveSelection()
     editorRef.current.focus()
     restoreSelection()
     document.execCommand(command, false, commandValue)
@@ -1895,7 +1896,12 @@ function RichTextField({
         {label}
       </span>
       <div className={cn('rounded-[24px] border', isDark ? 'border-slate-700 bg-slate-900' : 'border-slate-200 bg-slate-50')}>
-        <div className={cn('flex flex-wrap gap-2 border-b px-3 py-2.5', isDark ? 'border-slate-700' : 'border-slate-200')}>
+        <div
+          className={cn(
+            'sticky top-0 z-20 flex flex-wrap gap-2 border-b px-3 py-2.5',
+            isDark ? 'border-slate-700 bg-slate-900' : 'border-slate-200 bg-slate-50',
+          )}
+        >
           {toolbarButtons.map((item) => {
             const Icon = item.icon
             return (
@@ -1909,6 +1915,7 @@ function RichTextField({
                 key={item.command}
                 onMouseDown={(event) => {
                   event.preventDefault()
+                  saveSelection()
                   applyCommand(item.command)
                 }}
                 title={item.label}
