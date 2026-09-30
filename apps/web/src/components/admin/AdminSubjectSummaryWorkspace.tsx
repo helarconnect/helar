@@ -667,7 +667,12 @@ function SubjectModal({
           <button className="button-secondary !px-4 !py-3" onClick={onClose} type="button">
             Cancel
           </button>
-          <button className="button-primary !px-5 !py-3" disabled={isSaving} onClick={onSubmit} type="button">
+          <button
+            className="button-primary !px-5 !py-3"
+            disabled={isSaving || draft.name.trim().length < 2}
+            onClick={onSubmit}
+            type="button"
+          >
             {isSaving ? "Saving..." : "Save subject"}
           </button>
         </div>

@@ -5918,6 +5918,16 @@ export function createApp(options: AppOptions = {}) {
           });
         }
 
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+          return response.status(409).json({
+            success: false,
+            error: {
+              code: "SUBJECT_ALREADY_EXISTS",
+              message: "A subject with this name already exists."
+            }
+          });
+        }
+
         console.error(error);
         return response.status(500).json({
           success: false,
@@ -5971,6 +5981,16 @@ export function createApp(options: AppOptions = {}) {
               code: "VALIDATION_ERROR",
               message: "The subject payload is invalid.",
               details: error.flatten()
+            }
+          });
+        }
+
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+          return response.status(409).json({
+            success: false,
+            error: {
+              code: "SUBJECT_ALREADY_EXISTS",
+              message: "A subject with this name already exists."
             }
           });
         }
