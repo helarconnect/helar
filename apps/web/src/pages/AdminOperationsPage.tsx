@@ -2240,14 +2240,15 @@ function BarMcqReview({ node, isDark }: { node: Awaited<ReturnType<typeof fetchA
                   )}
                   key={idx}
                 >
-                  <span className="mr-2 font-medium">{isCorrect ? '✓ ' : ''}</span>{opt}
+                  <span className="mr-2 font-medium">{isCorrect ? '✓ ' : ''}</span>
+                  <RichTextContent html={decodeHtmlEntities(opt)} isDark={isDark} />
                 </li>
               )
             })}
           </ol>
           {correctLabel ? (
             <p className={cn('mt-5 text-xs uppercase tracking-[0.22em]', isDark ? 'text-emerald-400' : 'text-emerald-700')}>
-              Correct answer: {correctLabel}
+              Correct answer: {stripHtml(decodeHtmlEntities(correctLabel))}
             </p>
           ) : null}
         </ReviewBlock>

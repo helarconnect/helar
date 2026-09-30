@@ -394,7 +394,7 @@ export function SubscriptionPage() {
         >
           <div className="flex items-center gap-3">
             <CreditCard className={cn("h-5 w-5", isDark ? "text-slate-300" : "text-slate-700")} />
-            <h2 className={cn("text-lg font-semibold", isDark ? "text-white" : "text-slate-950")}>Recent payments</h2>
+            <h2 className={cn("text-lg font-semibold", isDark ? "text-white" : "text-slate-950")}>Subscription history</h2>
           </div>
 
           <div className="mt-6 space-y-3">
@@ -402,40 +402,105 @@ export function SubscriptionPage() {
               <div className={cn("rounded-2xl border px-4 py-4 text-sm", isDark ? "border-slate-800 text-slate-300" : "border-slate-200 text-slate-600")}>
                 Loading your subscription history...
               </div>
-            ) : snapshotQuery.data?.recentPayments.length ? (
-              snapshotQuery.data.recentPayments.map((payment) => (
-                <div
-                  className={cn(
-                    "rounded-[22px] border px-4 py-4",
-                    isDark ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-slate-50"
-                  )}
-                  key={payment.id}
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className={cn("text-sm font-semibold", isDark ? "text-white" : "text-slate-950")}>
-                        {payment.plan?.name ?? "Subscription payment"}
-                      </p>
-                      <p className={cn("mt-1 text-xs uppercase tracking-[0.2em]", isDark ? "text-slate-500" : "text-slate-400")}>
-                        {payment.provider} • {payment.status}
-                      </p>
-                    </div>
-                    <p className={cn("text-sm font-semibold", isDark ? "text-slate-100" : "text-slate-800")}>{payment.formattedAmount}</p>
-                  </div>
-                  <p className={cn("mt-3 text-sm", isDark ? "text-slate-300" : "text-slate-600")}>
-                    Paid or attempted on {formatDateTimeDMY(payment.createdAt)}
-                  </p>
-                  {payment.reference ? (
-                    <p className={cn("mt-1 break-all text-xs", isDark ? "text-slate-500" : "text-slate-400")}>
-                      Reference: {payment.reference}
-                    </p>
-                  ) : null}
-                </div>
-              ))
             ) : (
-              <div className={cn("rounded-2xl border px-4 py-4 text-sm", isDark ? "border-slate-800 text-slate-300" : "border-slate-200 text-slate-600")}>
-                No subscription payments have been recorded for this account yet.
-              </div>
+              <>
+                {activeSubscription ? (
+                  <div
+                    className={cn(
+                      "rounded-[22px] border px-4 py-4",
+                      isDark ? "border-emerald-500/25 bg-emerald-500/10" : "border-emerald-200 bg-emerald-50"
+                    )}
+                  >
+                    <p className={cn("text-sm font-semibold", isDark ? "text-white" : "text-slate-950")}>
+                      Active: {activeSubscription.plan.name}
+                    </p>
+                    <p className={cn("mt-1 text-xs uppercase tracking-[0.2em]", isDark ? "text-slate-300" : "text-slate-700")}>
+                      {activeSubscription.status}
+                    </p>
+                    <p className={cn("mt-3 text-sm", isDark ? "text-slate-200" : "text-slate-700")}>
+                      {formatDateTimeDMY(activeSubscription.startsAt)} → {activeSubscription.endsAt ? formatDateTimeDMY(activeSubscription.endsAt) : "Open-ended"}
+                    </p>
+                  </div>
+                ) : (
+                  <div className={cn("rounded-2xl border px-4 py-4 text-sm", isDark ? "border-slate-800 text-slate-300" : "border-slate-200 text-slate-600")}>
+                    No active subscription yet.
+                  </div>
+                )}
+
+                {snapshotQuery.data?.pastSubscriptions.length ? (
+                  <div className="space-y-3">
+                    <p className={cn("text-xs font-semibold uppercase tracking-[0.22em]", isDark ? "text-slate-500" : "text-slate-400")}>
+                      Past subscriptions
+                    </p>
+                    {Array.from(
+                      new Map(snapshotQuery.data.pastSubscriptions.map((subscription) => [subscription.id, subscription])).values()
+                    ).map((subscription) => (
+                      <div
+                        className={cn(
+                          "rounded-[22px] border px-4 py-4",
+                          isDark ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-slate-50"
+                        )}
+                        key={subscription.id}
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className={cn("text-sm font-semibold", isDark ? "text-white" : "text-slate-950")}>{subscription.plan.name}</p>
+                            <p className={cn("mt-1 text-xs uppercase tracking-[0.2em]", isDark ? "text-slate-500" : "text-slate-400")}>
+                              {subscription.status}
+                            </p>
+                          </div>
+                        </div>
+                        <p className={cn("mt-3 text-sm", isDark ? "text-slate-300" : "text-slate-600")}>
+                          {formatDateTimeDMY(subscription.startsAt)} → {subscription.endsAt ? formatDateTimeDMY(subscription.endsAt) : "Open-ended"}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+
+                <div className="pt-2">
+                  <p className={cn("text-xs font-semibold uppercase tracking-[0.22em]", isDark ? "text-slate-500" : "text-slate-400")}>
+                    Recent payments
+                  </p>
+                  <div className="mt-3 space-y-3">
+                    {snapshotQuery.data?.recentPayments.length ? (
+                      snapshotQuery.data.recentPayments.map((payment) => (
+                        <div
+                          className={cn(
+                            "rounded-[22px] border px-4 py-4",
+                            isDark ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-slate-50"
+                          )}
+                          key={payment.id}
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <p className={cn("text-sm font-semibold", isDark ? "text-white" : "text-slate-950")}>
+                                {payment.plan?.name ?? "Subscription payment"}
+                              </p>
+                              <p className={cn("mt-1 text-xs uppercase tracking-[0.2em]", isDark ? "text-slate-500" : "text-slate-400")}>
+                                {payment.provider} • {payment.status}
+                              </p>
+                            </div>
+                            <p className={cn("text-sm font-semibold", isDark ? "text-slate-100" : "text-slate-800")}>{payment.formattedAmount}</p>
+                          </div>
+                          <p className={cn("mt-3 text-sm", isDark ? "text-slate-300" : "text-slate-600")}>
+                            Paid or attempted on {formatDateTimeDMY(payment.createdAt)}
+                          </p>
+                          {payment.reference ? (
+                            <p className={cn("mt-1 break-all text-xs", isDark ? "text-slate-500" : "text-slate-400")}>
+                              Reference: {payment.reference}
+                            </p>
+                          ) : null}
+                        </div>
+                      ))
+                    ) : (
+                      <div className={cn("rounded-2xl border px-4 py-4 text-sm", isDark ? "border-slate-800 text-slate-300" : "border-slate-200 text-slate-600")}>
+                        No subscription payments have been recorded for this account yet.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </>
             )}
           </div>
         </article>

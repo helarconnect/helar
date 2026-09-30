@@ -155,6 +155,7 @@ export type ActiveSubscriptionSummary = {
 
 export type SubscriptionSnapshot = {
   activeSubscription: ActiveSubscriptionSummary | null;
+  pastSubscriptions: ActiveSubscriptionSummary[];
   recentPayments: SubscriptionPaymentSummary[];
 };
 

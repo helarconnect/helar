@@ -471,7 +471,7 @@ export function parseAdminManualActivationInput(input: unknown) {
 export async function getUserSubscriptionSnapshot(userId: string) {
   await ensureManagedPlans();
 
-  const [activeSubscription, recentPayments] = await Promise.all([
+  const [activeSubscription, subscriptions, recentPayments] = await Promise.all([
     prisma.subscription.findFirst({
       where: {
         ...notDeletedSubscriptionWhere,
@@ -481,6 +481,19 @@ export async function getUserSubscriptionSnapshot(userId: string) {
       orderBy: {
         createdAt: "desc"
       },
+      include: {
+        plan: true
+      }
+    }),
+    prisma.subscription.findMany({
+      where: {
+        ...notDeletedSubscriptionWhere,
+        userId
+      },
+      orderBy: {
+        createdAt: "desc"
+      },
+      take: 50,
       include: {
         plan: true
       }
@@ -511,8 +524,21 @@ export async function getUserSubscriptionSnapshot(userId: string) {
     })
   ]);
 
+  const dedupedSubscriptions: typeof subscriptions = [];
+  const subscriptionIds = new Set<string>();
+  for (const subscription of subscriptions) {
+    if (subscriptionIds.has(subscription.id)) continue;
+    subscriptionIds.add(subscription.id);
+    dedupedSubscriptions.push(subscription);
+  }
+
+  const pastSubscriptions = activeSubscription
+    ? dedupedSubscriptions.filter((subscription) => subscription.id !== activeSubscription.id)
+    : dedupedSubscriptions;
+
   return {
     activeSubscription: activeSubscription ? createSubscriptionSummary(activeSubscription) : null,
+    pastSubscriptions: pastSubscriptions.map((subscription) => createSubscriptionSummary(subscription)),
     recentPayments: recentPayments.map((payment) => createPaymentSummary(payment))
   };
 }

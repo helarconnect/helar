@@ -515,8 +515,18 @@ const adminRoleCodes = new Set([
   "content_admin"
 ]);
 
+function normalizeRoleCode(roleCode: string) {
+  const trimmed = roleCode.trim().toLowerCase();
+  const underscored = trimmed.replace(/[-\s]+/g, "_");
+  const collapsed = underscored.replace(/_/g, "");
+  if (collapsed === "superadmin") return "super_admin";
+  if (collapsed === "contentadmin") return "content_admin";
+  return underscored;
+}
+
 function hasRole(roleCodes: string[] = [], targetRoleCode: string) {
-  return roleCodes.includes(targetRoleCode);
+  const target = normalizeRoleCode(targetRoleCode);
+  return roleCodes.some((roleCode) => normalizeRoleCode(roleCode) === target);
 }
 
 function isContentAdminRole(roleCodes: string[] = []) {
@@ -524,11 +534,11 @@ function isContentAdminRole(roleCodes: string[] = []) {
 }
 
 function canAccessPaymentsRole(roleCodes: string[] = []) {
-  return roleCodes.some((roleCode) => adminRoleCodes.has(roleCode)) && !isContentAdminRole(roleCodes);
+  return roleCodes.some((roleCode) => adminRoleCodes.has(normalizeRoleCode(roleCode))) && !isContentAdminRole(roleCodes);
 }
 
 function canModerateHelarConnectRole(roleCodes: string[] = []) {
-  return roleCodes.some((roleCode) => ["super_admin", "moderator", "content_admin"].includes(roleCode));
+  return roleCodes.some((roleCode) => ["super_admin", "moderator", "content_admin"].includes(normalizeRoleCode(roleCode)));
 }
 
 function getJwtSecret() {
@@ -1207,7 +1217,7 @@ function readRouteParam(value: string | string[] | undefined) {
 }
 
 function requireAdminRequest(request: AuthenticatedRequest, response: Response, next: NextFunction) {
-  if (!request.auth?.roleCodes.some((roleCode) => adminRoleCodes.has(roleCode))) {
+  if (!request.auth?.roleCodes.some((roleCode) => adminRoleCodes.has(normalizeRoleCode(roleCode)))) {
     return response.status(403).json({
       success: false,
       error: {
@@ -1221,7 +1231,7 @@ function requireAdminRequest(request: AuthenticatedRequest, response: Response, 
 }
 
 function requireSuperAdminRequest(request: AuthenticatedRequest, response: Response, next: NextFunction) {
-  if (!request.auth?.roleCodes.includes("super_admin")) {
+  if (!request.auth?.roleCodes.some((roleCode) => normalizeRoleCode(roleCode) === "super_admin")) {
     return response.status(403).json({
       success: false,
       error: {

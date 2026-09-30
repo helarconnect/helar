@@ -1175,6 +1175,25 @@ export function AdminUsersWorkspace() {
       ] as const)
     : ([] as const);
 
+  const selectedUserSubscriptions = selectedUserQuery.data?.subscriptions ?? [];
+  const dedupedSelectedUserSubscriptions: typeof selectedUserSubscriptions = [];
+  const selectedUserSubscriptionIds = new Set<string>();
+  for (const subscription of selectedUserSubscriptions) {
+    if (selectedUserSubscriptionIds.has(subscription.id)) continue;
+    selectedUserSubscriptionIds.add(subscription.id);
+    dedupedSelectedUserSubscriptions.push(subscription);
+  }
+
+  const selectedUserActiveSubscription =
+    dedupedSelectedUserSubscriptions.find((subscription) => {
+      if (subscription.status !== "ACTIVE") return false;
+      if (!subscription.endsAt) return true;
+      return new Date(subscription.endsAt).getTime() > Date.now();
+    }) ?? null;
+  const selectedUserPastSubscriptions = selectedUserActiveSubscription
+    ? dedupedSelectedUserSubscriptions.filter((subscription) => subscription.id !== selectedUserActiveSubscription.id)
+    : dedupedSelectedUserSubscriptions;
+
   function toggleSort(nextSortBy: AdminUserListFilters["sortBy"]) {
     const resolvedSortBy = nextSortBy ?? "createdAt";
     const nextSortOrder = filters.sortBy === resolvedSortBy ? (filters.sortOrder === "asc" ? "desc" : "asc") : "asc";
@@ -1884,29 +1903,59 @@ export function AdminUsersWorkspace() {
               <Surface className={cn("p-4", isSuperAdmin ? "" : "xl:col-span-2")} isDark={isDark}>
                 <p className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-400")}>Subscriptions and payments</p>
                 <div className="mt-3 space-y-3">
-                  {selectedUserQuery.data.subscriptions.length ? (
-                    selectedUserQuery.data.subscriptions.map((subscription) => (
-                      <div
-                        className={cn("rounded-[18px] border p-3", isDark ? "border-slate-700 bg-slate-900" : "border-slate-200 bg-slate-50")}
-                        key={subscription.id}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className={cn("text-sm font-semibold", isDark ? "text-white" : "text-slate-950")}>{subscription.plan.name}</p>
-                            <p className={cn("mt-1 text-sm", isDark ? "text-slate-400" : "text-slate-600")}>
-                              {subscription.plan.price} • {prettifyEnum(subscription.plan.interval)}
-                            </p>
-                          </div>
-                          <StatusPill isDark={isDark} tone={subscription.status === "ACTIVE" ? "green" : subscription.status === "PAST_DUE" ? "amber" : "slate"}>
-                            {prettifyEnum(subscription.status)}
-                          </StatusPill>
+                  {selectedUserActiveSubscription ? (
+                    <div className={cn("rounded-[18px] border p-3", isDark ? "border-emerald-500/25 bg-emerald-500/10" : "border-emerald-200 bg-emerald-50")}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className={cn("text-sm font-semibold", isDark ? "text-white" : "text-slate-950")}>
+                            Active: {selectedUserActiveSubscription.plan.name}
+                          </p>
+                          <p className={cn("mt-1 text-sm", isDark ? "text-slate-300" : "text-slate-700")}>
+                            {selectedUserActiveSubscription.plan.price} • {prettifyEnum(selectedUserActiveSubscription.plan.interval)}
+                          </p>
                         </div>
-                        <p className={cn("mt-3 text-xs", isDark ? "text-slate-500" : "text-slate-400")}>
-                          {formatDateDMY(subscription.startsAt)} to {subscription.endsAt ? formatDateDMY(subscription.endsAt) : "Open-ended"}
-                        </p>
+                        <StatusPill isDark={isDark} tone="green">
+                          {prettifyEnum(selectedUserActiveSubscription.status)}
+                        </StatusPill>
                       </div>
-                    ))
-                  ) : (
+                      <p className={cn("mt-3 text-xs", isDark ? "text-slate-300" : "text-slate-700")}>
+                        {formatDateDMY(selectedUserActiveSubscription.startsAt)} to{" "}
+                        {selectedUserActiveSubscription.endsAt ? formatDateDMY(selectedUserActiveSubscription.endsAt) : "Open-ended"}
+                      </p>
+                    </div>
+                  ) : null}
+
+                  {selectedUserPastSubscriptions.length ? (
+                    <>
+                      <p className={cn("text-xs font-medium uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-400")}>
+                        Past subscriptions
+                      </p>
+                      {selectedUserPastSubscriptions.map((subscription) => (
+                        <div
+                          className={cn("rounded-[18px] border p-3", isDark ? "border-slate-700 bg-slate-900" : "border-slate-200 bg-slate-50")}
+                          key={subscription.id}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className={cn("text-sm font-semibold", isDark ? "text-white" : "text-slate-950")}>{subscription.plan.name}</p>
+                              <p className={cn("mt-1 text-sm", isDark ? "text-slate-400" : "text-slate-600")}>
+                                {subscription.plan.price} • {prettifyEnum(subscription.plan.interval)}
+                              </p>
+                            </div>
+                            <StatusPill
+                              isDark={isDark}
+                              tone={subscription.status === "PAST_DUE" ? "amber" : subscription.status === "ACTIVE" ? "green" : "slate"}
+                            >
+                              {prettifyEnum(subscription.status)}
+                            </StatusPill>
+                          </div>
+                          <p className={cn("mt-3 text-xs", isDark ? "text-slate-500" : "text-slate-400")}>
+                            {formatDateDMY(subscription.startsAt)} to {subscription.endsAt ? formatDateDMY(subscription.endsAt) : "Open-ended"}
+                          </p>
+                        </div>
+                      ))}
+                    </>
+                  ) : selectedUserActiveSubscription ? null : (
                     <EmptyState isDark={isDark} message="No subscriptions have been recorded for this user yet." />
                   )}
                 </div>

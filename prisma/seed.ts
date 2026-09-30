@@ -10,6 +10,7 @@ const prisma = new PrismaClient();
 
 const roles = [
   ["super_admin", "Super Admin"],
+  ["content_admin", "Content Admin"],
   ["judge", "Judge"],
   ["administrator", "Administrator"],
   ["academic_administrator", "Academic Administrator"],
