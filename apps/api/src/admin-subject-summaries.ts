@@ -2399,7 +2399,7 @@ export async function updateSubjectSummarySubject(subjectId: string, input: Subj
 export async function deleteSubjectSummarySubject(subjectId: string, actorUserId: string) {
   const existing = await prisma.subjectSummarySubject.findFirst({
     where: {
-      deletedAt: null,
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
       id: subjectId
     }
   });
@@ -2421,7 +2421,7 @@ export async function deleteSubjectSummarySubject(subjectId: string, actorUserId
     }),
     prisma.subjectSummaryTopic.updateMany({
       where: {
-        deletedAt: null,
+        OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
         subjectId
       },
       data: {
@@ -2430,7 +2430,7 @@ export async function deleteSubjectSummarySubject(subjectId: string, actorUserId
     }),
     prisma.subjectSummaryCase.updateMany({
       where: {
-        deletedAt: null,
+        OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
         subjectId
       },
       data: {
@@ -2452,7 +2452,7 @@ export async function deleteSubjectSummarySubject(subjectId: string, actorUserId
 export async function createSubjectSummaryTopic(input: SubjectSummaryTopicInput, actorUserId: string) {
   const subject = await prisma.subjectSummarySubject.findFirst({
     where: {
-      deletedAt: null,
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
       id: input.subjectId
     },
     select: {
@@ -2575,7 +2575,7 @@ export async function updateSubjectSummaryTopic(topicId: string, input: SubjectS
 export async function deleteSubjectSummaryTopic(topicId: string, actorUserId: string) {
   const existing = await prisma.subjectSummaryTopic.findFirst({
     where: {
-      deletedAt: null,
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
       id: topicId
     }
   });
@@ -2597,7 +2597,7 @@ export async function deleteSubjectSummaryTopic(topicId: string, actorUserId: st
     }),
     prisma.subjectSummaryCase.updateMany({
       where: {
-        deletedAt: null,
+        OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
         topicId
       },
       data: {
@@ -2756,7 +2756,7 @@ export async function updateSubjectSummaryCase(
 export async function deleteSubjectSummaryCase(caseId: string, actorUserId: string) {
   const existing = await prisma.subjectSummaryCase.findFirst({
     where: {
-      deletedAt: null,
+      OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
       id: caseId
     }
   });
@@ -2793,7 +2793,7 @@ export async function bulkUpdateSubjectSummarySubjects(action: SubjectSummarySub
     await runBatchTransaction([
       prisma.subjectSummarySubject.updateMany({
         where: {
-          deletedAt: null,
+          OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
           id: {
             in: action.ids
           }
@@ -2804,7 +2804,7 @@ export async function bulkUpdateSubjectSummarySubjects(action: SubjectSummarySub
       }),
       prisma.subjectSummaryTopic.updateMany({
         where: {
-          deletedAt: null,
+          OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
           subjectId: {
             in: action.ids
           }
@@ -2815,7 +2815,7 @@ export async function bulkUpdateSubjectSummarySubjects(action: SubjectSummarySub
       }),
       prisma.subjectSummaryCase.updateMany({
         where: {
-          deletedAt: null,
+          OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }],
           subjectId: {
             in: action.ids
           }
