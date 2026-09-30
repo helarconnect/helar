@@ -525,16 +525,21 @@ export async function getUserSubscriptionSnapshot(userId: string) {
   ]);
 
   const dedupedSubscriptions: typeof subscriptions = [];
-  const subscriptionIds = new Set<string>();
+  const subscriptionKeys = new Set<string>();
   for (const subscription of subscriptions) {
-    if (subscriptionIds.has(subscription.id)) continue;
-    subscriptionIds.add(subscription.id);
+    const key = `${subscription.planId}:${subscription.startsAt.toISOString()}:${subscription.endsAt?.toISOString() ?? ""}:${subscription.status}`;
+    if (subscriptionKeys.has(key)) continue;
+    subscriptionKeys.add(key);
     dedupedSubscriptions.push(subscription);
   }
 
-  const pastSubscriptions = activeSubscription
-    ? dedupedSubscriptions.filter((subscription) => subscription.id !== activeSubscription.id)
-    : dedupedSubscriptions;
+  const activeKey = activeSubscription
+    ? `${activeSubscription.planId}:${activeSubscription.startsAt.toISOString()}:${activeSubscription.endsAt?.toISOString() ?? ""}:${activeSubscription.status}`
+    : null;
+  const pastSubscriptions = activeKey ? dedupedSubscriptions.filter((subscription) => {
+    const key = `${subscription.planId}:${subscription.startsAt.toISOString()}:${subscription.endsAt?.toISOString() ?? ""}:${subscription.status}`;
+    return key !== activeKey;
+  }) : dedupedSubscriptions;
 
   return {
     activeSubscription: activeSubscription ? createSubscriptionSummary(activeSubscription) : null,
@@ -1101,20 +1106,6 @@ export async function verifySubscriptionPayment(userId: string, reference: strin
       throw new BillingOperationError("The subscription plan for this payment is missing.", 404);
     }
 
-    await tx.subscription.updateMany({
-      where: {
-        deletedAt: null,
-        status: {
-          in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAST_DUE, SubscriptionStatus.TRIALING]
-        },
-        userId
-      },
-      data: {
-        endsAt: completedAt,
-        status: SubscriptionStatus.EXPIRED
-      }
-    });
-
     const subscription = await tx.subscription.create({
       data: {
         autoRenew: false,
@@ -1130,15 +1121,93 @@ export async function verifySubscriptionPayment(userId: string, reference: strin
       }
     });
 
-    const updatedPayment = await tx.payment.update({
+    const claimed = await tx.payment.updateMany({
       where: {
-        id: payment.id
+        deletedAt: null,
+        id: payment.id,
+        status: PaymentStatus.PENDING,
+        subscriptionId: null
       },
       data: {
         status: PaymentStatus.SUCCEEDED,
         subscriptionId: subscription.id
       }
     });
+
+    if (claimed.count === 0) {
+      await tx.subscription.update({
+        where: {
+          id: subscription.id
+        },
+        data: {
+          deletedAt: completedAt,
+          endsAt: completedAt,
+          status: SubscriptionStatus.EXPIRED
+        }
+      });
+
+      const winnerPayment = await tx.payment.findUnique({
+        where: {
+          id: payment.id
+        }
+      });
+
+      if (!winnerPayment || winnerPayment.deletedAt || winnerPayment.status !== PaymentStatus.SUCCEEDED || !winnerPayment.subscriptionId) {
+        throw new BillingOperationError("The payment was finalized by another request but could not be loaded.", 409);
+      }
+
+      const winnerSubscription = await tx.subscription.findUnique({
+        where: {
+          id: winnerPayment.subscriptionId
+        },
+        include: {
+          plan: true
+        }
+      });
+
+      if (!winnerSubscription || winnerSubscription.deletedAt) {
+        throw new BillingOperationError("The subscription record for this payment is missing.", 404);
+      }
+
+      return {
+        payment: {
+          ...winnerPayment,
+          createdAt: winnerPayment.createdAt,
+          subscription: {
+            plan: winnerSubscription.plan
+          },
+          transactions: [{ reference }]
+        },
+        subscription: winnerSubscription
+      };
+    }
+
+    await tx.subscription.updateMany({
+      where: {
+        deletedAt: null,
+        id: {
+          not: subscription.id
+        },
+        status: {
+          in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAST_DUE, SubscriptionStatus.TRIALING]
+        },
+        userId
+      },
+      data: {
+        endsAt: completedAt,
+        status: SubscriptionStatus.EXPIRED
+      }
+    });
+
+    const updatedPayment = await tx.payment.findUnique({
+      where: {
+        id: payment.id
+      }
+    });
+
+    if (!updatedPayment || updatedPayment.deletedAt) {
+      throw new BillingOperationError("The payment record is no longer available.", 404);
+    }
 
     await tx.transaction.update({
       where: {

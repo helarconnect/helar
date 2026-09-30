@@ -1,5 +1,6 @@
 import { z } from "zod";
 import bcrypt from "bcryptjs";
+import { PaymentStatus } from "@prisma/client";
 
 import { sendAdminUserProvisioningEmail } from "./lib/email.js";
 import { prisma } from "./lib/prisma.js";
@@ -724,7 +725,7 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
       select: {
         devices: true,
         sessions: true,
-        payments: { where: { ...notDeletedWhere } },
+        payments: { where: { ...notDeletedWhere, status: PaymentStatus.SUCCEEDED } },
         topics: true,
         answers: true,
         comments: true,
@@ -1429,7 +1430,7 @@ export async function getAdminUserDetail(userId: string) {
         select: {
           devices: true,
           sessions: true,
-          payments: { where: { ...notDeletedWhere } },
+          payments: { where: { ...notDeletedWhere, status: PaymentStatus.SUCCEEDED } },
           subscriptions: { where: { ...notDeletedWhere } },
           topics: true,
           answers: true,
@@ -1448,6 +1449,15 @@ export async function getAdminUserDetail(userId: string) {
 
   const lastActiveAt = getLastActiveAt(user);
   const hasStudentRole = user.roles.some((userRole) => userRole.role.code === "student");
+  const dedupedSubscriptions: typeof user.subscriptions = [];
+  const subscriptionKeys = new Set<string>();
+
+  for (const subscription of user.subscriptions) {
+    const key = `${subscription.planId}:${subscription.startsAt.toISOString()}:${subscription.endsAt?.toISOString() ?? ""}:${subscription.status}`;
+    if (subscriptionKeys.has(key)) continue;
+    subscriptionKeys.add(key);
+    dedupedSubscriptions.push(subscription);
+  }
 
   return {
     id: user.id,
@@ -1501,7 +1511,7 @@ export async function getAdminUserDetail(userId: string) {
     counts: {
       devices: user._count.devices,
       sessions: user._count.sessions,
-      subscriptions: user._count.subscriptions,
+      subscriptions: dedupedSubscriptions.length,
       payments: user._count.payments,
       topics: user._count.topics,
       answers: user._count.answers,
@@ -1522,7 +1532,7 @@ export async function getAdminUserDetail(userId: string) {
       updatedAt: session.updatedAt.toISOString(),
       expiresAt: session.expiresAt.toISOString()
     })),
-    subscriptions: user.subscriptions.map((subscription) => ({
+    subscriptions: dedupedSubscriptions.map((subscription) => ({
       id: subscription.id,
       status: subscription.status,
       autoRenew: subscription.autoRenew,
