@@ -645,6 +645,7 @@ function resolveDeviceLimit(deviceLimitOverride: number | null | undefined) {
 export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: string[]) {
   const assignableRoleCodes = getAssignableRoleCodes(actorRoleCodes);
   const managedRolesPromise = ensureAdminManagedRoles();
+  const notDeletedWhere = usesMongoRuntime ? { OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }] } : { deletedAt: null };
   const totalRegisteredUsersPromise = prisma.user.count({
     where: {
       ...(usesMongoRuntime
@@ -700,7 +701,7 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
     },
     subscriptions: {
       where: {
-        deletedAt: null
+        ...notDeletedWhere
       },
       orderBy: {
         createdAt: "desc"
@@ -712,7 +713,7 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
     },
     payments: {
       where: {
-        deletedAt: null
+        ...notDeletedWhere
       },
       orderBy: {
         createdAt: "desc"
@@ -723,7 +724,7 @@ export async function listAdminUsers(filters: AdminUserFilters, actorRoleCodes: 
       select: {
         devices: true,
         sessions: true,
-        payments: true,
+        payments: { where: { ...notDeletedWhere } },
         topics: true,
         answers: true,
         comments: true,
@@ -1428,8 +1429,8 @@ export async function getAdminUserDetail(userId: string) {
         select: {
           devices: true,
           sessions: true,
-          payments: true,
-          subscriptions: true,
+          payments: { where: { ...notDeletedWhere } },
+          subscriptions: { where: { ...notDeletedWhere } },
           topics: true,
           answers: true,
           comments: true,
