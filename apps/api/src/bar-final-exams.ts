@@ -466,6 +466,8 @@ type StudentMcqQuestionListItem = {
   options: string[];
   explanation: string | null;
   examDate: Date | null;
+  topicId: string | null;
+  topic: { id: string; name: string } | null;
 };
 
 export async function fetchBarFinalExamFormOptions() {
@@ -1446,7 +1448,14 @@ export async function listStudentBarFinalExamMcqQuestions(
       explanation: true,
       id: true,
       options: true,
-      question: true
+      question: true,
+      topicId: true,
+      topic: {
+        select: {
+          id: true,
+          name: true
+        }
+      }
     }
   });
 

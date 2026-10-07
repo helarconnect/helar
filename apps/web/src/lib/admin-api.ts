@@ -914,6 +914,8 @@ export type StudentBarFinalExamMcqQuestionsResponse = {
     id: string;
     options: string[];
     question: string;
+    topic: { id: string; name: string } | null;
+    topicId: string | null;
   }>;
   contentAccess: PremiumContentAccess;
 };

@@ -17,6 +17,7 @@ import {
   fetchBarFinalExamMcqFormOptions,
   fetchStudentBarFinalExamMcqQuestions,
   fetchStudentBarFinalExamMcqSubjects,
+  fetchStudentBarFinalExamMcqTopics,
   submitStudentBarFinalExamMcqAttempt,
   updateAdminBarFinalExamMcqTopic,
   updateAdminBarFinalExamMcqQuestion,
@@ -1289,6 +1290,12 @@ export function StudentBarFinalExamsMcqPage() {
     queryFn: () => fetchStudentBarFinalExamMcqSubjects(search)
   });
 
+  const topicsQuery = useQuery({
+    enabled: Boolean(selectedSubjectId),
+    queryKey: queryKeys.studentBarFinalExamMcqTopics(selectedSubjectId),
+    queryFn: () => fetchStudentBarFinalExamMcqTopics(selectedSubjectId)
+  });
+
   const questionsQuery = useQuery({
     enabled: Boolean(selectedSubjectId),
     queryKey: queryKeys.studentBarFinalExamMcqQuestions({ subjectId: selectedSubjectId, sortBy, sortOrder }),
@@ -1308,8 +1315,59 @@ export function StudentBarFinalExamsMcqPage() {
 
   const subjects = subjectsQuery.data?.subjects ?? [];
   const questions = questionsQuery.data?.items ?? [];
+  const topics = topicsQuery.data?.items ?? [];
   const allQuestionIds = useMemo(() => questions.map((item) => item.id), [questions]);
   const activeSubject = subjects.find((subject) => subject.id === selectedSubjectId) ?? null;
+
+  const groupedQuestions = useMemo(() => {
+    const groups = new Map<string, { key: string; name: string; items: typeof questions }>();
+    const topicOrder: Array<{ key: string; name: string }> = [];
+
+    for (const topic of topics) {
+      const key = topic.id;
+      topicOrder.push({ key, name: topic.name });
+      groups.set(key, { key, name: topic.name, items: [] });
+    }
+
+    for (const item of questions) {
+      const topicKey = item.topicId ?? "general";
+      const group = groups.get(topicKey);
+      if (group) {
+        group.items.push(item);
+        continue;
+      }
+
+      groups.set(topicKey, {
+        key: topicKey,
+        name: item.topic?.name ?? (topicKey === "general" ? "General" : "Topic"),
+        items: [item]
+      });
+    }
+
+    const orderedKeys = new Set<string>();
+    const result: Array<{ key: string; name: string; items: typeof questions }> = [];
+
+    const generalGroup = groups.get("general");
+    if (generalGroup && generalGroup.items.length) {
+      result.push(generalGroup);
+      orderedKeys.add("general");
+    }
+
+    for (const entry of topicOrder) {
+      const group = groups.get(entry.key);
+      if (!group || !group.items.length) continue;
+      result.push(group);
+      orderedKeys.add(entry.key);
+    }
+
+    const remaining = Array.from(groups.values())
+      .filter((group) => group.items.length && !orderedKeys.has(group.key))
+      .sort((left, right) => left.name.localeCompare(right.name));
+
+    return [...result, ...remaining];
+  }, [questions, topics]);
+
+  const firstGroupedQuestionId = useMemo(() => groupedQuestions[0]?.items[0]?.id ?? "", [groupedQuestions]);
 
   // Use the same attempt gating hook on the list page so per-question
   // badges and the subject-level progress bar update live as the student
@@ -1331,8 +1389,8 @@ export function StudentBarFinalExamsMcqPage() {
       return;
     }
 
-    setActiveQuestionId(questions[0].id);
-  }, [activeQuestionId, questions, selectedSubjectId]);
+    setActiveQuestionId(firstGroupedQuestionId || questions[0].id);
+  }, [activeQuestionId, firstGroupedQuestionId, questions, selectedSubjectId]);
 
   function scrollToQuestion(questionId: string) {
     const target = questionRefs.current.get(questionId);
@@ -1521,116 +1579,123 @@ export function StudentBarFinalExamsMcqPage() {
                   </div>
                 </div>
 
-                <div className="space-y-3">
-                {questions.map((item, index) => {
-                  const isActive = item.id === activeQuestionId;
-                  const hasContent = stripHtml(item.question).length > 0;
-                  const viewed = gating.viewedSet.has(item.id);
-                  const attempted = gating.attemptedSet.has(item.id);
-
-                  return (
-                    <div
-                      className={cn(
-                        "rounded-3xl border p-4 transition",
-                        isActive
-                          ? isDark
-                            ? "border-white/15 bg-white/10"
-                            : "border-slate-200 bg-slate-950 text-white"
-                          : isDark
-                            ? "border-slate-800 bg-slate-950/30"
-                            : "border-slate-200 bg-slate-50"
-                      )}
-                      key={item.id}
-                      ref={(node) => {
-                        if (!node) return;
-                        questionRefs.current.set(item.id, node);
-                      }}
-                    >
-                      <div className="flex flex-col gap-3">
-                        <div className="space-y-3">
-                          <div className="space-y-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>
-                                {activeSubject?.name ?? "Subject"}
-                              </p>
-                              {/* Per-question status badges:
-                                    1. Viewed — drives answer unlock gating
-                                    2. Attempted — informational only (student
-                                       submitted a selection for this one). */}
-                              <span
-                                className={cn(
-                                  "inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]",
-                                  viewed
-                                    ? isDark
-                                      ? "bg-sky-500/15 text-sky-200"
-                                      : "bg-sky-50 text-sky-700"
-                                    : isDark
-                                      ? "bg-slate-700/60 text-slate-300"
-                                      : "bg-slate-100 text-slate-600"
-                                )}
-                              >
-                                {viewed ? "Viewed" : "Not viewed"}
-                              </span>
-                              <span
-                                className={cn(
-                                  "inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]",
-                                  attempted
-                                    ? isDark
-                                      ? "bg-emerald-500/15 text-emerald-200"
-                                      : "bg-emerald-50 text-emerald-700"
-                                    : isDark
-                                      ? "bg-slate-700/60 text-slate-300"
-                                      : "bg-slate-100 text-slate-600"
-                                )}
-                              >
-                                {attempted ? "Attempted" : "Not attempted"}
-                              </span>
-                            </div>
-                            {hasContent ? (
-                              // Render rich text preview with controlled height
-                              // for professional card layout.
-                              <div
-                                className={cn(
-                                  "overflow-hidden text-sm leading-7 rich-text-preview rich-text-content",
-                                  isDark ? "text-slate-200" : "text-slate-900"
-                                )}
-                                style={{
-                                  display: "-webkit-box",
-                                  WebkitLineClamp: 5,
-                                  WebkitBoxOrient: "vertical",
-                                  maxHeight: "9rem",
-                                  overflow: "hidden"
-                                }}
-                                dangerouslySetInnerHTML={{ __html: item.question }}
-                              />
-                            ) : (
-                              <p className={cn("text-sm leading-7 italic", isDark ? "text-slate-500" : "text-slate-500")}>No question content.</p>
-                            )}
-                            <p className={cn("text-xs", isDark ? "text-slate-400" : "text-slate-600")}>{item.options.length} options</p>
-                          </div>
-
-                          <div className="flex flex-wrap items-center justify-end gap-2">
-                            <button
-                              className={cn(
-                                "inline-flex items-center justify-center gap-2 rounded-2xl px-3 py-2 text-sm font-medium transition",
-                                isDark ? "bg-white text-slate-950 hover:bg-slate-100" : "bg-slate-950 text-white hover:bg-slate-900"
-                              )}
-                              onClick={() => {
-                                setActiveQuestionId(item.id);
-                                navigate(`/app/bar-final-exams-mcq/${selectedSubjectId}/questions/${item.id}`);
-                              }}
-                              type="button"
-                            >
-                              <Eye className="h-4 w-4" />
-                              {attempted ? "Review question" : viewed ? "Read question" : "Read and attempt question"}
-                            </button>
-                          </div>
-                        </div>
+                <div className="space-y-6">
+                  {groupedQuestions.map((group) => (
+                    <section className="space-y-3" key={group.key}>
+                      <div className="flex items-center justify-between gap-3">
+                        <h3 className={cn("text-sm font-semibold", isDark ? "text-white" : "text-slate-950")}>{group.name}</h3>
+                        <p className={cn("text-xs", isDark ? "text-slate-500" : "text-slate-500")}>{group.items.length} questions</p>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
+
+                      <div className="space-y-3">
+                        {group.items.map((item) => {
+                          const isActive = item.id === activeQuestionId;
+                          const hasContent = stripHtml(item.question).length > 0;
+                          const viewed = gating.viewedSet.has(item.id);
+                          const attempted = gating.attemptedSet.has(item.id);
+
+                          return (
+                            <div
+                              className={cn(
+                                "rounded-3xl border p-4 transition",
+                                isActive
+                                  ? isDark
+                                    ? "border-white/15 bg-white/10"
+                                    : "border-slate-200 bg-slate-950 text-white"
+                                  : isDark
+                                    ? "border-slate-800 bg-slate-950/30"
+                                    : "border-slate-200 bg-slate-50"
+                              )}
+                              key={item.id}
+                              ref={(node) => {
+                                if (!node) return;
+                                questionRefs.current.set(item.id, node);
+                              }}
+                            >
+                              <div className="flex flex-col gap-3">
+                                <div className="space-y-3">
+                                  <div className="space-y-1">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>
+                                        {activeSubject?.name ?? "Subject"}
+                                      </p>
+                                      <span
+                                        className={cn(
+                                          "inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]",
+                                          viewed
+                                            ? isDark
+                                              ? "bg-sky-500/15 text-sky-200"
+                                              : "bg-sky-50 text-sky-700"
+                                            : isDark
+                                              ? "bg-slate-700/60 text-slate-300"
+                                              : "bg-slate-100 text-slate-600"
+                                        )}
+                                      >
+                                        {viewed ? "Viewed" : "Not viewed"}
+                                      </span>
+                                      <span
+                                        className={cn(
+                                          "inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]",
+                                          attempted
+                                            ? isDark
+                                              ? "bg-emerald-500/15 text-emerald-200"
+                                              : "bg-emerald-50 text-emerald-700"
+                                            : isDark
+                                              ? "bg-slate-700/60 text-slate-300"
+                                              : "bg-slate-100 text-slate-600"
+                                        )}
+                                      >
+                                        {attempted ? "Attempted" : "Not attempted"}
+                                      </span>
+                                    </div>
+
+                                    {hasContent ? (
+                                      <div
+                                        className={cn(
+                                          "overflow-hidden text-sm leading-7 rich-text-preview rich-text-content",
+                                          isDark ? "text-slate-200" : "text-slate-900"
+                                        )}
+                                        style={{
+                                          display: "-webkit-box",
+                                          WebkitLineClamp: 5,
+                                          WebkitBoxOrient: "vertical",
+                                          maxHeight: "9rem",
+                                          overflow: "hidden"
+                                        }}
+                                        dangerouslySetInnerHTML={{ __html: item.question }}
+                                      />
+                                    ) : (
+                                      <p className={cn("text-sm leading-7 italic", isDark ? "text-slate-500" : "text-slate-500")}>No question content.</p>
+                                    )}
+
+                                    <p className={cn("text-xs", isDark ? "text-slate-400" : "text-slate-600")}>{item.options.length} options</p>
+                                  </div>
+
+                                  <div className="flex flex-wrap items-center justify-end gap-2">
+                                    <button
+                                      className={cn(
+                                        "inline-flex items-center justify-center gap-2 rounded-2xl px-3 py-2 text-sm font-medium transition",
+                                        isDark ? "bg-white text-slate-950 hover:bg-slate-100" : "bg-slate-950 text-white hover:bg-slate-900"
+                                      )}
+                                      onClick={() => {
+                                        setActiveQuestionId(item.id);
+                                        navigate(`/app/bar-final-exams-mcq/${selectedSubjectId}/questions/${item.id}`);
+                                      }}
+                                      type="button"
+                                    >
+                                      <Eye className="h-4 w-4" />
+                                      {attempted ? "Review question" : viewed ? "Read question" : "Read and attempt question"}
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  ))}
+                </div>
               </div>
             )}
           </div>

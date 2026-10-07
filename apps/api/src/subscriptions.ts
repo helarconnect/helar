@@ -471,10 +471,12 @@ export function parseAdminManualActivationInput(input: unknown) {
 export async function getUserSubscriptionSnapshot(userId: string) {
   await ensureManagedPlans();
 
+  const now = new Date();
   const [activeSubscription, subscriptions, recentPayments] = await Promise.all([
     prisma.subscription.findFirst({
       where: {
         ...notDeletedSubscriptionWhere,
+        OR: [{ endsAt: null }, { endsAt: { gt: now } }],
         status: SubscriptionStatus.ACTIVE,
         userId
       },
@@ -1013,7 +1015,9 @@ export async function verifySubscriptionPayment(userId: string, reference: strin
     throw new BillingOperationError("The verified payment reference does not match the checkout request.", 409);
   }
 
-  if (verification.customer?.email && verification.customer.email !== expectedCheckoutEmail) {
+  const verifiedEmail = verification.customer?.email?.trim().toLowerCase() ?? "";
+  const expectedEmail = expectedCheckoutEmail.trim().toLowerCase();
+  if (verifiedEmail && verifiedEmail !== expectedEmail) {
     throw new BillingOperationError("The verified payment email does not match the signed-in user.", 409);
   }
 
@@ -1091,14 +1095,14 @@ export async function verifySubscriptionPayment(userId: string, reference: strin
 
     const planCode = storedPayload?.request?.planCode ?? storedPayload?.planCode ?? null;
 
-    if (planCode !== "monthly" && planCode !== "annual") {
+    if (planCode !== "monthly" && planCode !== "six_months" && planCode !== "annual") {
       throw new BillingOperationError("The checkout plan could not be resolved for verification.", 409);
     }
 
     const planRecord = await tx.subscriptionPlan.findFirst({
       where: {
         code: planCode,
-        deletedAt: null
+        ...notDeletedPlanWhere
       }
     });
 
