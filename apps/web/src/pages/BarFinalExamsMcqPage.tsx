@@ -1280,6 +1280,7 @@ export function StudentBarFinalExamsMcqPage() {
   const location = useLocation();
   const [search, setSearch] = useState("");
   const [selectedSubjectId, setSelectedSubjectId] = useState("");
+  const [selectedTopicId, setSelectedTopicId] = useState("");
   const [activeQuestionId, setActiveQuestionId] = useState("");
   const [sortBy, setSortBy] = useState<"createdAt" | "examDate">("createdAt");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
@@ -1297,9 +1298,9 @@ export function StudentBarFinalExamsMcqPage() {
   });
 
   const questionsQuery = useQuery({
-    enabled: Boolean(selectedSubjectId),
-    queryKey: queryKeys.studentBarFinalExamMcqQuestions({ subjectId: selectedSubjectId, sortBy, sortOrder }),
-    queryFn: () => fetchStudentBarFinalExamMcqQuestions(selectedSubjectId, { sortBy, sortOrder })
+    enabled: Boolean(selectedSubjectId && selectedTopicId),
+    queryKey: queryKeys.studentBarFinalExamMcqQuestions({ subjectId: selectedSubjectId, topicId: selectedTopicId, sortBy, sortOrder }),
+    queryFn: () => fetchStudentBarFinalExamMcqQuestions(selectedSubjectId, { topicId: selectedTopicId, sortBy, sortOrder })
   });
 
   useEffect(() => {
@@ -1311,6 +1312,7 @@ export function StudentBarFinalExamsMcqPage() {
       return;
     }
     setSelectedSubjectId(stateSubjectId);
+    setSelectedTopicId("");
   }, [location.key, location.state, selectedSubjectId]);
 
   const subjects = subjectsQuery.data?.subjects ?? [];
@@ -1319,56 +1321,6 @@ export function StudentBarFinalExamsMcqPage() {
   const allQuestionIds = useMemo(() => questions.map((item) => item.id), [questions]);
   const activeSubject = subjects.find((subject) => subject.id === selectedSubjectId) ?? null;
 
-  const groupedQuestions = useMemo(() => {
-    const groups = new Map<string, { key: string; name: string; items: typeof questions }>();
-    const topicOrder: Array<{ key: string; name: string }> = [];
-
-    for (const topic of topics) {
-      const key = topic.id;
-      topicOrder.push({ key, name: topic.name });
-      groups.set(key, { key, name: topic.name, items: [] });
-    }
-
-    for (const item of questions) {
-      const topicKey = item.topicId ?? "general";
-      const group = groups.get(topicKey);
-      if (group) {
-        group.items.push(item);
-        continue;
-      }
-
-      groups.set(topicKey, {
-        key: topicKey,
-        name: item.topic?.name ?? (topicKey === "general" ? "General" : "Topic"),
-        items: [item]
-      });
-    }
-
-    const orderedKeys = new Set<string>();
-    const result: Array<{ key: string; name: string; items: typeof questions }> = [];
-
-    const generalGroup = groups.get("general");
-    if (generalGroup && generalGroup.items.length) {
-      result.push(generalGroup);
-      orderedKeys.add("general");
-    }
-
-    for (const entry of topicOrder) {
-      const group = groups.get(entry.key);
-      if (!group || !group.items.length) continue;
-      result.push(group);
-      orderedKeys.add(entry.key);
-    }
-
-    const remaining = Array.from(groups.values())
-      .filter((group) => group.items.length && !orderedKeys.has(group.key))
-      .sort((left, right) => left.name.localeCompare(right.name));
-
-    return [...result, ...remaining];
-  }, [questions, topics]);
-
-  const firstGroupedQuestionId = useMemo(() => groupedQuestions[0]?.items[0]?.id ?? "", [groupedQuestions]);
-
   // Use the same attempt gating hook on the list page so per-question
   // badges and the subject-level progress bar update live as the student
   // works through the exam.
@@ -1376,6 +1328,11 @@ export function StudentBarFinalExamsMcqPage() {
 
   useEffect(() => {
     if (!selectedSubjectId) {
+      setActiveQuestionId("");
+      return;
+    }
+
+    if (!selectedTopicId) {
       setActiveQuestionId("");
       return;
     }
@@ -1389,8 +1346,8 @@ export function StudentBarFinalExamsMcqPage() {
       return;
     }
 
-    setActiveQuestionId(firstGroupedQuestionId || questions[0].id);
-  }, [activeQuestionId, firstGroupedQuestionId, questions, selectedSubjectId]);
+    setActiveQuestionId(questions[0].id);
+  }, [activeQuestionId, questions, selectedSubjectId, selectedTopicId]);
 
   function scrollToQuestion(questionId: string) {
     const target = questionRefs.current.get(questionId);
@@ -1468,7 +1425,11 @@ export function StudentBarFinalExamsMcqPage() {
                           : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                     )}
                     key={subject.id}
-                    onClick={() => setSelectedSubjectId(subject.id)}
+                    onClick={() => {
+                      setSelectedSubjectId(subject.id);
+                      setSelectedTopicId("");
+                      setActiveQuestionId("");
+                    }}
                     type="button"
                   >
                     <span>{subject.name}</span>
@@ -1484,224 +1445,265 @@ export function StudentBarFinalExamsMcqPage() {
               <div className={cn("rounded-2xl border px-4 py-6 text-sm", isDark ? "border-slate-800 text-slate-400" : "border-slate-200 text-slate-600")}>
                 Choose a subject to begin.
               </div>
-            ) : questionsQuery.isLoading ? (
-              <div className={cn("rounded-2xl border px-4 py-6 text-sm", isDark ? "border-slate-800 text-slate-400" : "border-slate-200 text-slate-600")}>
-                Loading questions...
-              </div>
-            ) : questions.length === 0 ? (
-              <div className={cn("rounded-2xl border px-4 py-6 text-sm", isDark ? "border-slate-800 text-slate-400" : "border-slate-200 text-slate-600")}>
-                No published MCQ questions yet for this subject.
-              </div>
             ) : (
               <div className="space-y-4">
                 <div className={cn("rounded-2xl border px-4 py-3", isDark ? "border-slate-800 bg-slate-950/30" : "border-slate-200 bg-slate-50")}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Progress</span>
-                      <span className={cn("text-xs font-semibold", isDark ? "text-white" : "text-slate-950")}>
-                        {gating.attemptedCount}/{gating.totalQuestions} attempted
-                      </span>
-                      <span className={cn("text-[11px]", isDark ? "text-slate-500" : "text-slate-500")}>
-                        · {gating.viewedCount} viewed
-                      </span>
-                    </div>
-                    <span
-                      className={cn(
-                        "inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]",
-                        gating.allAttempted
-                          ? isDark
-                            ? "bg-emerald-500/15 text-emerald-200"
-                            : "bg-emerald-50 text-emerald-700"
-                          : isDark
-                            ? "bg-sky-500/15 text-sky-200"
-                            : "bg-sky-50 text-sky-700"
-                      )}
-                    >
-                      {gating.allAttempted ? "All attempted" : `${gating.totalQuestions - gating.attemptedCount} remaining`}
-                    </span>
+                    <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Topics</p>
+                    {activeSubject ? (
+                      <p className={cn("text-xs", isDark ? "text-slate-500" : "text-slate-500")}>{activeSubject.name}</p>
+                    ) : null}
                   </div>
-                  <div className={cn("mt-2.5 h-2 w-full overflow-hidden rounded-full", isDark ? "bg-slate-800" : "bg-slate-200")}>
-                    <div
-                      className={cn(
-                        "h-full rounded-full transition-all duration-500",
-                        gating.allAttempted
-                          ? isDark
-                            ? "bg-emerald-500"
-                            : "bg-emerald-600"
-                          : isDark
-                            ? "bg-sky-500"
-                            : "bg-sky-600"
-                      )}
-                      style={{
-                        width: `${gating.totalQuestions > 0 ? Math.max(0, Math.min(100, (gating.attemptedCount / gating.totalQuestions) * 100)) : 0}%`
-                      }}
-                    />
-                  </div>
-                </div>
 
-                <div className={cn("rounded-2xl border px-4 py-3", isDark ? "border-slate-800 bg-slate-950/30" : "border-slate-200 bg-slate-50")}>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <span className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Sort</span>
-                    <select
-                      aria-label="Sort MCQ questions"
-                      className={cn("rounded-xl border px-3 py-2 text-xs font-medium outline-none", isDark ? "border-slate-700 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-950")}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        if (value === "examDateDesc") {
-                          setSortBy("examDate");
-                          setSortOrder("desc");
-                          return;
-                        }
-                        if (value === "examDateAsc") {
-                          setSortBy("examDate");
-                          setSortOrder("asc");
-                          return;
-                        }
-                        if (value === "createdAtDesc") {
-                          setSortBy("createdAt");
-                          setSortOrder("desc");
-                          return;
-                        }
-                        setSortBy("createdAt");
-                        setSortOrder("asc");
-                      }}
-                      value={(() => {
-                        if (sortBy === "examDate") return sortOrder === "desc" ? "examDateDesc" : "examDateAsc";
-                        if (sortBy === "createdAt" && sortOrder === "desc") return "createdAtDesc";
-                        return "createdAtAsc";
-                      })()}
-                    >
-                      <option value="createdAtAsc">Oldest first</option>
-                      <option value="createdAtDesc">Most recent</option>
-                      <option value="examDateDesc">Exam year (newest)</option>
-                      <option value="examDateAsc">Exam year (oldest)</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="space-y-6">
-                  {groupedQuestions.map((group) => (
-                    <section className="space-y-3" key={group.key}>
-                      <div className="flex items-center justify-between gap-3">
-                        <h3 className={cn("text-sm font-semibold", isDark ? "text-white" : "text-slate-950")}>{group.name}</h3>
-                        <p className={cn("text-xs", isDark ? "text-slate-500" : "text-slate-500")}>{group.items.length} questions</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {topicsQuery.isLoading ? (
+                      <div className={cn("rounded-2xl border px-4 py-3 text-sm", isDark ? "border-slate-800 text-slate-400" : "border-slate-200 text-slate-600")}>
+                        Loading topics...
                       </div>
+                    ) : topics.length === 0 ? (
+                      <div className={cn("rounded-2xl border px-4 py-3 text-sm", isDark ? "border-slate-800 text-slate-400" : "border-slate-200 text-slate-600")}>
+                        No topics found for this subject yet.
+                      </div>
+                    ) : (
+                      topics.map((topic) => (
+                        <button
+                          className={cn(
+                            "inline-flex items-center rounded-full border px-4 py-2 text-sm font-medium transition",
+                            selectedTopicId === topic.id
+                              ? isDark
+                                ? "border-white/15 bg-white/10 text-white"
+                                : "border-slate-200 bg-slate-950 text-white"
+                              : isDark
+                                ? "border-slate-800 bg-slate-950/30 text-slate-200 hover:border-slate-700"
+                                : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                          )}
+                          key={topic.id}
+                          onClick={() => {
+                            setSelectedTopicId(topic.id);
+                            setActiveQuestionId("");
+                          }}
+                          type="button"
+                        >
+                          {topic.name}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
 
-                      <div className="space-y-3">
-                        {group.items.map((item) => {
-                          const isActive = item.id === activeQuestionId;
-                          const hasContent = stripHtml(item.question).length > 0;
-                          const viewed = gating.viewedSet.has(item.id);
-                          const attempted = gating.attemptedSet.has(item.id);
+                {!selectedTopicId ? (
+                  <div className={cn("rounded-2xl border px-4 py-6 text-sm", isDark ? "border-slate-800 text-slate-400" : "border-slate-200 text-slate-600")}>
+                    Select a topic to view questions.
+                  </div>
+                ) : questionsQuery.isLoading ? (
+                  <div className={cn("rounded-2xl border px-4 py-6 text-sm", isDark ? "border-slate-800 text-slate-400" : "border-slate-200 text-slate-600")}>
+                    Loading questions...
+                  </div>
+                ) : questions.length === 0 ? (
+                  <div className={cn("rounded-2xl border px-4 py-6 text-sm", isDark ? "border-slate-800 text-slate-400" : "border-slate-200 text-slate-600")}>
+                    No published MCQ questions yet for this topic.
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className={cn("rounded-2xl border px-4 py-3", isDark ? "border-slate-800 bg-slate-950/30" : "border-slate-200 bg-slate-50")}>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Progress</span>
+                          <span className={cn("text-xs font-semibold", isDark ? "text-white" : "text-slate-950")}>
+                            {gating.attemptedCount}/{gating.totalQuestions} attempted
+                          </span>
+                          <span className={cn("text-[11px]", isDark ? "text-slate-500" : "text-slate-500")}>
+                            · {gating.viewedCount} viewed
+                          </span>
+                        </div>
+                        <span
+                          className={cn(
+                            "inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]",
+                            gating.allAttempted
+                              ? isDark
+                                ? "bg-emerald-500/15 text-emerald-200"
+                                : "bg-emerald-50 text-emerald-700"
+                              : isDark
+                                ? "bg-sky-500/15 text-sky-200"
+                                : "bg-sky-50 text-sky-700"
+                          )}
+                        >
+                          {gating.allAttempted ? "All attempted" : `${gating.totalQuestions - gating.attemptedCount} remaining`}
+                        </span>
+                      </div>
+                      <div className={cn("mt-2.5 h-2 w-full overflow-hidden rounded-full", isDark ? "bg-slate-800" : "bg-slate-200")}>
+                        <div
+                          className={cn(
+                            "h-full rounded-full transition-all duration-500",
+                            gating.allAttempted
+                              ? isDark
+                                ? "bg-emerald-500"
+                                : "bg-emerald-600"
+                              : isDark
+                                ? "bg-sky-500"
+                                : "bg-sky-600"
+                          )}
+                          style={{
+                            width: `${gating.totalQuestions > 0 ? Math.max(0, Math.min(100, (gating.attemptedCount / gating.totalQuestions) * 100)) : 0}%`
+                          }}
+                        />
+                      </div>
+                    </div>
 
-                          return (
-                            <div
-                              className={cn(
-                                "rounded-3xl border p-4 transition",
-                                isActive
-                                  ? isDark
-                                    ? "border-white/15 bg-white/10"
-                                    : "border-slate-200 bg-slate-950 text-white"
-                                  : isDark
-                                    ? "border-slate-800 bg-slate-950/30"
-                                    : "border-slate-200 bg-slate-50"
-                              )}
-                              key={item.id}
-                              ref={(node) => {
-                                if (!node) return;
-                                questionRefs.current.set(item.id, node);
-                              }}
-                            >
-                              <div className="flex flex-col gap-3">
-                                <div className="space-y-3">
-                                  <div className="space-y-1">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>
-                                        {activeSubject?.name ?? "Subject"}
-                                      </p>
-                                      <span
-                                        className={cn(
-                                          "inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]",
-                                          viewed
-                                            ? isDark
-                                              ? "bg-sky-500/15 text-sky-200"
-                                              : "bg-sky-50 text-sky-700"
-                                            : isDark
-                                              ? "bg-slate-700/60 text-slate-300"
-                                              : "bg-slate-100 text-slate-600"
-                                        )}
-                                      >
-                                        {viewed ? "Viewed" : "Not viewed"}
-                                      </span>
-                                      <span
-                                        className={cn(
-                                          "inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]",
-                                          attempted
-                                            ? isDark
-                                              ? "bg-emerald-500/15 text-emerald-200"
-                                              : "bg-emerald-50 text-emerald-700"
-                                            : isDark
-                                              ? "bg-slate-700/60 text-slate-300"
-                                              : "bg-slate-100 text-slate-600"
-                                        )}
-                                      >
-                                        {attempted ? "Attempted" : "Not attempted"}
-                                      </span>
-                                    </div>
+                    <div className={cn("rounded-2xl border px-4 py-3", isDark ? "border-slate-800 bg-slate-950/30" : "border-slate-200 bg-slate-50")}>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <span className={cn("text-xs uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>Sort</span>
+                        <select
+                          aria-label="Sort MCQ questions"
+                          className={cn("rounded-xl border px-3 py-2 text-xs font-medium outline-none", isDark ? "border-slate-700 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-950")}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            if (value === "examDateDesc") {
+                              setSortBy("examDate");
+                              setSortOrder("desc");
+                              return;
+                            }
+                            if (value === "examDateAsc") {
+                              setSortBy("examDate");
+                              setSortOrder("asc");
+                              return;
+                            }
+                            if (value === "createdAtDesc") {
+                              setSortBy("createdAt");
+                              setSortOrder("desc");
+                              return;
+                            }
+                            setSortBy("createdAt");
+                            setSortOrder("asc");
+                          }}
+                          value={(() => {
+                            if (sortBy === "examDate") return sortOrder === "desc" ? "examDateDesc" : "examDateAsc";
+                            if (sortBy === "createdAt" && sortOrder === "desc") return "createdAtDesc";
+                            return "createdAtAsc";
+                          })()}
+                        >
+                          <option value="createdAtAsc">Oldest first</option>
+                          <option value="createdAtDesc">Most recent</option>
+                          <option value="examDateDesc">Exam year (newest)</option>
+                          <option value="examDateAsc">Exam year (oldest)</option>
+                        </select>
+                      </div>
+                    </div>
 
-                                    {hasContent ? (
-                                      <div
-                                        className={cn(
-                                          "overflow-hidden text-sm leading-7 rich-text-preview rich-text-content",
-                                          isDark ? "text-slate-200" : "text-slate-900"
-                                        )}
-                                        style={{
-                                          display: "-webkit-box",
-                                          WebkitLineClamp: 5,
-                                          WebkitBoxOrient: "vertical",
-                                          maxHeight: "9rem",
-                                          overflow: "hidden"
-                                        }}
-                                        dangerouslySetInnerHTML={{ __html: item.question }}
-                                      />
-                                    ) : (
-                                      <p className={cn("text-sm leading-7 italic", isDark ? "text-slate-500" : "text-slate-500")}>No question content.</p>
-                                    )}
+                    <div className="space-y-3">
+                      {questions.map((item) => {
+                        const isActive = item.id === activeQuestionId;
+                        const hasContent = stripHtml(item.question).length > 0;
+                        const viewed = gating.viewedSet.has(item.id);
+                        const attempted = gating.attemptedSet.has(item.id);
 
-                                    <p className={cn("text-xs", isDark ? "text-slate-400" : "text-slate-600")}>{item.options.length} options</p>
-                                  </div>
-
-                                  <div className="flex flex-wrap items-center justify-end gap-2">
-                                    <button
+                        return (
+                          <div
+                            className={cn(
+                              "rounded-3xl border p-4 transition",
+                              isActive
+                                ? isDark
+                                  ? "border-white/15 bg-white/10"
+                                  : "border-slate-200 bg-slate-950 text-white"
+                                : isDark
+                                  ? "border-slate-800 bg-slate-950/30"
+                                  : "border-slate-200 bg-slate-50"
+                            )}
+                            key={item.id}
+                            ref={(node) => {
+                              if (!node) return;
+                              questionRefs.current.set(item.id, node);
+                            }}
+                          >
+                            <div className="flex flex-col gap-3">
+                              <div className="space-y-3">
+                                <div className="space-y-1">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-500")}>
+                                      {activeSubject?.name ?? "Subject"}
+                                    </p>
+                                    <span
                                       className={cn(
-                                        "inline-flex items-center justify-center gap-2 rounded-2xl px-3 py-2 text-sm font-medium transition",
-                                        isDark ? "bg-white text-slate-950 hover:bg-slate-100" : "bg-slate-950 text-white hover:bg-slate-900"
+                                        "inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]",
+                                        viewed
+                                          ? isDark
+                                            ? "bg-sky-500/15 text-sky-200"
+                                            : "bg-sky-50 text-sky-700"
+                                          : isDark
+                                            ? "bg-slate-700/60 text-slate-300"
+                                            : "bg-slate-100 text-slate-600"
                                       )}
-                                      onClick={() => {
-                                        setActiveQuestionId(item.id);
-                                        navigate(`/app/bar-final-exams-mcq/${selectedSubjectId}/questions/${item.id}`);
-                                      }}
-                                      type="button"
                                     >
-                                      <Eye className="h-4 w-4" />
-                                      {attempted ? "Review question" : viewed ? "Read question" : "Read and attempt question"}
-                                    </button>
+                                      {viewed ? "Viewed" : "Not viewed"}
+                                    </span>
+                                    <span
+                                      className={cn(
+                                        "inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]",
+                                        attempted
+                                          ? isDark
+                                            ? "bg-emerald-500/15 text-emerald-200"
+                                            : "bg-emerald-50 text-emerald-700"
+                                          : isDark
+                                            ? "bg-slate-700/60 text-slate-300"
+                                            : "bg-slate-100 text-slate-600"
+                                      )}
+                                    >
+                                      {attempted ? "Attempted" : "Not attempted"}
+                                    </span>
                                   </div>
+
+                                  {hasContent ? (
+                                    <div
+                                      className={cn(
+                                        "overflow-hidden text-sm leading-7 rich-text-preview rich-text-content",
+                                        isDark ? "text-slate-200" : "text-slate-900"
+                                      )}
+                                      style={{
+                                        display: "-webkit-box",
+                                        WebkitLineClamp: 5,
+                                        WebkitBoxOrient: "vertical",
+                                        maxHeight: "9rem",
+                                        overflow: "hidden"
+                                      }}
+                                      dangerouslySetInnerHTML={{ __html: item.question }}
+                                    />
+                                  ) : (
+                                    <p className={cn("text-sm leading-7 italic", isDark ? "text-slate-500" : "text-slate-500")}>No question content.</p>
+                                  )}
+
+                                  <p className={cn("text-xs", isDark ? "text-slate-400" : "text-slate-600")}>{item.options.length} options</p>
+                                </div>
+
+                                <div className="flex flex-wrap items-center justify-end gap-2">
+                                  <button
+                                    className={cn(
+                                      "inline-flex items-center justify-center gap-2 rounded-2xl px-3 py-2 text-sm font-medium transition",
+                                      isDark ? "bg-white text-slate-950 hover:bg-slate-100" : "bg-slate-950 text-white hover:bg-slate-900"
+                                    )}
+                                    onClick={() => {
+                                      setActiveQuestionId(item.id);
+                                      navigate(`/app/bar-final-exams-mcq/${selectedSubjectId}/questions/${item.id}`);
+                                    }}
+                                    type="button"
+                                  >
+                                    <Eye className="h-4 w-4" />
+                                    {attempted ? "Review question" : viewed ? "Read question" : "Read and attempt question"}
+                                  </button>
                                 </div>
                               </div>
                             </div>
-                          );
-                        })}
-                      </div>
-                    </section>
-                  ))}
-                </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
         </div>
 
-        {typeof document !== "undefined" && selectedSubjectId && questions.length > 0
+        {typeof document !== "undefined" && selectedSubjectId && selectedTopicId && questions.length > 0
           ? createPortal(
               <div className="pointer-events-none fixed right-6 top-1/2 z-[140] flex -translate-y-1/2 flex-col gap-2">
                 <button
