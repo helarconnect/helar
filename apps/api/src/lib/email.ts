@@ -57,6 +57,7 @@ type TransactionalMailInput = {
 };
 
 type SubscriptionActivationEmailInput = {
+  isRenewal?: boolean;
   amountMinor: number;
   currency: string;
   email: string;
@@ -605,7 +606,7 @@ function buildSubscriberSubscriptionText(input: SubscriptionActivationEmailInput
   return [
     `Hello ${input.fullName},`,
     "",
-    "Your Helar subscription payment was successful.",
+    input.isRenewal ? "Your Helar subscription has been renewed successfully." : "Your Helar subscription payment was successful.",
     "",
     `Plan: ${input.planName}`,
     `Amount: ${formatMoney(input.amountMinor, input.currency)}`,
@@ -624,10 +625,12 @@ function buildSubscriberSubscriptionHtml(input: SubscriptionActivationEmailInput
   return renderEmailLayout({
     preheader: "Your Helar subscription payment was successful. Here are the details.",
     eyebrow: "Subscription Active",
-    title: "Your subscription is active",
+    title: input.isRenewal ? "Your subscription has been renewed" : "Your subscription is active",
     intro: `Hello ${input.fullName}, your Helar subscription payment was successful.`,
     body: [
-      "Thank you for subscribing to Helar. Your subscription has been activated and you now have full access to all the features included in your plan.",
+      input.isRenewal
+        ? "Your subscription has been renewed successfully. Your premium access is active and your updated expiry date is shown below."
+        : "Thank you for subscribing to Helar. Your subscription has been activated and you now have full access to all the features included in your plan.",
       "You can review your subscription details, manage your plan, and update your billing information at any time from your account settings."
     ],
     details: [
@@ -1210,7 +1213,7 @@ export async function sendContactEmail(input: ContactEmailInput) {
 
 export async function sendSubscriptionActivationEmails(input: SubscriptionActivationEmailInput) {
   const config = getGoogleMailConfig();
-  const subscriberSubject = "Your Helar subscription is active — thank you";
+  const subscriberSubject = input.isRenewal ? "Your Helar subscription has been renewed" : "Your Helar subscription is active — thank you";
   const adminSubject = `New Helar subscription: ${input.planName} (${input.email})`;
   const subscriberEmailType = "subscription_activation_subscriber";
   const adminEmailType = "subscription_activation_admin";
@@ -1235,6 +1238,7 @@ export async function sendSubscriptionActivationEmails(input: SubscriptionActiva
     return { skipped: true as const };
   }
 
+  let subscriberSent = false;
   const transporter = createGoogleTransport(config);
   try {
     const subscriberResult = await transporter.sendMail(
@@ -1247,6 +1251,7 @@ export async function sendSubscriptionActivationEmails(input: SubscriptionActiva
       })
     );
 
+    subscriberSent = normalizeRecipients(subscriberResult.accepted).length > 0;
     logSendResult({
       emailType: subscriberEmailType,
       to: input.email,
@@ -1296,7 +1301,7 @@ export async function sendSubscriptionActivationEmails(input: SubscriptionActiva
     }
   }
 
-  return { skipped: false as const };
+  return { skipped: false as const, subscriberSent };
 }
 
 export async function sendWelcomeEmail(input: WelcomeEmailInput) {

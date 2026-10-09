@@ -241,7 +241,8 @@ import {
   parseAdminManualActivationInput,
   parseSubscriptionCheckoutInput,
   parseSubscriptionVerifyInput,
-  verifySubscriptionPayment
+  verifySubscriptionPayment,
+  processPaystackWebhook
 } from "./subscriptions.js";
 import {
   approveAllPendingContent,
@@ -1854,6 +1855,21 @@ export function createApp(options: AppOptions = {}) {
 
   app.use(cors());
   app.use(helmet());
+
+  // Register before JSON middleware so the signature covers the exact Paystack payload.
+  app.post("/api/v1/subscriptions/paystack/webhook", express.raw({ type: "application/json", limit: "256kb" }), async (request, response) => {
+    if (!useDatabase) { response.sendStatus(503); return; }
+    if (!Buffer.isBuffer(request.body)) { response.sendStatus(400); return; }
+    try {
+      await processPaystackWebhook(request.body, request.get("x-paystack-signature"));
+      response.sendStatus(200);
+    } catch (error) {
+      if (error instanceof BillingOperationError) { response.sendStatus(error.statusCode); return; }
+      if (error instanceof SyntaxError) { response.sendStatus(400); return; }
+      console.error("Paystack subscription webhook failed:", error);
+      response.sendStatus(503);
+    }
+  });
 
   // Admin library material transport chunk endpoints. Huge Word-HTML pastes
   // split at 500 KB on the frontend are uploaded here as individual plain-

@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { PaymentStatus, SubscriptionInterval, SubscriptionStatus, type Prisma } from "@prisma/client";
 import { z } from "zod";
 
@@ -204,24 +205,16 @@ function buildPaystackCustomerEmail(user: { email: string; id: string }) {
 }
 
 function calculateSubscriptionEndDate(planCode: ManagedPlanCode, interval: SubscriptionInterval, startsAt: Date) {
+  const months = planCode === "monthly" ? 1 : planCode === "six_months" ? 6 :
+    planCode === "annual" || interval === SubscriptionInterval.ANNUAL ? 12 : 0;
+  if (!months) throw new BillingOperationError("Unsupported subscription interval.", 400);
   const endsAt = new Date(startsAt);
-
-  if (planCode === "monthly") {
-    endsAt.setMonth(endsAt.getMonth() + 1);
-    return endsAt;
-  }
-
-  if (planCode === "six_months") {
-    endsAt.setMonth(endsAt.getMonth() + 6);
-    return endsAt;
-  }
-
-  if (planCode === "annual" || interval === SubscriptionInterval.ANNUAL) {
-    endsAt.setFullYear(endsAt.getFullYear() + 1);
-    return endsAt;
-  }
-
-  throw new BillingOperationError("Unsupported subscription interval.", 400);
+  const day = endsAt.getUTCDate();
+  endsAt.setUTCDate(1);
+  endsAt.setUTCMonth(endsAt.getUTCMonth() + months);
+  const lastDay = new Date(Date.UTC(endsAt.getUTCFullYear(), endsAt.getUTCMonth() + 1, 0)).getUTCDate();
+  endsAt.setUTCDate(Math.min(day, lastDay));
+  return endsAt;
 }
 
 function toJsonValue(value: unknown) {
@@ -475,8 +468,7 @@ export async function getUserSubscriptionSnapshot(userId: string) {
   const [activeSubscription, subscriptions, recentPayments] = await Promise.all([
     prisma.subscription.findFirst({
       where: {
-        ...notDeletedSubscriptionWhere,
-        OR: [{ endsAt: null }, { endsAt: { gt: now } }],
+        AND: [notDeletedSubscriptionWhere, { OR: [{ endsAt: null }, { endsAt: { gt: now } }] }],
         status: SubscriptionStatus.ACTIVE,
         userId
       },
@@ -850,6 +842,7 @@ export async function initializeSubscriptionCheckout(userId: string, input: z.in
       deletedAt: null,
       provider: "paystack",
       status: PaymentStatus.PENDING,
+      subscriptionId: null,
       userId: user.id
     }
   });
@@ -931,6 +924,65 @@ export async function initializeSubscriptionCheckout(userId: string, input: z.in
   }
 }
 
+export async function processPaystackWebhook(rawBody: Buffer, signature: string | undefined) {
+  const expected = createHmac("sha512", getPaystackSecretKey()).update(rawBody).digest();
+  if (!signature || !/^[a-f0-9]{128}$/i.test(signature) ||
+      !timingSafeEqual(expected, Buffer.from(signature, "hex"))) {
+    throw new BillingOperationError("Invalid Paystack signature.", 401);
+  }
+  const event = z.object({ event: z.string(), data: z.object({ reference: z.string().optional() }).passthrough().optional() })
+    .passthrough().safeParse(JSON.parse(rawBody.toString("utf8")));
+  if (!event.success) throw new BillingOperationError("Invalid Paystack event.", 400);
+  const payload = event.data;
+  if (payload.event !== "charge.success") return;
+  const reference = payload.data?.reference;
+  if (typeof reference !== "string" || !reference) {
+    throw new BillingOperationError("Missing Paystack payment reference.", 400);
+  }
+  const transaction = await prisma.transaction.findUnique({
+    where: { reference }, include: { payment: true }
+  });
+  // The Paystack account can also contain payments unrelated to Helar subscriptions.
+  if (!transaction || transaction.deletedAt || transaction.payment.deletedAt || transaction.payment.provider !== "paystack") return;
+  const result = await verifySubscriptionPayment(transaction.payment.userId, reference);
+  const subscription = await prisma.subscription.findUnique({ where: { id: result.subscription.id } });
+  const flags = (subscription?.notificationFlags ?? {}) as Record<string, unknown>;
+  // Ask Paystack to retry if mail delivery failed, without renewing a second time.
+  if (!flags.activationEmailSentAt) throw new BillingOperationError("Subscription confirmed; confirmation email awaiting delivery.", 503);
+}
+
+const subscriptionEmailTasks = new Map<string, Promise<void>>();
+
+async function sendConfirmedSubscriptionEmail(subscriptionId: string, reference: string) {
+  const existing = subscriptionEmailTasks.get(subscriptionId);
+  if (existing) return existing;
+  const task = (async () => {
+    const subscription = await prisma.subscription.findUnique({
+      where: { id: subscriptionId }, include: { user: true, plan: true }
+    });
+    if (!subscription || subscription.deletedAt) return;
+    const flags = (subscription.notificationFlags ?? {}) as Record<string, unknown>;
+    if (flags.activationEmailSentAt) return;
+    const payment = await prisma.payment.findFirst({ where: { subscriptionId, status: PaymentStatus.SUCCEEDED } });
+    if (!payment) return;
+    const result = await sendSubscriptionActivationEmails({
+      amountMinor: payment.amountMinor, currency: payment.currency,
+      email: subscription.user.email, fullName: subscription.user.fullName,
+      planName: subscription.plan.name, reference,
+      startsAt: subscription.startsAt.toISOString(), endsAt: subscription.endsAt?.toISOString() ?? null,
+      isRenewal: flags.isRenewal === true
+    });
+    if (!result.skipped && result.subscriberSent) {
+      await prisma.subscription.update({ where: { id: subscriptionId }, data: {
+        notificationFlags: toJsonValue({ ...flags, activationEmailSentAt: new Date().toISOString() })
+      } });
+    }
+  })();
+  subscriptionEmailTasks.set(subscriptionId, task);
+  try { await task; } catch (error) { console.error("Failed to send subscription confirmation email:", error); }
+  finally { subscriptionEmailTasks.delete(subscriptionId); }
+}
+
 export async function verifySubscriptionPayment(userId: string, reference: string) {
   await ensureManagedPlans();
 
@@ -971,6 +1023,7 @@ export async function verifySubscriptionPayment(userId: string, reference: strin
     transactionRecord.payment.subscription &&
     !transactionRecord.payment.subscription.deletedAt
   ) {
+    await sendConfirmedSubscriptionEmail(transactionRecord.payment.subscription.id, reference);
     return {
       payment: createPaymentSummary({
         ...transactionRecord.payment,
@@ -1022,14 +1075,13 @@ export async function verifySubscriptionPayment(userId: string, reference: strin
   }
 
   if (verification.status !== "success") {
-    await prisma.payment.update({
-      where: {
-        id: transactionRecord.paymentId
-      },
-      data: {
-        status: PaymentStatus.FAILED
-      }
-    });
+    // Pending/ongoing transactions may still succeed; never downgrade a confirmed payment.
+    if (["failed", "abandoned", "reversed"].includes(verification.status)) {
+      await prisma.payment.updateMany({
+        where: { id: transactionRecord.paymentId, status: { not: PaymentStatus.SUCCEEDED } },
+        data: { status: PaymentStatus.FAILED }
+      });
+    }
 
     throw new BillingOperationError(
       verification.gateway_response || "The payment was not completed successfully.",
@@ -1041,15 +1093,6 @@ export async function verifySubscriptionPayment(userId: string, reference: strin
     verification.amount !== transactionRecord.payment.amountMinor ||
     verification.currency !== transactionRecord.payment.currency
   ) {
-    await prisma.payment.update({
-      where: {
-        id: transactionRecord.paymentId
-      },
-      data: {
-        status: PaymentStatus.FAILED
-      }
-    });
-
     throw new BillingOperationError("The verified Paystack amount did not match the expected subscription amount.", 409);
   }
 
@@ -1110,11 +1153,21 @@ export async function verifySubscriptionPayment(userId: string, reference: strin
       throw new BillingOperationError("The subscription plan for this payment is missing.", 404);
     }
 
+    const previousSubscription = await tx.subscription.findFirst({
+      where: { ...notDeletedSubscriptionWhere, userId },
+      orderBy: { endsAt: "desc" }
+    });
+    const activeSubscription = await tx.subscription.findFirst({
+      where: { AND: [notDeletedSubscriptionWhere, { endsAt: { gt: completedAt } }], userId, status: SubscriptionStatus.ACTIVE },
+      orderBy: { endsAt: "desc" }
+    });
+    const renewalBase = activeSubscription?.endsAt ?? completedAt;
     const subscription = await tx.subscription.create({
       data: {
         autoRenew: false,
         deletedAt: null,
-        endsAt: calculateSubscriptionEndDate(planRecord.code as ManagedPlanCode, planRecord.interval, completedAt),
+        notificationFlags: toJsonValue({ isRenewal: Boolean(previousSubscription) }),
+        endsAt: calculateSubscriptionEndDate(planRecord.code as ManagedPlanCode, planRecord.interval, renewalBase),
         planId: planRecord.id,
         startsAt: completedAt,
         status: SubscriptionStatus.ACTIVE,
@@ -1127,10 +1180,12 @@ export async function verifySubscriptionPayment(userId: string, reference: strin
 
     const claimed = await tx.payment.updateMany({
       where: {
-        deletedAt: null,
+        AND: [
+          notDeletedPaymentWhere,
+          { OR: [{ subscriptionId: null }, { subscriptionId: { isSet: false } }] }
+        ],
         id: payment.id,
-        status: PaymentStatus.PENDING,
-        subscriptionId: null
+        status: { in: [PaymentStatus.PENDING, PaymentStatus.FAILED] }
       },
       data: {
         status: PaymentStatus.SUCCEEDED,
@@ -1188,7 +1243,7 @@ export async function verifySubscriptionPayment(userId: string, reference: strin
 
     await tx.subscription.updateMany({
       where: {
-        deletedAt: null,
+        ...notDeletedSubscriptionWhere,
         id: {
           not: subscription.id
         },
@@ -1220,6 +1275,7 @@ export async function verifySubscriptionPayment(userId: string, reference: strin
       data: {
         rawPayload: toJsonValue({
           kind: "paystack_verify",
+          request: storedPayload?.request ?? storedPayload,
           response: paystackResponse
         })
       }
@@ -1243,20 +1299,7 @@ export async function verifySubscriptionPayment(userId: string, reference: strin
     subscription: createSubscriptionSummary(finalized.subscription)
   };
 
-  try {
-    await sendSubscriptionActivationEmails({
-      amountMinor: finalized.payment.amountMinor,
-      currency: finalized.payment.currency,
-      email: transactionRecord.payment.user.email,
-      fullName: transactionRecord.payment.user.fullName,
-      planName: finalized.subscription.plan.name,
-      reference,
-      startsAt: finalized.subscription.startsAt.toISOString(),
-      endsAt: finalized.subscription.endsAt?.toISOString() ?? null
-    });
-  } catch (error) {
-    console.error("Failed to send subscription activation emails:", error);
-  }
+  await sendConfirmedSubscriptionEmail(finalized.subscription.id, reference);
 
   return result;
 }
