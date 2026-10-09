@@ -56,6 +56,11 @@ authenticatedHttp.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
     const originalRequest = error.config as RetriableRequestConfig | undefined;
+    if (error.response?.status === 403 &&
+        (error.response.data as { error?: { code?: string } })?.error?.code === "EMAIL_VERIFICATION_REQUIRED") {
+      useAuthStore.getState().clearSession();
+      throw error;
+    }
 
     if (error.response?.status !== 401 || !originalRequest || originalRequest._retry) {
       throw error;

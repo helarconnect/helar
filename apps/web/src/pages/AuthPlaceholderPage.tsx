@@ -2,13 +2,13 @@ import { AxiosError } from "axios";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
 import { AlertCircle, ArrowRight, CheckCircle2, Eye, EyeOff, X } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useForm } from "react-hook-form";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { z } from "zod";
 
-import { signInDemo, signUpDemo } from "@/lib/api";
+import { resendEmailVerification, signInDemo, signUpDemo } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth-store";
 
@@ -118,6 +118,16 @@ export function AuthPlaceholderPage({ mode }: AuthPlaceholderPageProps) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const setSession = useAuthStore((state) => state.setSession);
+  const clearSession = useAuthStore((state) => state.clearSession);
+  const [verificationEmail, setVerificationEmail] = useState(searchParams.get("email") ?? "");
+  const [verificationMessage, setVerificationMessage] = useState<string | null>(
+    searchParams.get("verification") === "required" ? "Verify your registered email address before signing in. You can request a new link below." : null
+  );
+
+  useEffect(() => {
+    const session = useAuthStore.getState().session;
+    if (session && !session.user.emailVerifiedAt) clearSession();
+  }, [clearSession]);
   const [toasts, setToasts] = useState<Array<{ id: number; message: string; tone: ToastTone }>>([]);
   const toastCounterRef = useRef(0);
   // Password visibility toggles so the user can show/hide the typed value
@@ -139,7 +149,7 @@ export function AuthPlaceholderPage({ mode }: AuthPlaceholderPageProps) {
     resolver: zodResolver(isSignIn ? signInSchema : signUpSchema),
     defaultValues: isSignIn
       ? {
-          email: "",
+          email: searchParams.get("email") ?? "",
           password: "",
           fullName: "",
           confirmPassword: ""
@@ -171,6 +181,16 @@ export function AuthPlaceholderPage({ mode }: AuthPlaceholderPageProps) {
       });
     },
     onSuccess: (response) => {
+      if (!("accessToken" in response.data)) {
+        clearSession();
+        setVerificationEmail(response.data.user.email);
+        const message = response.meta?.verificationEmailStatus === "sent"
+          ? "Account created. Check your email for the verification link. You can sign in after verifying your account."
+          : "Account created, but the verification email could not be sent. Please use Resend verification link below.";
+        setVerificationMessage(message);
+        showToast(message, response.meta?.verificationEmailStatus === "sent" ? "success" : "error");
+        return;
+      }
       const redirectTarget = searchParams.get("redirect");
       const intent = searchParams.get("intent");
       const safeRedirectTarget = redirectTarget?.startsWith("/") ? redirectTarget : "/app/dashboard";
@@ -181,19 +201,7 @@ export function AuthPlaceholderPage({ mode }: AuthPlaceholderPageProps) {
           : safeRedirectTarget;
 
       setSession(response.data);
-      if (isSignIn) {
-        showToast("Signed in successfully.", "success");
-      } else if (response.meta?.verificationEmailStatus === "sent") {
-        showToast("Account created successfully. Activation email sent.", "success");
-      } else if (response.meta?.verificationEmailStatus === "skipped") {
-        showToast("Account created successfully. Activation email is not configured yet.", "error");
-      } else if (response.meta?.verificationEmailStatus === "failed") {
-        showToast("Account created successfully. Activation email could not be sent.", "error");
-      } else if (response.meta?.verificationEmailStatus === "already_verified") {
-        showToast("Account created successfully.", "success");
-      } else {
-        showToast("Account created successfully.", "success");
-      }
+      showToast("Signed in successfully.", "success");
       window.setTimeout(() => navigate(destination, { replace: true }), 650);
     },
     onError: (error) => {
@@ -201,9 +209,39 @@ export function AuthPlaceholderPage({ mode }: AuthPlaceholderPageProps) {
         error instanceof AxiosError
           ? error.response?.data?.error?.message ?? "We could not complete this request right now."
           : "We could not complete this request right now.";
+      if (error instanceof AxiosError && error.response?.data?.error?.code === "EMAIL_VERIFICATION_REQUIRED") {
+        clearSession();
+        setVerificationEmail(form.getValues("email"));
+        setVerificationMessage(message);
+      }
       showToast(message, "error");
     }
   });
+
+  const resendMutation = useMutation({
+    mutationFn: (email: string) => resendEmailVerification(email),
+    onSuccess: (response) => {
+      setVerificationMessage(response.data.message);
+      showToast(response.data.message, "success");
+    },
+    onError: (error) => {
+      const message = error instanceof AxiosError
+        ? error.response?.data?.error?.message ?? "We could not send the verification email. Please try again shortly."
+        : "We could not send the verification email. Please try again shortly.";
+      setVerificationMessage(message);
+      showToast(message, "error");
+    }
+  });
+
+  function handleResendVerification() {
+    const parsed = z.string().trim().toLowerCase().email().safeParse(verificationEmail || form.getValues("email"));
+    if (!parsed.success) {
+      showToast("Enter your registered email address to receive a verification link.", "error");
+      return;
+    }
+    setVerificationEmail(parsed.data);
+    resendMutation.mutate(parsed.data);
+  }
 
   function handleAuthSubmit(values: AuthFormValues) {
     authMutation.mutate(values);
@@ -241,6 +279,13 @@ export function AuthPlaceholderPage({ mode }: AuthPlaceholderPageProps) {
               {isSignIn ? "Sign in to continue to your dashboard." : "Start your Helar workspace in minutes."}
             </p>
           </div>
+
+          {verificationMessage ? (
+            <div className="auth-status-card" role="status">
+              <p>{verificationMessage}</p>
+              {verificationEmail ? <p>Registered email: {verificationEmail}</p> : null}
+            </div>
+          ) : null}
 
           <form className="auth-form" onSubmit={form.handleSubmit(handleAuthSubmit)}>
             {!isSignIn ? (
@@ -363,6 +408,19 @@ export function AuthPlaceholderPage({ mode }: AuthPlaceholderPageProps) {
             {authMutation.isError ? (
               <div className="auth-status-card">
                 <p>{authErrorMessage}</p>
+              </div>
+            ) : null}
+
+            {isSignIn || verificationMessage ? (
+              <div className="auth-field">
+                <label htmlFor="verificationEmail">Email for verification</label>
+                <input className="auth-input" id="verificationEmail" type="email"
+                  value={verificationEmail} placeholder="Your registered email address"
+                  onChange={(event) => setVerificationEmail(event.target.value)} />
+                <button className="auth-inline-link" type="button" disabled={resendMutation.isPending}
+                  onClick={handleResendVerification}>
+                  {resendMutation.isPending ? "Sending verification link..." : "Resend verification link"}
+                </button>
               </div>
             ) : null}
 

@@ -34,56 +34,37 @@ describe("LexLearn API", () => {
     expect(response.body.error.code).toBe("VALIDATION_ERROR");
   });
 
-  it("rejects incorrect credentials when database-backed auth is enabled", async () => {
+  it("requires the account database before signing in", async () => {
     const response = await request(createApp({ useDatabase: false }))
       .post("/api/v1/auth/demo-sign-in")
       .send({ email: "admin@helar.test", password: "Helar123!" });
+    expect(response.status).toBe(503);
+    expect(response.body.error.code).toBe("DATABASE_UNAVAILABLE");
+    expect(response.body.data?.accessToken).toBeUndefined();
+  });
 
-    expect(response.status).toBe(401);
-    expect(response.body.success).toBe(false);
-    expect(response.body.error.code).toBe("INVALID_CREDENTIALS");
-  }, 45_000);
-
-  it("returns an admin demo user for admin sign-in emails", async () => {
+  it("does not bypass stored account verification with fallback sign-in", async () => {
     const response = await request(createApp({ useDatabase: false, allowAuthFallback: true }))
       .post("/api/v1/auth/demo-sign-in")
       .send({ email: "admin@helar.test", password: "Helar123!" });
-
-    expect(response.status).toBe(200);
-    expect(response.body.success).toBe(true);
-    expect(response.body.data.user.fullName).toBe("Helar Administrator");
-    expect(response.body.data.user.roleCodes).toContain("administrator");
+    expect(response.status).toBe(503);
+    expect(response.body.data?.accessToken).toBeUndefined();
   });
 
-  it("registers a new learner with validated credentials", async () => {
+  it("does not create a fallback registration session without the account database", async () => {
     const response = await request(createApp({ useDatabase: false, allowAuthFallback: true }))
       .post("/api/v1/auth/register")
-      .send({
-        fullName: "Adaeze Okonkwo",
-        email: "adaeze@helar.test",
-        password: "Helar123!",
-        confirmPassword: "Helar123!"
-      });
-
-    expect(response.status).toBe(201);
-    expect(response.body.success).toBe(true);
-    expect(response.body.data.user.fullName).toBe("Adaeze Okonkwo");
-    expect(response.body.data.user.roleCodes).toContain("student");
+      .send({ fullName: "Adaeze Okonkwo", email: "adaeze@helar.test", password: "Helar123!", confirmPassword: "Helar123!" });
+    expect(response.status).toBe(503);
+    expect(response.body.data?.accessToken).toBeUndefined();
   });
 
-  it("refreshes a fallback session when a valid refresh token is provided", async () => {
-    const signInResponse = await request(createApp({ useDatabase: false, allowAuthFallback: true }))
-      .post("/api/v1/auth/demo-sign-in")
-      .send({ email: "admin@helar.test", password: "Helar123!" });
-
+  it("does not refresh fallback sessions without stored verification", async () => {
     const response = await request(createApp({ useDatabase: false, allowAuthFallback: true }))
       .post("/api/v1/auth/refresh")
-      .send({ refreshToken: signInResponse.body.data.refreshToken });
-
-    expect(response.status).toBe(200);
-    expect(response.body.success).toBe(true);
-    expect(response.body.data.user.email).toBe("admin@helar.test");
-    expect(response.body.data.accessToken).toBeTypeOf("string");
+      .send({ refreshToken: "demo-refresh-token:admin@helar.test" });
+    expect(response.status).toBe(503);
+    expect(response.body.data?.accessToken).toBeUndefined();
   });
 
   it("rejects malformed refresh payloads", async () => {
@@ -96,14 +77,15 @@ describe("LexLearn API", () => {
     expect(response.body.error.code).toBe("VALIDATION_ERROR");
   });
 
-  it("updates a profile with validated address fields", async () => {
-    const signInResponse = await request(createApp({ useDatabase: false, allowAuthFallback: true }))
-      .post("/api/v1/auth/demo-sign-in")
-      .send({ email: "student@helar.test", password: "Helar123!" });
+  it("requires stored verification before accepting profile updates", async () => {
+    const accessToken = jwt.sign(
+      { sub: "64b000000000000000000002", email: "student@helar.test", roleCodes: ["student"] },
+      process.env.JWT_SECRET ?? "change-me"
+    );
 
     const response = await request(createApp({ useDatabase: false, allowAuthFallback: true }))
       .patch("/api/v1/users/me")
-      .set("Authorization", `Bearer ${signInResponse.body.data.accessToken}`)
+      .set("Authorization", `Bearer ${accessToken}`)
       .send({
         fullName: "Adaeze Okonkwo",
         phoneNumber: "+234 803 000 0000",
@@ -116,10 +98,8 @@ describe("LexLearn API", () => {
         avatarUrl: "data:image/png;base64,demo"
       });
 
-    expect(response.status).toBe(200);
-    expect(response.body.success).toBe(true);
-    expect(response.body.data.user.state).toBe("Lagos");
-    expect(response.body.data.user.addressLine1).toBe("12 Marina Street");
+    expect(response.status).toBe(503);
+    expect(response.body.error.code).toBe("DATABASE_UNAVAILABLE");
   });
 
   it("initializes and verifies a Paystack subscription checkout for monthly billing", async () => {
@@ -541,28 +521,30 @@ describe("LexLearn API", () => {
     expect(response.body.error.code).toBe("UNAUTHORIZED");
   });
 
-  it("rejects non-admin users from the admin workspace", async () => {
-    const signInResponse = await request(createApp({ useDatabase: false, allowAuthFallback: true }))
-      .post("/api/v1/auth/demo-sign-in")
-      .send({ email: "student@helar.test", password: "Helar123!" });
+  it("requires stored verification before admin workspace authorization", async () => {
+    const accessToken = jwt.sign(
+      { sub: "64b000000000000000000002", email: "student@helar.test", roleCodes: ["student"] },
+      process.env.JWT_SECRET ?? "change-me"
+    );
 
     const response = await request(createApp({ useDatabase: false }))
       .get("/api/v1/admin/users")
-      .set("Authorization", `Bearer ${signInResponse.body.data.accessToken}`);
+      .set("Authorization", `Bearer ${accessToken}`);
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(503);
     expect(response.body.success).toBe(false);
-    expect(response.body.error.code).toBe("FORBIDDEN");
+    expect(response.body.error.code).toBe("DATABASE_UNAVAILABLE");
   });
 
   it("requires the database for admin user operations after admin auth passes", async () => {
-    const signInResponse = await request(createApp({ useDatabase: false, allowAuthFallback: true }))
-      .post("/api/v1/auth/demo-sign-in")
-      .send({ email: "admin@helar.test", password: "Helar123!" });
+    const accessToken = jwt.sign(
+      { sub: "64b000000000000000000002", email: "admin@helar.test", roleCodes: ["administrator"] },
+      process.env.JWT_SECRET ?? "change-me"
+    );
 
     const response = await request(createApp({ useDatabase: false }))
       .get("/api/v1/admin/users")
-      .set("Authorization", `Bearer ${signInResponse.body.data.accessToken}`);
+      .set("Authorization", `Bearer ${accessToken}`);
 
     expect(response.status).toBe(503);
     expect(response.body.success).toBe(false);
@@ -570,13 +552,14 @@ describe("LexLearn API", () => {
   });
 
   it("requires the database for admin user creation after admin auth passes", async () => {
-    const signInResponse = await request(createApp({ useDatabase: false, allowAuthFallback: true }))
-      .post("/api/v1/auth/demo-sign-in")
-      .send({ email: "admin@helar.test", password: "Helar123!" });
+    const accessToken = jwt.sign(
+      { sub: "64b000000000000000000002", email: "admin@helar.test", roleCodes: ["administrator"] },
+      process.env.JWT_SECRET ?? "change-me"
+    );
 
     const response = await request(createApp({ useDatabase: false }))
       .post("/api/v1/admin/users")
-      .set("Authorization", `Bearer ${signInResponse.body.data.accessToken}`)
+      .set("Authorization", `Bearer ${accessToken}`)
       .send({
         fullName: "Workspace Created User",
         email: "workspace-created-user@helar.test",
@@ -590,13 +573,14 @@ describe("LexLearn API", () => {
   });
 
   it("requires the database for admin registration analytics after admin auth passes", async () => {
-    const signInResponse = await request(createApp({ useDatabase: false, allowAuthFallback: true }))
-      .post("/api/v1/auth/demo-sign-in")
-      .send({ email: "admin@helar.test", password: "Helar123!" });
+    const accessToken = jwt.sign(
+      { sub: "64b000000000000000000002", email: "admin@helar.test", roleCodes: ["administrator"] },
+      process.env.JWT_SECRET ?? "change-me"
+    );
 
     const response = await request(createApp({ useDatabase: false }))
       .get("/api/v1/admin/users/analytics/monthly-registrations")
-      .set("Authorization", `Bearer ${signInResponse.body.data.accessToken}`);
+      .set("Authorization", `Bearer ${accessToken}`);
 
     expect(response.status).toBe(503);
     expect(response.body.success).toBe(false);
@@ -613,29 +597,31 @@ describe("LexLearn API", () => {
     expect(response.body.error.code).toBe("UNAUTHORIZED");
   });
 
-  it("rejects non-admin role updates", async () => {
-    const signInResponse = await request(createApp({ useDatabase: false, allowAuthFallback: true }))
-      .post("/api/v1/auth/demo-sign-in")
-      .send({ email: "student@helar.test", password: "Helar123!" });
+  it("requires stored verification before role updates", async () => {
+    const accessToken = jwt.sign(
+      { sub: "64b000000000000000000002", email: "student@helar.test", roleCodes: ["student"] },
+      process.env.JWT_SECRET ?? "change-me"
+    );
 
     const response = await request(createApp({ useDatabase: false }))
       .patch("/api/v1/admin/users/demo-user/roles")
-      .set("Authorization", `Bearer ${signInResponse.body.data.accessToken}`)
+      .set("Authorization", `Bearer ${accessToken}`)
       .send({ roleCodes: ["student"] });
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(503);
     expect(response.body.success).toBe(false);
-    expect(response.body.error.code).toBe("FORBIDDEN");
+    expect(response.body.error.code).toBe("DATABASE_UNAVAILABLE");
   });
 
-  it("rejects non-admin user creation requests", async () => {
-    const signInResponse = await request(createApp({ useDatabase: false, allowAuthFallback: true }))
-      .post("/api/v1/auth/demo-sign-in")
-      .send({ email: "student@helar.test", password: "Helar123!" });
+  it("requires stored verification before user creation authorization", async () => {
+    const accessToken = jwt.sign(
+      { sub: "64b000000000000000000002", email: "student@helar.test", roleCodes: ["student"] },
+      process.env.JWT_SECRET ?? "change-me"
+    );
 
     const response = await request(createApp({ useDatabase: false }))
       .post("/api/v1/admin/users")
-      .set("Authorization", `Bearer ${signInResponse.body.data.accessToken}`)
+      .set("Authorization", `Bearer ${accessToken}`)
       .send({
         fullName: "Unauthorized User",
         email: "unauthorized-user@helar.test",
@@ -643,19 +629,20 @@ describe("LexLearn API", () => {
         roleCodes: ["student"]
       });
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(503);
     expect(response.body.success).toBe(false);
-    expect(response.body.error.code).toBe("FORBIDDEN");
+    expect(response.body.error.code).toBe("DATABASE_UNAVAILABLE");
   });
 
   it("requires the database for admin status updates after admin auth passes", async () => {
-    const signInResponse = await request(createApp({ useDatabase: false, allowAuthFallback: true }))
-      .post("/api/v1/auth/demo-sign-in")
-      .send({ email: "admin@helar.test", password: "Helar123!" });
+    const accessToken = jwt.sign(
+      { sub: "64b000000000000000000002", email: "admin@helar.test", roleCodes: ["administrator"] },
+      process.env.JWT_SECRET ?? "change-me"
+    );
 
     const response = await request(createApp({ useDatabase: false }))
       .patch("/api/v1/admin/users/demo-user/status")
-      .set("Authorization", `Bearer ${signInResponse.body.data.accessToken}`)
+      .set("Authorization", `Bearer ${accessToken}`)
       .send({ status: "SUSPENDED" });
 
     expect(response.status).toBe(503);

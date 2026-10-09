@@ -13,6 +13,7 @@ type AdminUserProvisioningEmailInput = {
 };
 
 type RegistrationVerificationEmailInput = {
+  notifyAdmin?: boolean;
   email: string;
   fullName: string;
   roleCodes: string[];
@@ -502,8 +503,7 @@ function buildAdminRegistrationNotificationText(input: RegistrationVerificationE
     `Full name: ${input.fullName}`,
     `Email: ${input.email}`,
     `Account type: ${roleSummary}`,
-    "Status: Pending email verification",
-    `Verification link: ${input.verificationUrl}`
+    "Status: Pending email verification"
   ].join("\n");
 }
 
@@ -519,8 +519,6 @@ function buildAdminRegistrationNotificationHtml(input: RegistrationVerificationE
       "The account has been created and is currently waiting for email verification.",
       "Use the summary below for quick reference."
     ],
-    ctaLabel: "Open Verification Link",
-    ctaUrl: input.verificationUrl,
     details: [
       { label: "Full name", value: input.fullName },
       { label: "Email address", value: input.email },
@@ -1039,7 +1037,7 @@ export async function sendRegistrationVerificationEmails(input: RegistrationVeri
 
   let adminAccepted: string[] = [];
 
-  if (config.adminNotificationEmail) {
+  if (input.notifyAdmin !== false && config.adminNotificationEmail) {
     try {
       const adminEmailResult = await transporter.sendMail(
         buildTransactionalMailOptions({
