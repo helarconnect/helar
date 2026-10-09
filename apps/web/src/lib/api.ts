@@ -56,16 +56,6 @@ export type DemoSignInResponse = {
   };
 };
 
-export type RegistrationResponse = {
-  success: true;
-  data: {
-    user: DemoSignInResponse["data"]["user"];
-    requiresVerification: true;
-    message: string;
-  };
-  meta: { verificationEmailStatus: "sent" | "skipped" | "failed" };
-};
-
 export type ResendVerificationResponse = {
   success: true;
   data: {
@@ -316,8 +306,8 @@ export async function signInDemo(payload: {
   return response.data;
 }
 
-export async function signUpDemo(payload: DemoSignUpPayload): Promise<RegistrationResponse> {
-  const response = await publicHttp.post<RegistrationResponse>("/api/v1/auth/register", {
+export async function signUpDemo(payload: DemoSignUpPayload): Promise<DemoSignInResponse> {
+  const response = await publicHttp.post<DemoSignInResponse>("/api/v1/auth/register", {
     ...payload,
     deviceName: getStableDeviceName()
   });
@@ -329,10 +319,8 @@ export async function requestPasswordReset(payload: { email: string }): Promise<
   return response.data;
 }
 
-export async function resendEmailVerification(email?: string): Promise<ResendVerificationResponse> {
-  const response = email
-    ? await publicHttp.post<ResendVerificationResponse>("/api/v1/auth/resend-verification", { email })
-    : await authenticatedHttp.post<ResendVerificationResponse>("/api/v1/auth/resend-verification");
+export async function resendEmailVerification(): Promise<ResendVerificationResponse> {
+  const response = await authenticatedHttp.post<ResendVerificationResponse>("/api/v1/auth/resend-verification");
   return response.data;
 }
 
