@@ -95,6 +95,7 @@ const adminQuestionFiltersSchema = z.object({
 const questionInputSchema = z
   .object({
     answer: z.string().trim().min(2),
+    year: z.number().int().min(1900).max(2100).nullable().optional(),
     examDate: z.string().trim().optional().or(z.literal("")),
     question: z.string().trim().min(2),
     status: z.nativeEnum(BarFinalExamQuestionStatus).default(BarFinalExamQuestionStatus.DRAFT),
@@ -297,6 +298,7 @@ function mapQuestion(item: {
   topicId: string | null;
   question: string;
   answer: string;
+  year?: number | null;
   examDate: Date | null;
   status: BarFinalExamQuestionStatus;
   createdAt: Date;
@@ -312,6 +314,7 @@ function mapQuestion(item: {
 }) {
   return {
     answer: item.answer,
+    year: item.year ?? null,
     createdAt: item.createdAt.toISOString(),
     examDate: item.examDate?.toISOString() ?? null,
     id: item.id,
@@ -847,6 +850,7 @@ export async function createAdminBarFinalExamQuestion(
   const created = await prisma.barFinalExamQuestion.create({
     data: {
       answer: input.answer,
+      ...(input.year !== undefined ? { year: input.year } : {}),
       deletedAt: null,
       examDate: resolvedExamDate,
       question: input.question,
@@ -925,6 +929,7 @@ export async function updateAdminBarFinalExamQuestion(
     },
     data: {
       answer: input.answer,
+      ...(input.year !== undefined ? { year: input.year } : {}),
       examDate: resolvedExamDate,
       question: input.question,
       reviewFeedback: null,

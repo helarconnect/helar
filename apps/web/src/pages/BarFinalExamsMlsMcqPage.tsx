@@ -102,6 +102,7 @@ function buildDefaultDraft(subjectId: string): BarFinalExamQuestionInput {
   return {
     answer: "",
     examDate: "",
+    year: null,
     question: "",
     status: "PUBLISHED",
     subjectId
@@ -298,6 +299,7 @@ export function AdminBarFinalExamsMlsMcqPage() {
     [items]
   );
   const canSaveDraft =
+    (draft.year == null || (Number.isInteger(draft.year) && draft.year >= 1900 && draft.year <= 2100)) &&
     Boolean(draft.subjectId) && stripHtml(draft.question).length >= 2 && stripHtml(draft.answer).length >= 2;
   const canOpenCreate = !formOptionsQuery.isLoading && subjects.length > 0;
   const nextQuestionNumber =
@@ -311,6 +313,7 @@ export function AdminBarFinalExamsMlsMcqPage() {
   function openEdit(question: BarFinalExamQuestion) {
     setDraft({
       answer: question.answer,
+      year: question.year ?? null,
       examDate: question.examDate ? question.examDate.slice(0, 10) : "",
       question: question.question,
       status: question.status,
@@ -659,6 +662,21 @@ export function AdminBarFinalExamsMlsMcqPage() {
                   <option value="PUBLISHED">Published</option>
                   <option value="ARCHIVED">Archived</option>
                 </select>
+              </label>
+
+              <label className="space-y-2">
+                <span className={cn("text-xs font-medium uppercase tracking-[0.18em]", "text-slate-500")}>Year</span>
+                <input
+                  aria-label="Year"
+                  className={cn("w-full rounded-2xl border px-3.5 py-3 text-sm outline-none", isDark ? "border-slate-700 bg-slate-900 text-white" : "border-slate-200 bg-slate-50 text-slate-950")}
+                  min={1900}
+                  max={2100}
+                  step={1}
+                  type="number"
+                  placeholder="e.g. 2026"
+                  value={draft.year ?? ""}
+                  onChange={(event) => setDraft((current) => ({ ...current, year: event.target.value === "" ? null : Number(event.target.value) }))}
+                />
               </label>
 
               <label className="space-y-2">

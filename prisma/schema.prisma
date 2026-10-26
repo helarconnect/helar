@@ -1197,6 +1197,7 @@ model BarFinalExamQuestion {
   question       String
   answer         String
   examDate       DateTime?
+  year           Int?
   status         BarFinalExamQuestionStatus @default(DRAFT)
   reviewFeedback String?
   approvedAt     DateTime?

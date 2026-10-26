@@ -378,7 +378,7 @@ export function AdminBarFinalExamsMcqPage() {
   const filters = useMemo(
     () => ({
       page: 1,
-      pageSize: 50,
+      pageSize: 300,
       search,
       status: "all" as const,
       subjectId: subjectId || undefined,

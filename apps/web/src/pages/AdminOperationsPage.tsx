@@ -1098,6 +1098,7 @@ function buildEditableDraft(
     const snapshot = data as Awaited<ReturnType<typeof fetchAdminBarFinalExamQuestionDetail>>
     return {
       answer: snapshot.answer ?? '',
+      year: snapshot.year ?? null,
       examDate: snapshot.examDate ?? null,
       question: snapshot.question ?? '',
       status: snapshot.status ?? 'DRAFT',
@@ -1256,6 +1257,7 @@ export function AdminContentReviewDetailPage() {
       if (targetItem.type === 'bar_final_exam_question') {
         const original = dataSnapshot as Awaited<ReturnType<typeof fetchAdminBarFinalExamQuestionDetail>>
         return updateAdminBarFinalExamQuestion(targetItem.resourceId, {
+          year: draftSnapshot.year === undefined ? original.year : draftSnapshot.year,
           answer: draftSnapshot.answer ?? original.answer ?? '',
           // Prefer draft value over original so edits during approval work-flows
           // (e.g. adjusting exam date or toggling status to PUBLISHED) persist
@@ -2612,6 +2614,19 @@ function BarTheoryEditor({
     <div className="space-y-5">
       <ReviewBlock isDark={isDark}>
         <p className={cn('text-sm', isDark ? 'text-slate-400' : 'text-slate-500')}>{node.subject.name}</p>
+        <label className="mt-4 block space-y-2">
+          <span className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">Year</span>
+          <input
+            aria-label="Year"
+            className={cn('w-full rounded-2xl border px-3.5 py-3 text-sm outline-none', isDark ? 'border-slate-700 bg-slate-900 text-white' : 'border-slate-200 bg-slate-50 text-slate-950')}
+            type="number"
+            min={1900}
+            max={2100}
+            step={1}
+            value={draft?.year === undefined ? (node.year ?? '') : (draft.year ?? '')}
+            onChange={(event) => onChange('year', event.target.value === '' ? null : Number(event.target.value))}
+          />
+        </label>
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <label className="space-y-2">
             <span className={cn('text-xs font-medium uppercase tracking-[0.18em]', isDark ? 'text-slate-500' : 'text-slate-500')}>Status</span>

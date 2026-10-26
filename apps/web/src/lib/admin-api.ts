@@ -782,6 +782,7 @@ export type SubjectSummaryModuleStudentRevisionResponse = {
 export type BarFinalExamQuestionStatus = "DRAFT" | "PENDING_APPROVAL" | "PUBLISHED" | "ARCHIVED";
 
 export type BarFinalExamQuestion = {
+  year?: number | null;
   answer: string;
   createdAt: string;
   examDate: string | null;
@@ -802,6 +803,7 @@ export type BarFinalExamQuestion = {
 };
 
 export type BarFinalExamQuestionInput = {
+  year?: number | null;
   answer: string;
   examDate: string;
   question: string;
