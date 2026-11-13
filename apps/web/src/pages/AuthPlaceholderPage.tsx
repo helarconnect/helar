@@ -70,7 +70,7 @@ const baseAuthSchema = z.object({
   password: z
     .string()
     .min(8, "Password must be at least 8 characters.")
-    .max(72, "Password is too long."),
+    .refine((value) => new TextEncoder().encode(value).length <= 72, "Password must be at most 72 bytes."),
   confirmPassword: z.string().optional(),
   registrationRole: z
     .enum(["student", "lawyer"])
@@ -79,7 +79,9 @@ const baseAuthSchema = z.object({
     .transform((value) => value ?? "student"),
 }).strict();
 
-const signInSchema = baseAuthSchema;
+const signInSchema = baseAuthSchema.extend({
+  password: z.string().min(1, "Enter your password.").max(120, "Password is too long.")
+});
 
 const signUpSchema = baseAuthSchema.superRefine((values, context) => {
   if (!values.fullName || values.fullName.trim().length < 2) {
@@ -173,7 +175,10 @@ export function AuthPlaceholderPage({ mode }: AuthPlaceholderPageProps) {
     onSuccess: (response) => {
       const redirectTarget = searchParams.get("redirect");
       const intent = searchParams.get("intent");
-      const safeRedirectTarget = redirectTarget?.startsWith("/") ? redirectTarget : "/app/dashboard";
+      const safeRedirectTarget =
+        redirectTarget?.startsWith("/") && !redirectTarget.startsWith("//") && !redirectTarget.includes("\\")
+          ? redirectTarget
+          : "/app/dashboard";
       const shouldAppendIntent = intent && safeRedirectTarget.startsWith("/connect") && !safeRedirectTarget.includes("intent=");
       const destination =
         shouldAppendIntent

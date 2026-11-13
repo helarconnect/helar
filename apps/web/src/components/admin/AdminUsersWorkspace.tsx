@@ -26,7 +26,6 @@ import {
   createAdminUser,
   type AdminCreateUserInput,
   type AdminMonthlyRegistrations,
-  type AdminUserDeviceLimitInput,
   type AdminUserDetail,
   type AdminUserListFilters,
   type AdminUserPasswordInput,
@@ -38,7 +37,6 @@ import {
   fetchAdminUsersForExport,
   fetchAdminUsers,
   resetAdminUserDevices,
-  updateAdminUserDeviceLimit,
   updateAdminUserPassword,
   updateAdminUserProfile,
   updateAdminUserRoles,
@@ -628,7 +626,6 @@ export function AdminUsersWorkspace() {
     confirmPassword: "",
     password: ""
   });
-  const [deviceLimitOverrideDraft, setDeviceLimitOverrideDraft] = useState("");
   const [toasts, setToasts] = useState<Array<{ id: number; message: string; tone: "success" | "error" }>>([]);
 
   function dismissToast(id: number) {
@@ -689,9 +686,6 @@ export function AdminUsersWorkspace() {
       confirmPassword: "",
       password: ""
     });
-    setDeviceLimitOverrideDraft(
-      selectedUserQuery.data.deviceLimitOverride === null ? "" : String(selectedUserQuery.data.deviceLimitOverride)
-    );
   }, [selectedUserQuery.data]);
 
   useEffect(() => {
@@ -785,23 +779,6 @@ export function AdminUsersWorkspace() {
           ? error.response?.data?.error?.message ?? "Could not update the user password right now."
           : "Could not update the user password right now.";
 
-      showToast(errorMessage, "error");
-    }
-  });
-
-  const deviceLimitMutation = useMutation({
-    mutationFn: ({ userId, payload }: { userId: string; payload: AdminUserDeviceLimitInput }) =>
-      updateAdminUserDeviceLimit(userId, payload),
-    onSuccess: (updatedUser) => {
-      setDeviceLimitOverrideDraft(updatedUser.deviceLimitOverride === null ? "" : String(updatedUser.deviceLimitOverride));
-      showToast(`Updated ${updatedUser.fullName}'s device limit to ${updatedUser.deviceLimit}.`, "success");
-      void queryClient.invalidateQueries({ queryKey: queryKeys.adminUserDetail(updatedUser.id) });
-    },
-    onError: (error) => {
-      const errorMessage =
-        error instanceof AxiosError
-          ? error.response?.data?.error?.message ?? "Could not update the device limit right now."
-          : "Could not update the device limit right now.";
       showToast(errorMessage, "error");
     }
   });
@@ -953,60 +930,6 @@ export function AdminUsersWorkspace() {
       ...current,
       [field]: value
     }));
-  }
-
-  function buildDeviceLimitPayload(): AdminUserDeviceLimitInput | null {
-    const trimmedValue = deviceLimitOverrideDraft.trim();
-
-    if (!trimmedValue) {
-      return {
-        deviceLimitOverride: null
-      };
-    }
-
-    const parsedValue = Number(trimmedValue);
-
-    if (!Number.isFinite(parsedValue) || !Number.isInteger(parsedValue)) {
-      showToast("Enter a whole number for the device limit override.", "error");
-      return null;
-    }
-
-    if (parsedValue < 1 || parsedValue > 20) {
-      showToast("Device limit override must be between 1 and 20.", "error");
-      return null;
-    }
-
-    return {
-      deviceLimitOverride: parsedValue
-    };
-  }
-
-  function handleSaveDeviceLimit() {
-    if (!selectedUserQuery.data) {
-      return;
-    }
-
-    const payload = buildDeviceLimitPayload();
-    if (!payload) {
-      return;
-    }
-
-    deviceLimitMutation.mutate({
-      userId: selectedUserQuery.data.id,
-      payload
-    });
-  }
-
-  function handleClearDeviceLimitOverride() {
-    setDeviceLimitOverrideDraft("");
-    if (!selectedUserQuery.data) {
-      return;
-    }
-
-    deviceLimitMutation.mutate({
-      userId: selectedUserQuery.data.id,
-      payload: { deviceLimitOverride: null }
-    });
   }
 
   function handleResetDevices() {
@@ -1768,67 +1691,6 @@ export function AdminUsersWorkspace() {
                     </button>
                   ) : null}
                 </div>
-
-                <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  <CompactField
-                    isDark={isDark}
-                    label="Allowed devices"
-                    value={`${selectedUserQuery.data.deviceLimit} ${selectedUserQuery.data.deviceLimit === 1 ? "device" : "devices"}`}
-                  />
-                  <CompactField
-                    isDark={isDark}
-                    label="Override"
-                    value={
-                      selectedUserQuery.data.deviceLimitOverride === null
-                        ? "Not set"
-                        : `${selectedUserQuery.data.deviceLimitOverride} ${selectedUserQuery.data.deviceLimitOverride === 1 ? "device" : "devices"}`
-                    }
-                  />
-                </div>
-
-                {isSuperAdmin ? (
-                  <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto_auto] sm:items-end">
-                    <label>
-                      <span className={cn("text-[11px] uppercase tracking-[0.18em]", isDark ? "text-slate-500" : "text-slate-400")}>
-                        Device limit override (1-20)
-                      </span>
-                      <input
-                        className={cn(
-                          "mt-2 w-full rounded-2xl border px-4 py-3 text-sm outline-none transition",
-                          isDark ? "border-slate-700 bg-slate-950 text-white" : "border-slate-200 bg-white text-slate-900"
-                        )}
-                        disabled={deviceLimitMutation.isPending}
-                        inputMode="numeric"
-                        onChange={(event) => setDeviceLimitOverrideDraft(event.target.value)}
-                        placeholder="Leave blank for default"
-                        value={deviceLimitOverrideDraft}
-                      />
-                    </label>
-
-                    <button
-                      className="button-primary !px-4 !py-3"
-                      disabled={deviceLimitMutation.isPending}
-                      onClick={handleSaveDeviceLimit}
-                      type="button"
-                    >
-                      {deviceLimitMutation.isPending ? "Saving..." : "Save"}
-                    </button>
-
-                    <button
-                      className={cn(
-                        "!px-4 !py-3 inline-flex items-center gap-2 rounded-2xl border text-sm font-medium transition hover:-translate-y-0.5 disabled:opacity-60 disabled:hover:translate-y-0",
-                        isDark
-                          ? "border-slate-600 bg-slate-800 text-white hover:border-slate-500 hover:bg-slate-700 disabled:border-slate-700 disabled:bg-slate-900 disabled:text-slate-500"
-                          : "border-slate-300 bg-white text-slate-800 hover:border-slate-400 hover:bg-slate-50 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-500",
-                      )}
-                      disabled={deviceLimitMutation.isPending}
-                      onClick={handleClearDeviceLimitOverride}
-                      type="button"
-                    >
-                      Clear
-                    </button>
-                  </div>
-                ) : null}
 
                 <div className="mt-5 space-y-2">
                   {selectedUserQuery.data.devices.length ? (

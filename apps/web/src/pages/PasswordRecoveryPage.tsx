@@ -7,6 +7,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { z } from "zod";
 
 import { requestPasswordReset, resetPassword } from "@/lib/api";
+import { useAuthStore } from "@/store/auth-store";
 
 const forgotPasswordSchema = z
   .object({
@@ -16,7 +17,7 @@ const forgotPasswordSchema = z
 
 const resetPasswordSchema = z
   .object({
-    password: z.string().min(8, "Password must be at least 8 characters.").max(72, "Password is too long."),
+    password: z.string().min(8, "Password must be at least 8 characters.").refine((value) => new TextEncoder().encode(value).length <= 72, "Password must be at most 72 bytes."),
     confirmPassword: z.string()
   })
   .strict()
@@ -46,6 +47,7 @@ type ForgotPasswordFormValues = z.infer<typeof forgotPasswordSchema>;
 type ResetPasswordFormValues = z.infer<typeof resetPasswordSchema>;
 
 export function PasswordRecoveryPage({ mode }: PasswordRecoveryPageProps) {
+  const clearSession = useAuthStore((state) => state.clearSession);
   const isForgotPassword = mode === "forgot-password";
   const [searchParams] = useSearchParams();
   const resetToken = searchParams.get("token")?.trim() ?? "";
@@ -75,7 +77,11 @@ export function PasswordRecoveryPage({ mode }: PasswordRecoveryPageProps) {
         token: resetToken,
         password: values.password,
         confirmPassword: values.confirmPassword
-      })
+      }),
+    onSuccess: () => {
+      clearSession();
+      resetForm.reset();
+    }
   });
 
   const activeError =
@@ -110,7 +116,7 @@ export function PasswordRecoveryPage({ mode }: PasswordRecoveryPageProps) {
                 isForgotPassword
                   ? "A secure reset link is sent to the registered email address."
                   : "Your reset link is time-limited for security.",
-                "Password updates revoke old sessions so your account stays protected.",
+                "After a reset, existing sessions will need to sign in again when their access expires.",
                 "Use at least 8 characters for your new password."
               ].map((item) => (
                 <div className="auth-feature-row" key={item}>
@@ -151,7 +157,7 @@ export function PasswordRecoveryPage({ mode }: PasswordRecoveryPageProps) {
             >
               <div className="auth-field">
                 <label htmlFor="email">Email</label>
-                <input className="auth-input" id="email" type="email" {...forgotForm.register("email")} />
+                <input className="auth-input" id="email" type="email" autoComplete="email" {...forgotForm.register("email")} />
                 <p className="auth-error">{forgotForm.formState.errors.email?.message}</p>
               </div>
 
@@ -161,58 +167,54 @@ export function PasswordRecoveryPage({ mode }: PasswordRecoveryPageProps) {
               </button>
 
               {forgotPasswordMutation.isError ? (
-                <div className="auth-status-card">
+                <div className="auth-status-card" role="status">
                   <p>{activeError}</p>
                 </div>
               ) : null}
 
               {forgotPasswordMutation.isSuccess ? (
-                <div className="auth-status-card">
+                <div className="auth-status-card" role="status">
                   <p>{forgotPasswordMutation.data.data.message}</p>
                 </div>
               ) : null}
             </form>
+          ) : resetPasswordMutation.isSuccess ? (
+            <div className="auth-status-card" role="status">
+              <p>{resetPasswordMutation.data.data.message}</p>
+              <Link className="auth-inline-link" to="/auth/sign-in">Return to sign in</Link>
+            </div>
+          ) : !resetToken || ["INVALID_RESET_TOKEN", "RESET_LINK_EXPIRED"].includes(
+            (resetPasswordMutation.error as AxiosError<{ error?: { code?: string } }> | null)?.response?.data?.error?.code ?? ""
+          ) ? (
+            <div className="auth-status-card" role="status">
+              <p>{resetToken ? activeError : "This password reset link is invalid."}</p>
+              <Link className="auth-inline-link" to="/auth/forgot-password">Request a new reset link</Link>
+            </div>
           ) : (
             <form className="auth-form" onSubmit={resetForm.handleSubmit((values) => resetPasswordMutation.mutate(values))}>
-              {!resetToken ? (
-                <div className="auth-status-card">
-                  <p>This password reset link is invalid. Please request a new one.</p>
-                </div>
-              ) : null}
-
               <div className="auth-field">
                 <label htmlFor="password">New password</label>
-                <input className="auth-input" id="password" type="password" {...resetForm.register("password")} />
+                <input className="auth-input" id="password" type="password" autoComplete="new-password" {...resetForm.register("password")} />
                 <p className="auth-error">{resetForm.formState.errors.password?.message}</p>
               </div>
 
               <div className="auth-field">
                 <label htmlFor="confirmPassword">Confirm new password</label>
-                <input className="auth-input" id="confirmPassword" type="password" {...resetForm.register("confirmPassword")} />
+                <input className="auth-input" id="confirmPassword" type="password" autoComplete="new-password" {...resetForm.register("confirmPassword")} />
                 <p className="auth-error">{resetForm.formState.errors.confirmPassword?.message}</p>
               </div>
 
-              <button className="auth-primary-button" disabled={resetPasswordMutation.isPending || !resetToken} type="submit">
+              <button className="auth-primary-button" disabled={resetPasswordMutation.isPending} type="submit">
                 {resetPasswordMutation.isPending ? "Updating password..." : "Update password"}
                 <ArrowRight className="h-4 w-4" />
               </button>
 
               {resetPasswordMutation.isError ? (
-                <div className="auth-status-card">
+                <div className="auth-status-card" role="status">
                   <p>{activeError}</p>
                 </div>
               ) : null}
 
-              {resetPasswordMutation.isSuccess ? (
-                <div className="auth-status-card">
-                  <p>{resetPasswordMutation.data.data.message}</p>
-                  <p className="mt-3">
-                    <Link className="auth-inline-link" to="/auth/sign-in">
-                      Return to sign in
-                    </Link>
-                  </p>
-                </div>
-              ) : null}
             </form>
           )}
         </section>

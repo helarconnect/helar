@@ -10,6 +10,7 @@ type SessionResponse = {
 
 type RetriableRequestConfig = InternalAxiosRequestConfig & {
   _retry?: boolean;
+  authUserId?: string;
 };
 
 const apiBaseURL =
@@ -24,29 +25,26 @@ export const authenticatedHttp = axios.create({
   baseURL: apiBaseURL
 });
 
-let refreshRequest: Promise<AuthSession> | null = null;
+let refreshRequest: { token: string; promise: Promise<AuthSession> } | null = null;
 
-async function refreshAccessSession() {
-  const authStore = useAuthStore.getState();
-  const refreshToken = authStore.session?.refreshToken;
-
-  if (!refreshToken) {
-    throw new Error("Missing refresh token.");
-  }
-
+async function refreshAccessSession(refreshToken: string) {
   const response = await publicHttp.post<SessionResponse>("/api/v1/auth/refresh", {
     refreshToken
   });
 
-  authStore.setSession(response.data.data);
+  const authStore = useAuthStore.getState();
+  if (authStore.session?.refreshToken === refreshToken) {
+    authStore.setSession(response.data.data);
+  }
   return response.data.data;
 }
 
 authenticatedHttp.interceptors.request.use((config) => {
-  const accessToken = useAuthStore.getState().session?.accessToken;
+  const session = useAuthStore.getState().session;
 
-  if (accessToken) {
-    config.headers.set("Authorization", `Bearer ${accessToken}`);
+  if (session) {
+    (config as RetriableRequestConfig).authUserId = session.user.id;
+    config.headers.set("Authorization", `Bearer ${session.accessToken}`);
   }
 
   return config;
@@ -61,26 +59,42 @@ authenticatedHttp.interceptors.response.use(
       throw error;
     }
 
-    const refreshToken = useAuthStore.getState().session?.refreshToken;
+    const session = useAuthStore.getState().session;
 
-    if (!refreshToken) {
-      useAuthStore.getState().clearSession();
+    if (!session || session.user.id !== originalRequest.authUserId) {
       throw error;
     }
 
     originalRequest._retry = true;
 
+    if (originalRequest.headers.get("Authorization") !== `Bearer ${session.accessToken}`) {
+      return authenticatedHttp(originalRequest);
+    }
+
+    if (refreshRequest?.token !== session.refreshToken) {
+      refreshRequest = {
+        token: session.refreshToken,
+        promise: refreshAccessSession(session.refreshToken)
+      };
+    }
+    const pendingRefresh = refreshRequest;
+
     try {
-      // Keep concurrent 401 responses behind one refresh call.
-      refreshRequest ??= refreshAccessSession();
-      const nextSession = await refreshRequest;
-      originalRequest.headers.set("Authorization", `Bearer ${nextSession.accessToken}`);
+      const nextSession = await pendingRefresh.promise;
+      if (useAuthStore.getState().session?.refreshToken !== nextSession.refreshToken) {
+        throw error;
+      }
       return authenticatedHttp(originalRequest);
     } catch (refreshError) {
-      useAuthStore.getState().clearSession();
+      if (axios.isAxiosError(refreshError) && refreshError.response?.status === 401 &&
+          useAuthStore.getState().session?.refreshToken === session.refreshToken) {
+        useAuthStore.getState().clearSession();
+      }
       throw refreshError;
     } finally {
-      refreshRequest = null;
+      if (refreshRequest === pendingRefresh) {
+        refreshRequest = null;
+      }
     }
   }
 );

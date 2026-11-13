@@ -792,7 +792,8 @@ describe("LexLearn API", () => {
       .post("/api/v1/auth/demo-sign-in")
       .send({
         email: superAdminCreatedEmail,
-        password
+        password,
+        deviceName: "Test browser"
       });
 
     expect(superAdminCreatedUserLogin.status).toBe(200);
@@ -910,7 +911,8 @@ describe("LexLearn API", () => {
       .post("/api/v1/auth/demo-sign-in")
       .send({
         email: studentEmail,
-        password: "StudentNew123!"
+        password: "StudentNew123!",
+        deviceName: "Test browser"
       });
 
     expect(studentLoginResponse.status).toBe(200);
@@ -941,7 +943,8 @@ describe("LexLearn API", () => {
       .post("/api/v1/auth/demo-sign-in")
       .send({
         email: lawyerEmail,
-        password: "LawyerNew123!"
+        password: "LawyerNew123!",
+        deviceName: "Test browser"
       });
 
     expect(lawyerLoginResponse.status).toBe(200);

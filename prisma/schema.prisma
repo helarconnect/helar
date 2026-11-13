@@ -159,7 +159,6 @@ model User {
   emailVerifiedAt  DateTime?
   sessionsRevokedAt DateTime?
   twoFactorEnabled Boolean       @default(false)
-  deviceLimitOverride Int?
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
   deletedAt        DateTime?

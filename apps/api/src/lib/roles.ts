@@ -29,3 +29,12 @@ export function normalizeRoleName(role: RoleLike): string {
   return role.code;
 }
 
+
+export function normalizeRoleCode(roleCode: string) {
+  const trimmed = roleCode.trim().toLowerCase();
+  const underscored = trimmed.replace(/[-\s]+/g, "_");
+  const collapsed = underscored.replace(/_/g, "");
+  if (collapsed === "superadmin") return "super_admin";
+  if (collapsed === "contentadmin") return "content_admin";
+  return underscored;
+}

@@ -60,9 +60,9 @@ const institutionUpdateSchema = z
 
 const passwordSchema = z
   .object({
-    currentPassword: z.string().trim().min(1, "Enter your current password."),
-    password: z.string().trim().min(8, "Password must be at least 8 characters.").max(72, "Password is too long."),
-    confirmPassword: z.string().trim().min(8, "Confirm your new password.")
+    currentPassword: z.string().min(1, "Enter your current password."),
+    password: z.string().min(8, "Password must be at least 8 characters.").refine((value) => new TextEncoder().encode(value).length <= 72, "Password must be at most 72 bytes."),
+    confirmPassword: z.string().min(8, "Confirm your new password.")
   })
   .superRefine((values, context) => {
     if (values.password !== values.confirmPassword) {

@@ -1181,8 +1181,6 @@ export type AdminUserDetail = {
     topics: number;
   };
   createdAt: string;
-  deviceLimit: number;
-  deviceLimitOverride: number | null;
   devices: Array<{
     createdAt: string;
     id: string;
@@ -1328,10 +1326,6 @@ export type AdminCreateUserInput = {
 
 export type AdminUserPasswordInput = {
   password: string;
-};
-
-export type AdminUserDeviceLimitInput = {
-  deviceLimitOverride: number | null;
 };
 
 export type AdminMonthlyRegistrations = {
@@ -3434,15 +3428,6 @@ export async function updateAdminUserRoles(userId: string, roleCodes: string[]) 
   const response = await authenticatedHttp.patch<{ success: true; data: AdminUserDetail }>(
     `/api/v1/admin/users/${userId}/roles`,
     { roleCodes }
-  );
-
-  return response.data.data;
-}
-
-export async function updateAdminUserDeviceLimit(userId: string, payload: AdminUserDeviceLimitInput) {
-  const response = await authenticatedHttp.patch<{ success: true; data: AdminUserDetail }>(
-    `/api/v1/admin/users/${userId}/device-limit`,
-    payload
   );
 
   return response.data.data;

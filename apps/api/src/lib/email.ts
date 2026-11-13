@@ -314,12 +314,12 @@ function prettifyRoleCode(roleCode: string) {
 
 function getGoogleMailConfig(): GoogleMailConfig | null {
   const fromEmail =
-    process.env.MAIL_FROM_EMAIL?.trim() ??
-    process.env.GOOGLE_OAUTH_SENDER_EMAIL?.trim() ??
+    process.env.MAIL_FROM_EMAIL?.trim() ||
+    process.env.GOOGLE_OAUTH_SENDER_EMAIL?.trim() ||
     "";
   const appPassword =
-    process.env.MAIL_APP_PASSWORD?.replace(/\s+/g, "") ??
-    process.env.GMAIL_APP_PASSWORD?.replace(/\s+/g, "") ??
+    process.env.MAIL_APP_PASSWORD?.trim() ||
+    process.env.GMAIL_APP_PASSWORD?.replace(/\s+/g, "") ||
     "";
   const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim() ?? "";
   const refreshToken = process.env.GOOGLE_OAUTH_REFRESH_TOKEN?.trim() ?? "";
@@ -876,8 +876,15 @@ function buildSubscriptionExpiredHtml(input: SubscriptionExpiredEmailInput) {
 }
 
 function createGoogleTransport(config: GoogleMailConfig) {
+  const timeouts = {
+    connectionTimeout: 5_000,
+    greetingTimeout: 5_000,
+    socketTimeout: 10_000
+  };
+
   if (config.smtpHost && config.smtpPort && config.appPassword) {
     return nodemailer.createTransport({
+      ...timeouts,
       host: config.smtpHost,
       port: config.smtpPort,
       secure: config.smtpSecure,
@@ -893,15 +900,17 @@ function createGoogleTransport(config: GoogleMailConfig) {
 
   if (config.appPassword) {
     return nodemailer.createTransport({
+      ...timeouts,
       service: "gmail",
       auth: {
         user: config.fromEmail,
-        pass: config.appPassword
+        pass: config.appPassword.replace(/\s+/g, "")
       }
     });
   }
 
   return nodemailer.createTransport({
+    ...timeouts,
     service: "gmail",
     auth: {
       type: "OAuth2",

@@ -9,7 +9,7 @@ import { Prisma } from "@prisma/client";
 import type { NextFunction, Request, Response } from "express";
 import { z } from "zod";
 
-import { sendContactEmail, sendPasswordResetEmail, sendRegistrationVerificationEmails, sendWelcomeEmail } from "./lib/email.js";
+import { isGoogleOAuthEmailConfigured, sendContactEmail, sendPasswordResetEmail, sendRegistrationVerificationEmails, sendWelcomeEmail } from "./lib/email.js";
 import {
   appendAdminLibraryChunkBuffer,
   clearAdminLibraryChunkBuffer,
@@ -217,13 +217,11 @@ import {
   parseAdminCreateUserInput,
   parseAdminUserFilters,
   parseAdminUserMonthlyRegistrationsQuery,
-  parseAdminUserDeviceLimitInput,
   parseAdminUserPasswordInput,
   parseAdminUserProfileInput,
   parseAdminUserRolesInput,
   parseAdminUserStatusInput,
   resetAdminUserDevices,
-  updateAdminUserDeviceLimitOverride,
   updateAdminUserPassword,
   updateAdminUserProfile,
   updateAdminUserRoles,
@@ -262,22 +260,23 @@ import {
 } from "./admin-notifications.js";
 import { dashboardSnapshot } from "./data/platform-data.js";
 import { prisma } from "./lib/prisma.js";
+import { normalizeRoleCode } from "./lib/roles.js";
 import { isRefreshSessionActive, revokeUserSessions } from "./lib/sessions.js";
 import { runInTransaction } from "./lib/transactions.js";
 
 const passwordSchema = z
   .string()
-  .trim()
   .min(8, "Password must be at least 8 characters.")
-  .max(72, "Password is too long.");
+  .refine((value) => Buffer.byteLength(value, "utf8") <= 72, "Password must be at most 72 bytes.");
 
 const emailSchema = z.string().trim().toLowerCase().email();
 
 const signInSchema = z
   .object({
     email: emailSchema,
-    password: passwordSchema,
-    deviceName: z.string().trim().min(2).max(120).optional()
+    password: z.string().min(1).max(120),
+    deviceName: z.string().trim().min(2).max(120).optional(),
+    browserLinkCode: z.string().optional()
   })
   .strict();
 
@@ -286,7 +285,7 @@ const registerSchema = z
     fullName: z.string().trim().min(2).max(80),
     email: emailSchema,
     password: passwordSchema,
-    confirmPassword: z.string().trim().min(8).max(72),
+    confirmPassword: passwordSchema,
     registrationRole: z.enum(["student", "lawyer"]).default("student"),
     deviceName: z.string().trim().min(2).max(120).optional()
   })
@@ -311,8 +310,6 @@ const notDeletedDeviceWhere: Prisma.DeviceWhereInput = {
   OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }]
 };
 
-const MAX_ACCOUNT_DEVICES = 3;
-
 const verifyEmailQuerySchema = z
   .object({
     token: z.string().trim().min(24).max(4_000)
@@ -329,7 +326,7 @@ const resetPasswordSchema = z
   .object({
     token: z.string().trim().min(24).max(4_000),
     password: passwordSchema,
-    confirmPassword: z.string().trim().min(8).max(72)
+    confirmPassword: passwordSchema
   })
   .strict()
   .superRefine((value, context) => {
@@ -384,9 +381,9 @@ const profileSchema = z
 
 const userPasswordUpdateSchema = z
   .object({
-    currentPassword: z.string().trim().min(1).max(120),
+    currentPassword: z.string().min(1).max(120),
     password: passwordSchema,
-    confirmPassword: z.string().trim().min(8).max(72)
+    confirmPassword: passwordSchema
   })
   .strict()
   .superRefine((value, context) => {
@@ -448,6 +445,7 @@ const sessionUserSelect = {
   email: true,
   emailVerifiedAt: true,
   status: true,
+  deletedAt: true,
   sessionsRevokedAt: true,
   twoFactorEnabled: true,
   avatarUrl: true,
@@ -516,15 +514,6 @@ const adminRoleCodes = new Set([
   "content_admin"
 ]);
 
-function normalizeRoleCode(roleCode: string) {
-  const trimmed = roleCode.trim().toLowerCase();
-  const underscored = trimmed.replace(/[-\s]+/g, "_");
-  const collapsed = underscored.replace(/_/g, "");
-  if (collapsed === "superadmin") return "super_admin";
-  if (collapsed === "contentadmin") return "content_admin";
-  return underscored;
-}
-
 function hasRole(roleCodes: string[] = [], targetRoleCode: string) {
   const target = normalizeRoleCode(targetRoleCode);
   return roleCodes.some((roleCode) => normalizeRoleCode(roleCode) === target);
@@ -551,7 +540,7 @@ function getPublicApiBaseUrl() {
     process.env.API_PUBLIC_BASE_URL?.trim() ||
     process.env.VITE_API_BASE_URL?.trim() ||
     `http://localhost:${process.env.PORT ?? 4000}`
-  );
+  ).replace(/\/+$/, "");
 }
 
 function getPublicWebBaseUrl() {
@@ -559,8 +548,8 @@ function getPublicWebBaseUrl() {
     process.env.APP_PUBLIC_BASE_URL?.trim() ||
     process.env.WEB_PUBLIC_BASE_URL?.trim() ||
     process.env.VITE_APP_BASE_URL?.trim() ||
-    "http://localhost:5173"
-  );
+    (process.env.NODE_ENV === "production" ? "https://helar.law" : "http://localhost:5173")
+  ).replace(/\/+$/, "");
 }
 
 function escapeCsvValue(value: string | number | boolean | null | undefined) {
@@ -593,12 +582,17 @@ function createEmailVerificationUrl(token: string) {
   return `${getPublicApiBaseUrl()}/api/v1/auth/verify-email?token=${encodeURIComponent(token)}`;
 }
 
-function createPasswordResetToken(userId: string, email: string) {
+function passwordResetVersion(passwordHash: string) {
+  return crypto.createHmac("sha256", getJwtSecret()).update("password_reset:").update(passwordHash).digest("hex");
+}
+
+function createPasswordResetToken(userId: string, email: string, passwordHash: string) {
   return jwt.sign(
     {
       sub: userId,
       email,
-      purpose: "password_reset"
+      purpose: "password_reset",
+      version: passwordResetVersion(passwordHash)
     },
     getJwtSecret(),
     { expiresIn: "1h" }
@@ -646,33 +640,6 @@ function buildFallbackUser(email: string, overrides?: Partial<ApiUser>): ApiUser
     twoFactorEnabled: true,
     ...overrides
   };
-}
-
-class DeviceLimitError extends Error {
-  code = "DEVICE_LIMIT_REACHED";
-  statusCode = 403;
-
-  constructor(limit: number) {
-    super(
-      `You can only use Helar on up to ${limit} devices. Please continue on one of your existing devices or contact support for help.`
-    );
-  }
-}
-
-function resolveAccountDeviceLimit(deviceLimitOverride: number | null | undefined) {
-  const overrideValue = Number.isFinite(deviceLimitOverride) ? Number(deviceLimitOverride) : NaN;
-  const normalizedOverride = Number.isInteger(overrideValue) ? overrideValue : NaN;
-  const limit = Number.isFinite(normalizedOverride) ? normalizedOverride : MAX_ACCOUNT_DEVICES;
-
-  return Math.max(1, limit);
-}
-
-function shouldEnforceAccountDeviceLimit(roleCodes: string[] = []) {
-  if (roleCodes.includes("super_admin") || roleCodes.includes("content_admin")) {
-    return false;
-  }
-
-  return roleCodes.includes("student") || roleCodes.includes("lawyer");
 }
 
 function createDatabaseFallbackErrorMessage() {
@@ -989,86 +956,35 @@ function buildAdminLibraryFailureResponse(
   }
 }
 
-async function registerUserDevice(
-  tx: Prisma.TransactionClient,
-  userId: string,
-  rawDeviceName: string | undefined,
-  roleCodes?: string[]
-) {
-  const deviceName = rawDeviceName?.trim();
-
-  if (!deviceName) {
+async function recordLoginDevice(tx: Prisma.TransactionClient, userId: string, name: string | undefined) {
+  if (!name) {
     return;
   }
 
-  const existingDevice = await tx.device.findFirst({
-    where: {
-      ...notDeletedDeviceWhere,
-      name: deviceName,
-      userId
-    },
-    select: {
-      id: true
-    }
+  const device = await tx.device.findFirst({
+    where: { ...notDeletedDeviceWhere, userId, name },
+    select: { id: true }
   });
 
-  if (existingDevice) {
-    await tx.device.update({
-      where: { id: existingDevice.id },
-      data: {
-        lastSeenAt: new Date()
-      }
-    });
+  if (device) {
+    await tx.device.update({ where: { id: device.id }, data: { lastSeenAt: new Date() } });
     return;
   }
 
-  const resolvedRoleCodes =
-    roleCodes ??
-    (
-      await tx.user
-        .findUnique({
-          where: { id: userId },
-          select: {
-            roles: {
-              select: {
-                role: {
-                  select: {
-                    code: true
-                  }
-                }
-              }
-            }
-          }
-        })
-        .then((user) => user?.roles.map((item) => item.role.code) ?? [])
-    );
+  await tx.device.create({ data: { userId, name, lastSeenAt: new Date() } });
+}
 
-  if (shouldEnforceAccountDeviceLimit(resolvedRoleCodes)) {
-    const registeredDeviceCount = await tx.device.count({
-      where: {
-        ...notDeletedDeviceWhere,
-        userId
+async function runSignInTransaction<T>(operation: (tx: Prisma.TransactionClient) => Promise<T>) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await runInTransaction(operation);
+    } catch (error) {
+      if (attempt >= 3 ||
+          !(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2034") {
+        throw error;
       }
-    });
-
-    const user = await tx.user.findUnique({
-      where: { id: userId },
-      select: { deviceLimitOverride: true }
-    });
-    const deviceLimit = resolveAccountDeviceLimit(user?.deviceLimitOverride);
-
-    if (registeredDeviceCount >= deviceLimit) {
-      throw new DeviceLimitError(deviceLimit);
     }
   }
-
-  await tx.device.create({
-    data: {
-      userId,
-      name: deviceName,
-      lastSeenAt: new Date()
-    }
-  });
 }
 
 function createAccessToken(user: ApiUser) {
@@ -1083,7 +999,7 @@ function createAccessToken(user: ApiUser) {
   );
 }
 
-async function createRefreshToken(userId: string, db: Prisma.TransactionClient | typeof prisma = prisma) {
+async function createRefreshToken(userId: string, db: Prisma.TransactionClient, createdAt?: Date) {
   const refreshSecret = crypto.randomBytes(48).toString("hex");
   const refreshHash = await bcrypt.hash(refreshSecret, 10);
 
@@ -1091,6 +1007,7 @@ async function createRefreshToken(userId: string, db: Prisma.TransactionClient |
     data: {
       userId,
       refreshHash,
+      createdAt,
       expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30)
     }
   });
@@ -1117,7 +1034,7 @@ function createRateLimiter(maxRequests: number, windowMs: number) {
   return (request: Request, response: Response, next: NextFunction) => {
     const forwardedFor = request.headers["x-forwarded-for"];
     const forwardedIp = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor?.split(",")[0];
-    const clientKey = `${forwardedIp ?? request.ip ?? "unknown"}:${request.path}`;
+    const clientKey = `${forwardedIp ?? request.ip ?? "unknown"}:${request.baseUrl || request.path}`;
     const now = Date.now();
     const entry = requestWindow.get(clientKey);
 
@@ -1162,7 +1079,7 @@ function authenticateRequest(request: AuthenticatedRequest, response: Response, 
     const token = authorizationHeader.slice("Bearer ".length);
     const payload = jwt.verify(token, getJwtSecret()) as jwt.JwtPayload;
 
-    if (typeof payload.sub !== "string") {
+    if (typeof payload.sub !== "string" || payload.purpose !== undefined || !Array.isArray(payload.roleCodes)) {
       throw new Error("Missing token subject");
     }
 
@@ -1198,7 +1115,7 @@ function attachOptionalAuth(request: AuthenticatedRequest, _response: Response, 
     const token = authorizationHeader.slice("Bearer ".length);
     const payload = jwt.verify(token, getJwtSecret()) as jwt.JwtPayload;
 
-    if (typeof payload.sub === "string") {
+    if (typeof payload.sub === "string" && payload.purpose === undefined && Array.isArray(payload.roleCodes)) {
       request.auth = {
         userId: payload.sub,
         roleCodes: Array.isArray(payload.roleCodes)
@@ -1325,22 +1242,22 @@ async function ensureRole(code: string, name: string) {
   });
 }
 
+const emailInUseError = {
+  success: false,
+  error: {
+    code: "EMAIL_IN_USE",
+    message: "An account with this email already exists."
+  }
+};
+
 async function persistRegister(payload: z.infer<typeof registerSchema>) {
   const existingUser = await prisma.user.findUnique({
-    where: { email: payload.email }
+    where: { email: payload.email },
+    select: { id: true }
   });
 
   if (existingUser) {
-    return {
-      status: 409 as const,
-      body: {
-        success: false,
-        error: {
-          code: "EMAIL_IN_USE",
-          message: "An account with this email already exists."
-        }
-      }
-    };
+    return { status: 409 as const, body: emailInUseError };
   }
 
   const selectedRole = await ensureRole(
@@ -1367,12 +1284,7 @@ async function persistRegister(payload: z.infer<typeof registerSchema>) {
       include: userRelationsInclude
     });
 
-    await registerUserDevice(
-      tx,
-      createdUser.id,
-      payload.deviceName,
-      createdUser.roles.map((userRole) => userRole.role.code)
-    );
+    await recordLoginDevice(tx, createdUser.id, payload.deviceName);
 
     const refreshToken = await createRefreshToken(createdUser.id, tx);
 
@@ -1396,7 +1308,7 @@ async function persistRegister(payload: z.infer<typeof registerSchema>) {
       roleCodes: [payload.registrationRole],
       verificationUrl: emailVerificationUrl
     });
-    verificationEmailStatus = result.skipped ? "skipped" : "sent";
+    verificationEmailStatus = result.skipped ? "skipped" : result.userAccepted.length ? "sent" : "failed";
   } catch (error) {
     console.error("Failed to send registration verification emails:", error);
     verificationEmailStatus = "failed";
@@ -1414,7 +1326,7 @@ async function persistRegister(payload: z.infer<typeof registerSchema>) {
       pricingUrl,
       isAlreadyVerified
     });
-    welcomeEmailStatus = welcomeResult.skipped ? "skipped" : "sent";
+    welcomeEmailStatus = welcomeResult.skipped ? "skipped" : welcomeResult.userAccepted.length ? "sent" : "failed";
   } catch (error) {
     console.error("Failed to send welcome email:", error);
     welcomeEmailStatus = "failed";
@@ -1433,56 +1345,55 @@ async function persistRegister(payload: z.infer<typeof registerSchema>) {
   };
 }
 
+async function matchesAccountPassword(password: string, passwordHash: string) {
+  if (await bcrypt.compare(password, passwordHash)) {
+    return true;
+  }
+
+  // Passwords created through the previous web forms were trimmed before hashing.
+  const trimmedPassword = password.trim();
+  return trimmedPassword !== password && bcrypt.compare(trimmedPassword, passwordHash);
+}
+
 async function persistSignIn(payload: z.infer<typeof signInSchema>) {
+  const startedAt = new Date();
   const user = await prisma.user.findUnique({
     where: { email: payload.email },
     include: userRelationsInclude
   });
 
-  if (!user?.passwordHash) {
-    return {
-      status: 401 as const,
-      body: {
-        success: false,
-        error: {
-          code: "INVALID_CREDENTIALS",
-          message: "Email or password is incorrect."
-        }
-      }
-    };
+  const invalidCredentials = {
+    status: 401 as const,
+    body: {
+      success: false,
+      error: { code: "INVALID_CREDENTIALS", message: "Email or password is incorrect." }
+    }
+  };
+
+  if (!user?.passwordHash || user.deletedAt || user.status !== "ACTIVE" ||
+      !(await matchesAccountPassword(payload.password, user.passwordHash))) {
+    return invalidCredentials;
   }
 
-  const passwordMatches = await bcrypt.compare(payload.password, user.passwordHash);
+  const signedInSession = await runSignInTransaction(async (tx) => {
+    const currentUser = await tx.user.findUnique({ where: { id: user.id }, include: userRelationsInclude });
+    if (!currentUser || currentUser.deletedAt || currentUser.status !== "ACTIVE" ||
+        currentUser.passwordHash !== user.passwordHash) {
+      return null;
+    }
 
-  if (!passwordMatches || user.status !== "ACTIVE") {
-    return {
-      status: 401 as const,
-      body: {
-        success: false,
-        error: {
-          code: "INVALID_CREDENTIALS",
-          message: "Email or password is incorrect."
-        }
-      }
-    };
-  }
+    await recordLoginDevice(tx, currentUser.id, payload.deviceName);
 
-  const signedInSession = await runInTransaction(async (tx: Prisma.TransactionClient) => {
-    await registerUserDevice(
-      tx,
-      user.id,
-      payload.deviceName,
-      getActiveRoleCodes(user.roles)
-    );
+    const refreshToken = await createRefreshToken(user.id, tx, startedAt);
 
-    const refreshToken = await createRefreshToken(user.id, tx);
-
-    return {
-      refreshToken
-    };
+    return { refreshToken, user: currentUser };
   });
 
-  const apiUser = normalizeUser(user);
+  if (!signedInSession) {
+    return invalidCredentials;
+  }
+
+  const apiUser = normalizeUser(signedInSession.user);
 
   return {
     status: 200 as const,
@@ -1498,6 +1409,10 @@ async function findRefreshSession(refreshToken: string) {
   const [sessionId, refreshSecret] = refreshToken.includes(".") ? refreshToken.split(".", 2) : [null, null];
 
   if (sessionId && refreshSecret) {
+    if (!/^[a-f0-9]{24}$/i.test(sessionId)) {
+      return null;
+    }
+
     const session = await prisma.session.findUnique({
       where: { id: sessionId },
       include: refreshSessionInclude
@@ -1510,6 +1425,8 @@ async function findRefreshSession(refreshToken: string) {
     ) {
       return session;
     }
+
+    return null;
   }
 
   const activeSessions = await prisma.session.findMany({
@@ -1535,30 +1452,34 @@ async function findRefreshSession(refreshToken: string) {
 }
 
 async function persistRefreshSession(refreshToken: string) {
+  const startedAt = new Date();
   const session = (await findRefreshSession(refreshToken)) as RefreshSessionWithUser | null;
 
-  if (!session || session.user.status !== "ACTIVE") {
+  if (!session) {
     return null;
   }
 
   return runInTransaction(async (tx: Prisma.TransactionClient) => {
-    await tx.session.update({
-      where: { id: session.id },
-      data: {
-        deletedAt: new Date()
-      }
-    });
-
-    const nextRefreshToken = await createRefreshToken(session.userId, tx);
     const refreshedUser = await tx.user.findUnique({
       where: { id: session.userId },
       select: sessionUserSelect
     });
 
-    if (!refreshedUser || refreshedUser.status !== "ACTIVE") {
+    if (!refreshedUser || refreshedUser.deletedAt || refreshedUser.status !== "ACTIVE" ||
+        !isRefreshSessionActive({ ...session, user: refreshedUser })) {
       return null;
     }
 
+    const rotated = await tx.session.updateMany({
+      where: { id: session.id, OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }] },
+      data: { deletedAt: new Date() }
+    });
+
+    if (rotated.count !== 1) {
+      return null;
+    }
+
+    const nextRefreshToken = await createRefreshToken(session.userId, tx, startedAt);
     return createSessionPayload(normalizeUser(refreshedUser), nextRefreshToken);
   });
 }
@@ -1567,7 +1488,7 @@ async function persistForgotPassword(payload: z.infer<typeof forgotPasswordSchem
   const successBody = {
     success: true,
     data: {
-      message: "If an account exists for that email, a password reset link has been sent."
+      message: "If an eligible account exists, check your inbox and spam folder for a password reset link."
     }
   } as const;
 
@@ -1591,7 +1512,7 @@ async function persistForgotPassword(payload: z.infer<typeof forgotPasswordSchem
     };
   }
 
-  const resetToken = createPasswordResetToken(user.id, user.email);
+  const resetToken = createPasswordResetToken(user.id, user.email, user.passwordHash);
   const resetUrl = createPasswordResetUrl(resetToken);
 
   try {
@@ -1613,89 +1534,66 @@ async function persistForgotPassword(payload: z.infer<typeof forgotPasswordSchem
 async function persistResetPassword(payload: z.infer<typeof resetPasswordSchema>) {
   const tokenPayload = jwt.verify(payload.token, getJwtSecret()) as jwt.JwtPayload;
 
-  if (tokenPayload.purpose !== "password_reset" || typeof tokenPayload.sub !== "string") {
-    return {
-      status: 400 as const,
-      body: {
-        success: false,
-        error: {
-          code: "INVALID_RESET_TOKEN",
-          message: "The password reset link is invalid."
-        }
+  const invalidLink = {
+    status: 400 as const,
+    body: {
+      success: false,
+      error: {
+        code: "INVALID_RESET_TOKEN",
+        message: "This password reset link is no longer valid. Please request a new one."
       }
-    };
+    }
+  };
+
+  if (tokenPayload.purpose !== "password_reset" ||
+      typeof tokenPayload.sub !== "string" || !/^[a-f0-9]{24}$/i.test(tokenPayload.sub) ||
+      typeof tokenPayload.email !== "string" || typeof tokenPayload.version !== "string") {
+    return invalidLink;
   }
 
-  if (typeof tokenPayload.iat !== "number") {
-    return {
-      status: 400 as const,
-      body: {
-        success: false,
-        error: {
-          code: "INVALID_RESET_TOKEN",
-          message: "The password reset link is invalid."
-        }
-      }
-    };
-  }
+  const user = await prisma.user.findUnique({
+    where: { id: tokenPayload.sub },
+    select: { id: true, email: true, passwordHash: true, status: true, deletedAt: true }
+  });
 
-  const userSelect = {
-    id: true,
-    deletedAt: true,
-    status: true,
-    updatedAt: true
-  } as const;
-
-  const user = tokenPayload.sub.includes("@")
-    ? await prisma.user.findUnique({
-        where: { email: tokenPayload.sub },
-        select: userSelect
-      })
-    : await prisma.user.findUnique({
-        where: { id: tokenPayload.sub },
-        select: userSelect
-      });
-
-  if (!user || user.deletedAt || user.status !== "ACTIVE") {
-    return {
-      status: 400 as const,
-      body: {
-        success: false,
-        error: {
-          code: "INVALID_RESET_TOKEN",
-          message: "The password reset link is invalid."
-        }
-      }
-    };
-  }
-
-  const tokenIssuedAt = new Date(tokenPayload.iat * 1000);
-
-  if (user.updatedAt.getTime() > tokenIssuedAt.getTime()) {
-    return {
-      status: 400 as const,
-      body: {
-        success: false,
-        error: {
-          code: "RESET_LINK_ALREADY_USED",
-          message: "This password reset link has already been used or is no longer valid."
-        }
-      }
-    };
+  if (!user || user.deletedAt || user.status !== "ACTIVE" || !user.passwordHash ||
+      user.email !== tokenPayload.email || passwordResetVersion(user.passwordHash) !== tokenPayload.version) {
+    return invalidLink;
   }
 
   const passwordHash = await bcrypt.hash(payload.password, 10);
+  let updated: boolean;
 
-  await runInTransaction(async (tx: Prisma.TransactionClient) => {
-    await tx.user.update({
-      where: { id: user.id },
-      data: {
-        passwordHash
+  try {
+    updated = await runInTransaction(async (tx: Prisma.TransactionClient) => {
+      const result = await tx.user.updateMany({
+        where: {
+          id: user.id,
+          email: user.email,
+          passwordHash: user.passwordHash,
+          status: "ACTIVE",
+          OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }]
+        },
+        data: { passwordHash }
+      });
+
+      if (result.count !== 1) {
+        return false;
       }
-    });
 
-    await revokeUserSessions(tx, user.id);
-  });
+      await revokeUserSessions(tx, user.id);
+      return true;
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
+      return invalidLink;
+    }
+    throw error;
+  }
+
+  if (!updated) {
+    return invalidLink;
+  }
 
   return {
     status: 200 as const,
@@ -1809,7 +1707,7 @@ async function persistUserPasswordUpdate(userId: string, payload: z.infer<typeof
     };
   }
 
-  const currentPasswordMatches = await bcrypt.compare(payload.currentPassword, user.passwordHash);
+  const currentPasswordMatches = await matchesAccountPassword(payload.currentPassword, user.passwordHash);
 
   if (!currentPasswordMatches) {
     return {
@@ -3219,16 +3117,6 @@ export function createApp(options: AppOptions = {}) {
       }
       return response.status(result.status).json(result.body);
     } catch (error) {
-      if (error instanceof DeviceLimitError) {
-        return response.status(error.statusCode).json({
-          success: false,
-          error: {
-            code: error.code,
-            message: error.message
-          }
-        });
-      }
-
       // Classify the failure so clients and admins can act on it.
       const classification = classifyDatabaseError(error);
       console.error("[auth:demo-sign-in] sign-in failure", {
@@ -3315,14 +3203,10 @@ export function createApp(options: AppOptions = {}) {
       const result = await persistRegister(parsed.data);
       return response.status(result.status).json(result.body);
     } catch (error) {
-      if (error instanceof DeviceLimitError) {
-        return response.status(error.statusCode).json({
-          success: false,
-          error: {
-            code: error.code,
-            message: error.message
-          }
-        });
+      if (error instanceof Prisma.PrismaClientKnownRequestError &&
+          (error.code === "P2002" || error.code === "P2034") &&
+          await prisma.user.findUnique({ where: { email: parsed.data.email }, select: { id: true } }).catch(() => null)) {
+        return response.status(409).json(emailInUseError);
       }
 
       console.error(error);
@@ -3367,11 +3251,12 @@ export function createApp(options: AppOptions = {}) {
       });
     }
 
-    if (!useDatabase && allowAuthFallback) {
-      return response.json({
-        success: true,
-        data: {
-          message: "If an account exists for that email, a password reset link has been sent."
+    if (!useDatabase || !isGoogleOAuthEmailConfigured()) {
+      return response.status(503).json({
+        success: false,
+        error: {
+          code: "PASSWORD_RESET_UNAVAILABLE",
+          message: "Password reset is temporarily unavailable. Please try again shortly."
         }
       });
     }
@@ -3500,20 +3385,17 @@ export function createApp(options: AppOptions = {}) {
     try {
       const tokenPayload = jwt.verify(parsed.data.token, getJwtSecret()) as jwt.JwtPayload;
 
-      if (tokenPayload.purpose !== "email_verification" || typeof tokenPayload.sub !== "string") {
+      if (tokenPayload.purpose !== "email_verification" || typeof tokenPayload.sub !== "string" || typeof tokenPayload.email !== "string") {
         return renderHtml("Invalid Verification Link", "The email verification link is invalid.", 400);
       }
 
       const user = await prisma.user.findUnique({
         where: { id: tokenPayload.sub },
-        select: {
-          id: true,
-          emailVerifiedAt: true
-        }
+        select: { id: true, email: true, emailVerifiedAt: true, deletedAt: true }
       });
 
-      if (!user) {
-        return renderHtml("Account Not Found", "We could not find an account for this verification link.", 404);
+      if (!user || user.deletedAt || user.email !== tokenPayload.email) {
+        return renderHtml("Invalid Verification Link", "Please sign in to request a new verification email.", 400);
       }
 
       if (user.emailVerifiedAt) {
@@ -3521,16 +3403,14 @@ export function createApp(options: AppOptions = {}) {
       }
 
       await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          emailVerifiedAt: new Date()
-        }
+        where: { id: user.id, email: tokenPayload.email },
+        data: { emailVerifiedAt: new Date() }
       });
 
       return renderHtml("Email Verified", "Your Helar account has been verified successfully. You can now sign in.");
     } catch (error) {
       if (error instanceof jwt.TokenExpiredError) {
-        return renderHtml("Verification Link Expired", "This verification link has expired. Please register again or request a new verification email.", 400);
+        return renderHtml("Verification Link Expired", "This verification link has expired. Sign in to request a new verification email.", 400);
       }
 
       return renderHtml("Invalid Verification Link", "The email verification link is invalid.", 400);
@@ -3641,7 +3521,7 @@ export function createApp(options: AppOptions = {}) {
             roleCodes: request.auth?.roleCodes ?? [],
             verificationUrl: emailVerificationUrl
           });
-          verificationEmailStatus = result.skipped ? "skipped" : "sent";
+          verificationEmailStatus = result.skipped ? "skipped" : result.userAccepted.length ? "sent" : "failed";
         } catch (error) {
           console.error("Failed to resend registration verification email:", error);
           verificationEmailStatus = "failed";
@@ -3721,6 +3601,12 @@ export function createApp(options: AppOptions = {}) {
         data: refreshedSession
       });
     } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
+        return response.status(409).json({
+          success: false,
+          error: { code: "REFRESH_CONFLICT", message: "The session changed while it was being refreshed." }
+        });
+      }
       console.error(error);
       return response.status(503).json({
         success: false,
@@ -10839,68 +10725,6 @@ export function createApp(options: AppOptions = {}) {
           error: {
             code: "ADMIN_USER_DEVICES_RESET_FAILED",
             message: "Could not reset the user devices right now."
-          }
-        });
-      }
-    }
-  );
-
-  app.patch(
-    "/api/v1/admin/users/:userId/device-limit",
-    authenticateRequest,
-    requireAdminRequest,
-    requireSuperAdminRequest,
-    async (request: AuthenticatedRequest, response: Response) => {
-      if (!useDatabase) {
-        return response.status(503).json({
-          success: false,
-          error: {
-            code: "DATABASE_UNAVAILABLE",
-            message: "The database is required to update device limits."
-          }
-        });
-      }
-
-      try {
-        const parsed = parseAdminUserDeviceLimitInput(request.body);
-        const updatedUser = await updateAdminUserDeviceLimitOverride(
-          String(request.params.userId),
-          parsed,
-          request.auth!.userId
-        );
-
-        if (!updatedUser) {
-          return response.status(404).json({
-            success: false,
-            error: {
-              code: "USER_NOT_FOUND",
-              message: "The requested user could not be found."
-            }
-          });
-        }
-
-        return response.json({
-          success: true,
-          data: updatedUser
-        });
-      } catch (error) {
-        if (error instanceof z.ZodError) {
-          return response.status(400).json({
-            success: false,
-            error: {
-              code: "VALIDATION_ERROR",
-              message: "The device limit payload is invalid.",
-              details: error.flatten()
-            }
-          });
-        }
-
-        console.error(error);
-        return response.status(500).json({
-          success: false,
-          error: {
-            code: "ADMIN_USER_DEVICE_LIMIT_UPDATE_FAILED",
-            message: "Could not update the device limit right now."
           }
         });
       }

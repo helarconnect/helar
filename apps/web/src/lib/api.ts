@@ -227,17 +227,21 @@ function getStableDeviceName() {
   const platformLabel = getPlatformLabel(userAgent);
 
   // Keep one identifier per browser install so returning users reuse the same device slot.
-  let deviceId = window.localStorage.getItem(DEVICE_ID_STORAGE_KEY);
+  try {
+    let deviceId = window.localStorage.getItem(DEVICE_ID_STORAGE_KEY);
 
-  if (!deviceId) {
-    deviceId =
-      typeof window.crypto?.randomUUID === "function"
-        ? window.crypto.randomUUID()
-        : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    window.localStorage.setItem(DEVICE_ID_STORAGE_KEY, deviceId);
+    if (!deviceId) {
+      deviceId =
+        typeof window.crypto?.randomUUID === "function"
+          ? window.crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      window.localStorage.setItem(DEVICE_ID_STORAGE_KEY, deviceId);
+    }
+
+    return `${browserLabel} on ${platformLabel} • ${deviceId.slice(0, 8)}`.slice(0, 120);
+  } catch {
+    return undefined;
   }
-
-  return `${browserLabel} on ${platformLabel} • ${deviceId.slice(0, 8)}`.slice(0, 120);
 }
 
 const fallbackOverview: PlatformOverview = {
